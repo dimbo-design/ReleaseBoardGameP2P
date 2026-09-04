@@ -18,6 +18,12 @@
   transform: translateY(-50%);
 }
 
+/* while dealing out of the pile, don't clip — cards fly in from outside the
+   grid's own scroll band (GitCards.module.css's own `.dealing`, ported) */
+.dealing {
+  overflow: visible;
+}
+
 .cell {
   position: relative;
   inline-size: 150px;

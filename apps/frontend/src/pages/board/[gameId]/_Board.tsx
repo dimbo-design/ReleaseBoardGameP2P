@@ -467,6 +467,7 @@ export default function Board({
   // kind and nothing else.
   const cherry = useCherryPickStaging({
     state,
+    anchors,
     actions,
     copy: {
       prompt: copy.table.cherryPickPrompt,
@@ -1933,6 +1934,7 @@ export default function Board({
       {defenseStaging.overlay}
       {handLimit.overlay}
       {neutralizing.overlay}
+      {cherry.overlay}
       {requesting.band}
       {inside.row}
       {cherry.grid}

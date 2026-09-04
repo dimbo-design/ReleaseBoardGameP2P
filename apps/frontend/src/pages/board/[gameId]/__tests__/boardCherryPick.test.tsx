@@ -6,6 +6,7 @@
 // gives it a sibling surface rather than widening that row.
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { mockReducedMotion } from '~/test/reducedMotion'
 import Board from '../_Board'
 import { makeBoardProps } from './fixture'
 
@@ -74,5 +75,26 @@ describe("the grid that answers Git Cherry-pick's own pick", () => {
       card: 'c1',
       toDeck: 'c2',
     })
+  })
+
+  // Task A4's own line: the flights must never cross it. `play()` drives
+  // WAAPI directly and does not check the preference — the CSS-transition
+  // dealing/reveal legs and the `later()` timers are what have to ask, or a
+  // reduced-motion player would wait on a flight nobody rendered.
+  it('resolves at once under reduced motion, with nothing left flying', () => {
+    const mm = mockReducedMotion(true)
+    const onResolve = vi.fn()
+    renderBoard({
+      pending: cherryPending([
+        { uid: 'c1', id: 'attack-bug' },
+        { uid: 'c2', id: 'release-frontend' },
+      ]),
+      actions: { onResolve },
+    })
+    fireEvent.click(screen.getByTestId('cherry-cell-c2'))
+    fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+    expect(onResolve).toHaveBeenCalledWith({ kind: 'pickFromDiscard', card: 'c2' })
+    expect(screen.queryByTestId('board-cherry-grid')).toBeNull()
+    mm.mockRestore()
   })
 })
