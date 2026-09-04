@@ -1,4 +1,5 @@
 import type { Action, Choice } from '../actions'
+import { rulesFor } from '../cards'
 import type { Engine } from '../engine'
 import type { CardUid, GameState, PlayerId, ReleaseSlot } from '../state'
 import type { ReleaseView } from '../view'
@@ -74,12 +75,17 @@ export function botAction(
         }
       }
       case 'pickFromDiscard': {
-        const card = pending.options[0]?.uid ?? ''
-        const toDeck = pending.picks === 2 ? pending.options[1]?.uid : undefined
+        // options[0] may be a trigger a sudo offer carries for the DECK slot;
+        // naming it for the hand is rejected, and a pending nothing can resolve
+        // stalls everything behind it.
+        const hand = pending.options.find((c) => rulesFor(c.id)?.kind !== 'trigger')
+        if (!hand) return null
+        const toDeck =
+          pending.picks === 2 ? pending.options.find((c) => c.uid !== hand.uid)?.uid : undefined
         return {
           type: 'RESOLVE',
           player: me,
-          choice: { kind: 'pickFromDiscard', card, ...(toDeck ? { toDeck } : {}) },
+          choice: { kind: 'pickFromDiscard', card: hand.uid, ...(toDeck ? { toDeck } : {}) },
           at,
         }
       }

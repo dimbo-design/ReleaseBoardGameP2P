@@ -254,6 +254,38 @@ describe('Git Cherry-pick', () => {
     expect(pending.picks).toBe(2)
   })
 
+  it('raises no pending for a sudo pick over a discard of nothing but triggers', () => {
+    const state = gameWith(['trigger-error-503', 'trigger-ai'], [CHERRY, 'support-sudo'])
+    const { state: next } = engine.reduce(state, {
+      type: 'PLAY',
+      player: 'p1',
+      card: `${CHERRY}#h0`,
+      combo: 'support-sudo#h1',
+      at: 1,
+    })
+    // Rules answer 11: the mandatory hand slot has no legal filler among
+    // triggers, so this is a wasteful play, not a decision left open.
+    expect(next.pending).toBeNull()
+    expect(next.decks.discard.map((c) => c.id).sort()).toEqual(
+      [CHERRY, 'support-sudo', 'trigger-error-503', 'trigger-ai'].sort(),
+    )
+  })
+
+  it('raises no pending for a sudo pick over a discard of a single trigger', () => {
+    const state = gameWith(['trigger-error-503'], [CHERRY, 'support-sudo'])
+    const { state: next } = engine.reduce(state, {
+      type: 'PLAY',
+      player: 'p1',
+      card: `${CHERRY}#h0`,
+      combo: 'support-sudo#h1',
+      at: 1,
+    })
+    expect(next.pending).toBeNull()
+    expect(next.decks.discard.map((c) => c.id).sort()).toEqual(
+      [CHERRY, 'support-sudo', 'trigger-error-503'].sort(),
+    )
+  })
+
   it('refuses a trigger as the card taken to hand, even under sudo', () => {
     const state = gameWith(['trigger-error-503', 'attack-bug'], [CHERRY, 'support-sudo'])
     const played = engine.reduce(state, {

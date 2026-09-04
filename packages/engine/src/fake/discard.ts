@@ -48,7 +48,13 @@ export function openPickFromDiscard(
   // showed nothing and eventSeq never advanced for a legal, consequential play.
   for (const c of spent) log.add({ type: 'discarded', player, card: c.id, reason: 'effect' })
   const spentState = discard(state, spent)
-  if (options.length === 0) return { ...spentState, eventSeq: log.seq }
+  // The hand slot is mandatory and a trigger may never fill it
+  // (onPickFromDiscard). So the offer is measured by what could take THAT
+  // slot, not by its raw length: a sudo pick over a discard of nothing but
+  // triggers has no legal resolution at all, and opening a pending for it
+  // would freeze the turn. Rules answer 11 makes it a wasteful play instead.
+  const forHand = options.filter((c) => rulesFor(c.id)?.kind !== 'trigger')
+  if (forHand.length === 0) return { ...spentState, eventSeq: log.seq }
   const picks = Math.min(combo ? 2 : 1, options.length) as 1 | 2
   return {
     ...spentState,

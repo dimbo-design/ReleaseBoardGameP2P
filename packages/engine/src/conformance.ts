@@ -160,15 +160,17 @@ function resolvePendingAction(state: GameState, n: number): Action | null {
       }
     }
     case 'pickFromDiscard': {
-      // openPickFromDiscard only ever offers a nonempty list, so the first
-      // option is always valid; the second pick only exists when `picks` is 2.
-      const card = pending.options[0]?.uid
-      if (!card) return null
-      const toDeck = pending.picks === 2 ? pending.options[1]?.uid : undefined
+      // options[0] may be a trigger a sudo offer carries for the DECK slot;
+      // naming it for the hand is rejected, and a pending nothing can resolve
+      // stalls everything behind it.
+      const hand = pending.options.find((c) => rulesFor(c.id)?.kind !== 'trigger')
+      if (!hand) return null
+      const toDeck =
+        pending.picks === 2 ? pending.options.find((c) => c.uid !== hand.uid)?.uid : undefined
       return {
         type: 'RESOLVE',
         player: pending.player,
-        choice: { kind: 'pickFromDiscard', card, ...(toDeck ? { toDeck } : {}) },
+        choice: { kind: 'pickFromDiscard', card: hand.uid, ...(toDeck ? { toDeck } : {}) },
         at,
       }
     }
