@@ -17,6 +17,7 @@ import { useDefenseBeat } from './defenseBeat'
 import { useDiscardBeat } from './discardBeat'
 import { useDrawBeat } from './drawBeat'
 import { useEliminateBeat } from './eliminateBeat'
+import { useGameEndBeat } from './gameEndBeat'
 import { useHandLimitBeat } from './handLimitBeat'
 import type { BeatPlan } from './planBeats'
 import { planBeats } from './planBeats'
@@ -175,6 +176,7 @@ export function useBeats(args: {
   const combo = useComboBeat(anchors, staging, clearPaidCost, takeStagedRelease)
   const defense = useDefenseBeat(anchors, staging)
   const elimination = useEliminateBeat()
+  const gameEnd = useGameEndBeat()
   const handLimits = useHandLimitBeat(anchors, handLimit)
   const transfers = useTransferBeat(anchors)
   const ais = useAiBeat(anchors)
@@ -251,6 +253,15 @@ export function useBeats(args: {
           exclusive: false,
           alarm: false,
           run: (ctx) => decks.runPiles(plan, ctx),
+        }
+      }
+      if (plan.kind === 'gameEnd') {
+        return {
+          key: plan.key,
+          base,
+          exclusive: true,
+          alarm: false,
+          run: (ctx) => gameEnd.run(plan, ctx),
         }
       }
       if (plan.kind === 'attackPlaced') {
@@ -384,6 +395,7 @@ export function useBeats(args: {
       defense.runStolen,
       defense.runNeutralized,
       elimination.run,
+      gameEnd.run,
       handLimits.run,
       transfers.runTransfer,
       transfers.runRequested,
@@ -478,7 +490,7 @@ export function useBeats(args: {
   // the arm also keeps it before the BATCH effect, which must not read a stale
   // watermark on the one pass where it matters most.)
   const playing = useRef<string | null>(null)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `discards`, `draws`, `decks`, `combo`, `defense`, `elimination`, `handLimits`, `transfers` and `ais` are read for the CURRENT render's runners on purpose, not added to the deps below — this effect is keyed to the match, not runner object identity
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `discards`, `draws`, `decks`, `combo`, `defense`, `elimination`, `gameEnd`, `handLimits`, `transfers` and `ais` are read for the CURRENT render's runners on purpose, not added to the deps below — this effect is keyed to the match, not runner object identity
   useLayoutEffect(() => {
     const key = intro?.key ?? null
     if (key == null || playing.current === key) return
@@ -501,6 +513,7 @@ export function useBeats(args: {
     combo.reset()
     defense.reset()
     elimination.reset()
+    gameEnd.reset()
     handLimits.reset()
     transfers.reset()
     ais.reset()
@@ -617,6 +630,7 @@ export function useBeats(args: {
       ...combo.overlay,
       ...defense.overlay,
       ...elimination.overlay,
+      ...gameEnd.overlay,
       ...handLimits.overlay,
       ...transfers.overlay,
       ...ais.overlay,

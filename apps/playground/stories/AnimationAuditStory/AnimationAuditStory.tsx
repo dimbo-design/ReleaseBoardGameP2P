@@ -706,6 +706,7 @@ const SCENARIOS: Scenario[] = [
       en: "the last release is pulled out of the fan and settles into its slot (playToReleaseZone, SNAP) — the zone is closed. Then the poppers: THREE independent bangs (0 / 620 / 1450ms), each with its own power — it drives the piece count, the reach and the time in the air, so they are three events and not one repeat. A volley is its own component: the pieces are made once and started once in a mount effect (starting from a render-time ref callback killed the pieces already in the air: the callback re-fires on every render and play stacks a second animation on a node mid-flight). Every piece its own code symbol, colour token and step of the mono scale; the arc is play('confettiFly'). The GameOver window comes up at 2.4s WHILE the confetti is still flying, and the confetti flies over it. In the playground both layers start below the technical line — it belongs to the playground, not the screen.",
     },
     where: 'GameEnd',
+    board: 'features/board-beats/gameEndBeat.tsx',
   },
   {
     name: {
@@ -741,6 +742,21 @@ const SCENARIOS: Scenario[] = [
 //     it — is in docs/animations/backlog.md; here they are visible, there they
 //     are actionable.
 const ISSUES: Issue[] = [
+  {
+    what: {
+      ru: 'Для победы последнего выжившего нет утверждённой сцены',
+      en: 'A last-standing victory has no approved scene',
+    },
+    problem: {
+      ru: "gameOver(condition: 'lastStanding') приходит после пути исключения игроков, а GameEndStory задаёт только релизный рассказ: последняя карта садится в зону, затем срабатывают хлопушки. В #107 живой борд поэтому празднует все gameOver(condition: 'release') — прямую постановку, кражу Security Bug и AI Release — но для lastStanding сохраняет существующий переход от такта исключения к GameOver. Повторить релизные хлопушки без последней посадки или придумать отдельный финал значило бы выдумать неутверждённую хореографию. Закроет playground-сцена или явное решение владельца, что lastStanding использует те же хлопушки.",
+      en: "gameOver(condition: 'lastStanding') arrives through the elimination path, while GameEndStory specifies only a release story: the last card lands in the zone, then the poppers fire. In #107 the live board therefore celebrates every gameOver(condition: 'release') — direct placement, a Security Bug steal and an AI Release — but preserves the existing elimination-to-GameOver path for lastStanding. Reusing release poppers without the final landing, or inventing another finale, would create unapproved choreography. A playground scene or an explicit owner decision that lastStanding shares the poppers will close the gap.",
+    },
+    where: {
+      ru: 'engine gameOver(lastStanding) + playground GameEnd (только release) + features/board-beats/gameEndBeat.tsx',
+      en: 'engine gameOver(lastStanding) + playground GameEnd (release only) + features/board-beats/gameEndBeat.tsx',
+    },
+    status: 'open',
+  },
   {
     what: {
       ru: 'Промах Security Bug нечем показать — правило есть, такта нет',

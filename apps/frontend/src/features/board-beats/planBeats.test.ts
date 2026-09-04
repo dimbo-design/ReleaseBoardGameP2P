@@ -48,6 +48,11 @@ const attacked = (over: Partial<Extract<Event, { type: 'attacked' }>> & { id: nu
 const released = (over: Partial<Extract<Event, { type: 'released' }>> & { id: number }): Event =>
   ({ type: 'released', player: 'p1', slot: 'frontend', card: 'release-frontend', ...over }) as Event
 
+const gameOver = (
+  condition: Extract<Event, { type: 'gameOver' }>['condition'],
+  id = 99,
+): Event => ({ id, type: 'gameOver', winner: 'p1', condition })
+
 const tookHit = (over: Partial<Extract<Event, { type: 'tookHit' }>> & { id: number }): Event =>
   ({ type: 'tookHit', player: 'p1', ...over }) as Event
 
@@ -79,6 +84,16 @@ describe('planBeats', () => {
       { id: 2, type: 'passed', player: 'p1' },
     ]
     expect(planBeats(events, boardBefore())).toEqual([])
+  })
+
+  it('celebrates every release-condition victory from the gameOver event itself', () => {
+    expect(planBeats([gameOver('release')], boardBefore())).toEqual([
+      { kind: 'gameEnd', key: 'gameEnd:99', eventId: 99 },
+    ])
+  })
+
+  it('does not invent choreography for a last-standing victory', () => {
+    expect(planBeats([gameOver('lastStanding')], boardBefore())).toEqual([])
   })
 
   it('flies the player’s own discard from its slot in the fan', () => {

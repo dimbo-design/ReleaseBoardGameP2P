@@ -3,10 +3,14 @@ import type { CardData } from '@release/ui'
 import { cardById } from '@release/ui'
 import { scatterAt } from '@release/ui/animations'
 import { act, fireEvent, render } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { BoardAnchors, BoardState, IntroBeat } from '~/entities/game/board'
 import { ELIM_DELAY } from './eliminateBeat'
 import { useBeats } from './useBeats'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 const motion = vi.hoisted(() => ({ reduced: true }))
 vi.mock('~/shared/lib/useReducedMotion', () => ({ useReducedMotion: () => motion.reduced }))
@@ -690,6 +694,29 @@ it('is never working under prefers-reduced-motion', async () => {
   const { getByTestId } = mount()
   await flush()
   expect(getByTestId('running').textContent).toBe('idle')
+})
+
+it('starts a release victory celebration as an exclusive board beat', async () => {
+  vi.useFakeTimers()
+  motion.reduced = false
+  const event = {
+    id: 99,
+    type: 'gameOver',
+    winner: 'p1',
+    condition: 'release',
+  } as Event
+  const { container, getByTestId, rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} />,
+  )
+
+  rerender(<Probe live={preDiscard} events={[event]} anchors={stub} />)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+
+  expect(container.querySelector('[data-testid="game-end-confetti"]')).not.toBeNull()
+  expect(getByTestId('running').textContent).toBe('running')
+  expect(getByTestId('exclusive').textContent).toBe('exclusive')
 })
 
 // ===== a 503 a standing Monitoring answers by itself (#103 testing, problem 2)

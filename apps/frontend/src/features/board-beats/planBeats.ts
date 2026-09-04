@@ -175,6 +175,10 @@ export type BeatPlan =
     }
   | { kind: 'reshuffle'; key: string; cards: number }
   | { kind: 'piles'; key: string; steps: PileStep[] }
+  // A release-condition win celebrates after every movement that completed the
+  // winning zone. It is keyed from `gameOver`, not from `released`, because a
+  // Security Bug steal and an AI Release can complete the same condition.
+  | { kind: 'gameEnd'; key: string; eventId: number }
   // A player is out: the full-screen video plays over a board that has already
   // settled into its eliminated state (#103). Carries no clip of its own — the
   // runner resolves one from `eventId`, so every peer watching the same
@@ -784,6 +788,11 @@ export function planBeats(
         ...(e.codeReview ? { codeReview: e.codeReview } : {}),
         ...(cost ? { cost } : {}),
       })
+      continue
+    }
+    if (e.type === 'gameOver' && e.condition === 'release') {
+      flush()
+      plans.push({ kind: 'gameEnd', key: `gameEnd:${e.id}`, eventId: e.id })
       continue
     }
     if (e.type === 'defended') {
