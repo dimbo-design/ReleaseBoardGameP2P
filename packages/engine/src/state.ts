@@ -158,6 +158,17 @@ export type Pending =
       picks: 1 | 2
       source: CardId
     }
+  // Git Rebase. The offered cards are private to the player using it — "не
+  // показывая другим" — so pendingView gates `piles` behind `mine` exactly as
+  // it gates `pickFromDiscard.options`. One entry per pile the effect reaches:
+  // base = the pile the player named (rules decisions 2026-09-04 answer 1),
+  // sudo = every pile. `cards` is top-first, so index 0 is the next card drawn.
+  | {
+      kind: 'reorderTop'
+      player: PlayerId
+      piles: { pile: number; cards: CardInstance[] }[]
+      source: CardId
+    }
 
 export interface GameState {
   gameId: string

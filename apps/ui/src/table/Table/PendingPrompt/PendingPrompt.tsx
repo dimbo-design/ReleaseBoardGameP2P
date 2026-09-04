@@ -28,6 +28,9 @@ export interface PendingPromptCopy {
   // Git Cherry-pick's discard pick. The copy contract must stay total over
   // every TablePending kind, since `copy[pending.kind]` indexes it.
   pickFromDiscard: { prompt: string; action: string }
+  // Git Rebase's private reorder. The panel itself is Task B3's work — this
+  // key only keeps the copy contract total now that TablePending has the kind.
+  reorderTop: { prompt: string; action: string }
 }
 
 export interface PendingPromptProps {
@@ -428,6 +431,12 @@ export default function PendingPrompt({
             onClick={() => setDiscardPicks((cur) => [...cur, o.uid])}
           />
         ))
+      break
+    }
+    case 'reorderTop': {
+      // Type contract only (#108, Task B1) — the reorder grid is Task B3's
+      // work. Until then this renders no options and cannot confirm, the same
+      // pre-implementation defaults every other kind starts from above.
       break
     }
   }

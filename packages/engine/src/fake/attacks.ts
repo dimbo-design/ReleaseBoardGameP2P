@@ -474,6 +474,15 @@ export function pendingView(state: GameState, viewerId: PlayerId): PendingView |
         picks: p.picks,
         source: p.source,
       }
+    case 'reorderTop':
+      // A deck's contents are never public, so this is `mine` or nothing —
+      // the same gate `pickFromDiscard` uses, for the same reason.
+      return {
+        kind: 'reorderTop',
+        player: p.player,
+        piles: mine ? p.piles.map((e) => ({ pile: e.pile, cards: [...e.cards] })) : [],
+        source: p.source,
+      }
     default:
       return null
   }

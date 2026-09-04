@@ -262,6 +262,10 @@
     "pickFromDiscard": {
       "prompt": "take a card from the discard",
       "action": "take"
+    },
+    "reorderTop": {
+      "prompt": "look at the top three cards and set their order",
+      "action": "reorder"
     }
   },
   "window": {

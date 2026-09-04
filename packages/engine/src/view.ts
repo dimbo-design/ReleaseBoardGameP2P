@@ -112,6 +112,15 @@ export type PendingView =
       picks: 1 | 2
       source: CardId
     }
+  // Full card identity, gated behind `mine` in pendingView (attacks.ts) — the
+  // whole of what "не показывая другим" needs, since a deck's contents are
+  // never projected to anyone.
+  | {
+      kind: 'reorderTop'
+      player: PlayerId
+      piles: { pile: number; cards: CardInstance[] }[]
+      source: CardId
+    }
 
 export interface OpponentView {
   id: PlayerId

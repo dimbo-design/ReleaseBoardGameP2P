@@ -64,7 +64,15 @@ function playedOut(): GameState {
   const engine = createFakeEngine()
   let state = engine.createGame({
     gameId: 'real',
-    seed: 3,
+    // Seed 153, not 3: task B1 (#108) added Git Rebase to FAKE_DECK, which
+    // shifts createGame's shuffle the same way every earlier deck-size change
+    // has elsewhere in this codebase (packages/engine/src/conformance.ts
+    // carries the same class of comment at each of its own swept seeds) —
+    // seed 3's game no longer reaches `over` within this helper's 40-round
+    // budget. Swept for the same match shape the tests below still need: a
+    // finished game, an err503 tie, a sole attackedInto leader, and nobody
+    // scoring a DDoS.
+    seed: 153,
     players: SEATS.map((s) => ({ id: s.playerId, name: s.name })),
     setup: {
       handLimit: 'base',

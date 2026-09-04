@@ -10,9 +10,8 @@ export { botAction, runUntilIdle } from './bots'
 export { drawObligationMet, TURN_ACTION_MS } from './core'
 
 // Quantities mirror apps/ui/src/cards/catalogue.ts. Only the ids the fake
-// implements appear — System Upgrade, ai-inside and the rest of the Git
-// operations are deferred per the design, and createGame filters anything
-// unsupported anyway.
+// implements appear — System Upgrade is deferred per the design, and
+// createGame filters anything unsupported anyway.
 export const FAKE_DECK: DeckEntry[] = [
   { id: 'release-frontend', qty: 4 },
   { id: 'release-backend', qty: 4 },
@@ -38,6 +37,7 @@ export const FAKE_DECK: DeckEntry[] = [
   { id: 'trigger-error-503', qty: 7 },
   { id: 'trigger-ai', qty: 12 },
   { id: 'operation-git-cherry-pick', qty: 3 },
+  { id: 'operation-git-rebase', qty: 3 },
 ]
 
 export const FAKE_EVENTS: DeckEntry[] = [

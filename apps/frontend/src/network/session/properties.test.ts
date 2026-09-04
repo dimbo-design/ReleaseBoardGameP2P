@@ -394,7 +394,12 @@ it('never lets one seat stall the whole game', () => {
   // nothing. The refill's own guard is packages/engine/src/fake/reshuffle.test.ts.
   // Seed 4 is kept for the reasons that outlived #79 — driveAbsent genuinely
   // fires, the game reaches `over` on its own, and it steers clear of #80.
-  const abandoned = disconnect(start(4), 'peer-a', 1_000).session
+  // Seed 1, not 4: task B1 (#108) added Git Rebase to FAKE_DECK, which — like
+  // every earlier deck-size change noted above — shifts the shuffle's RNG
+  // stream, so a fixed seed lands on a new trajectory. 4's game no longer
+  // finishes within budget once abandoned this way; swept again against the
+  // current deck.
+  const abandoned = disconnect(start(1), 'peer-a', 1_000).session
   const { session, exhausted } = playOut(abandoned)
 
   // The criterion is that the game *finishes*, not that the turn moved once:

@@ -18,7 +18,7 @@ import {
 // rather than this test silently drifting out of sync.
 const WINDOW_FIRST_MS = 15_000
 
-function twoPlayerSession() {
+function twoPlayerSession(seed = 1) {
   return createSession({
     gameId: 'g1',
     keeperId: 'a',
@@ -26,7 +26,7 @@ function twoPlayerSession() {
     // Seed 42 puts a trigger card (publicly revealed on draw, per Task 4's
     // "hides the drawn card" test) at the top of pile 0. Seed 1 deals a normal
     // card there instead, so a draw stays private to the drawer as intended.
-    seed: 1,
+    seed,
     players: [
       { playerId: 'a', peerId: 'peer-a', name: 'Ann' },
       { playerId: 'b', peerId: 'peer-b', name: 'Bo' },
@@ -567,7 +567,14 @@ it('expires a window a deadline-free pending would otherwise hold open', () => {
 })
 
 it('lets a stalled defence resolve even after its window has expired', () => {
-  const { session } = twoPlayerSession()
+  // Seed 4, not the shared helper's default 1: task B1 (#108) added Git Rebase
+  // to FAKE_DECK, which shifts the shuffle's RNG stream the same way earlier
+  // deck-size changes did elsewhere in this suite (see properties.test.ts and
+  // packages/engine/src/conformance.ts for the same class of drift) — under
+  // seed 1 this fixture's window no longer closes on the release-scope defend
+  // path within this test's own trace. Swept against the current deck; every
+  // other call site keeps the shared default, which still fits their needs.
+  const { session } = twoPlayerSession(4)
   const opened = openWindowFixture(session)
   const window = opened.state.window
   if (!window) throw new Error('fixture failed to open a window')

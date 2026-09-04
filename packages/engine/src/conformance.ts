@@ -582,8 +582,13 @@ export function describeEngine(
       })
 
       it('keeps state structurally valid and actually resolves a hand-limit decision', () => {
+        // Seed 1, not 55: #108 added Git Rebase to FAKE_DECK, which shifts the
+        // main-deck shuffle's length and so createGame's returned rngCursor —
+        // the same class of drift documented at length on the window-timing
+        // test below. 55's run no longer happens to resolve a hand-limit
+        // decision within budget; swept again against the current deck.
         const engine = make()
-        const start = engine.createGame(configFor(options, 55, MEMORY_SETUP))
+        const start = engine.createGame(configFor(options, 1, MEMORY_SETUP))
         const { state, events } = drive(engine, start, 23, 300)
         expect(state.seating).toHaveLength(3)
         for (const id of state.seating) expect(state.players[id]).toBeDefined()
@@ -850,20 +855,24 @@ export function describeEngine(
         // shuffle's RNG stream, so every fixed seed lands on a new trajectory
         // and 6262's fast run no longer happens to ship two releases in one
         // turn. The cap never broke — its witness stopped occurring.
+        //
+        // Seed 7, not 6267: #108 added Git Rebase to FAKE_DECK, the same class
+        // of shift, and 6267 stopped shipping two releases in one turn under
+        // 'fast'. Swept again against the current deck.
         const engine = make()
         const fastSetup: Setup = { ...BASE_SETUP, releases: 'fast' }
 
-        let base = engine.createGame(configFor(options, 6267))
+        let base = engine.createGame(configFor(options, 7))
         for (let n = 0; n < 600; n += 1) {
           expect(base.turn.releasesPlayed).toBeLessThanOrEqual(1)
-          base = engine.reduce(base, fuzzAction(base, 6267, n)).state
+          base = engine.reduce(base, fuzzAction(base, 7, n)).state
         }
 
-        let fast = engine.createGame(configFor(options, 6267, fastSetup))
+        let fast = engine.createGame(configFor(options, 7, fastSetup))
         let sawMoreThanOne = false
         for (let n = 0; n < 600; n += 1) {
           if (fast.turn.releasesPlayed > 1) sawMoreThanOne = true
-          fast = engine.reduce(fast, fuzzAction(fast, 6267, n)).state
+          fast = engine.reduce(fast, fuzzAction(fast, 7, n)).state
         }
         // Without this, a cap that silently still applied under 'fast' would
         // pass the assertion above by never being tested against a run that
@@ -942,8 +951,12 @@ export function describeEngine(
         // moved the events one, and every seed the previous sweep found (6, 17,
         // 19, 23, 24) stopped reaching a defended release window. Swept again
         // against the current deck.
+        //
+        // Seed 1, not 55: #108 added Git Rebase to FAKE_DECK, the same class of
+        // shift again, and 55 stopped reaching a round-2+ defended window
+        // within budget. Swept again against the current deck.
         const engine = make()
-        let state = engine.createGame(configFor(options, 55))
+        let state = engine.createGame(configFor(options, 1))
         let sawRound1 = false
         let sawLaterRound = false
         for (let n = 0; n < 600 && !state.over; n += 1) {
@@ -1020,8 +1033,13 @@ export function describeEngine(
         // longer reaches a protected release inside the budget. The negative
         // half — no non-DDoS attack ever offered a zone target — held on every
         // seed swept, which is the half that would signal a real defect.
+        //
+        // Seed 2 now, not 23: #108 added Git Rebase to FAKE_DECK, the same
+        // class of shift again, and 23 stopped reaching a protected release
+        // inside the budget. Swept again against the current deck; the negative
+        // half still held throughout.
         const engine = make()
-        const result = driveProtectedReleaseAndDdos(engine, options, 23, 1500)
+        const result = driveProtectedReleaseAndDdos(engine, options, 2, 1500)
         expect(
           result.sawNonDdosZoneTarget,
           'a non-DDoS attack was offered a release or Monitoring target',

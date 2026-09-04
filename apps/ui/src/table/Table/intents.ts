@@ -28,6 +28,9 @@ export type TableChoice =
   | { kind: 'giveCard'; card: string }
   | { kind: 'handLimit'; cards: string[] }
   | { kind: 'pickFromDiscard'; card: string; toDeck?: string }
+  // The order committed per pile, index 0 becoming the new top — mirrors the
+  // engine's own Choice.
+  | { kind: 'reorderTop'; order: { pile: number; cards: string[] }[] }
   // Taking a staged release back before its cost is paid — see the engine's
   // own Choice for why it carries nothing.
   | { kind: 'cancelRelease' }
@@ -80,6 +83,12 @@ export type TablePending =
       player: string
       options: { uid: string; id: string }[]
       picks: 1 | 2
+      source: string
+    }
+  | {
+      kind: 'reorderTop'
+      player: string
+      piles: { pile: number; cards: { uid: string; id: string }[] }[]
       source: string
     }
 
