@@ -157,4 +157,141 @@ describe('Git Rebase', () => {
     expect(next.decks.discard.map((c) => c.id)).toContain('operation-git-rebase')
     expect(next.players.p1.hand).toHaveLength(0)
   })
+
+  it('puts the pile back in the order the player committed', () => {
+    const played = reduce(table([REBASE], [pile('a', 5)]), {
+      type: 'PLAY',
+      player: 'p1',
+      card: REBASE.uid,
+      target: { kind: 'pile', pile: 0 },
+      at: 1,
+    }).state
+    const { state: next } = reduce(played, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: {
+        kind: 'reorderTop',
+        order: [{ pile: 0, cards: ['attack-bug#a2', 'attack-bug#a0', 'attack-bug#a1'] }],
+      },
+      at: 2,
+    })
+    expect(next.pending).toBeNull()
+    expect(next.decks.main[0].map((c) => c.uid)).toEqual([
+      'attack-bug#a2',
+      'attack-bug#a0',
+      'attack-bug#a1',
+      'attack-bug#a3',
+      'attack-bug#a4',
+    ])
+  })
+
+  it('rejects an order that is not a permutation of what was offered', () => {
+    const played = reduce(table([REBASE], [pile('a', 5)]), {
+      type: 'PLAY',
+      player: 'p1',
+      card: REBASE.uid,
+      target: { kind: 'pile', pile: 0 },
+      at: 1,
+    }).state
+    const { state: next, events } = reduce(played, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: {
+        kind: 'reorderTop',
+        // #a3 was never on offer — it is the fourth card down.
+        order: [{ pile: 0, cards: ['attack-bug#a0', 'attack-bug#a1', 'attack-bug#a3'] }],
+      },
+      at: 2,
+    })
+    expect(next).toBe(played)
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+  })
+
+  it('rejects an order that repeats a card instead of naming each once', () => {
+    // Mutation check (B3 step 6): dropping the `seen` repeat guard lets this
+    // through, since every uid it names is individually on offer.
+    const played = reduce(table([REBASE], [pile('a', 5)]), {
+      type: 'PLAY',
+      player: 'p1',
+      card: REBASE.uid,
+      target: { kind: 'pile', pile: 0 },
+      at: 1,
+    }).state
+    const { state: next, events } = reduce(played, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: {
+        kind: 'reorderTop',
+        order: [{ pile: 0, cards: ['attack-bug#a0', 'attack-bug#a0', 'attack-bug#a0'] }],
+      },
+      at: 2,
+    })
+    expect(next).toBe(played)
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+  })
+
+  it('rejects a reorder from somebody else', () => {
+    const played = reduce(table([REBASE], [pile('a', 5)]), {
+      type: 'PLAY',
+      player: 'p1',
+      card: REBASE.uid,
+      target: { kind: 'pile', pile: 0 },
+      at: 1,
+    }).state
+    const { events } = reduce(played, {
+      type: 'RESOLVE',
+      player: 'p2',
+      choice: {
+        kind: 'reorderTop',
+        order: [{ pile: 0, cards: ['attack-bug#a0', 'attack-bug#a1', 'attack-bug#a2'] }],
+      },
+      at: 2,
+    })
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+  })
+
+  it('shows an opponent projection nothing of the offer', () => {
+    const played = reduce(table([REBASE], [pile('a', 5)]), {
+      type: 'PLAY',
+      player: 'p1',
+      card: REBASE.uid,
+      target: { kind: 'pile', pile: 0 },
+      at: 1,
+    }).state
+    const view = engine.project(played, 'p2')
+    expect(view.pending).toMatchObject({ kind: 'reorderTop', player: 'p1', piles: [] })
+  })
+
+  it('rejects a committed order once the pile it names has moved underneath it', () => {
+    // Mutation check (B3 step 6): a stale pending must not be trusted over
+    // live state — dropping the live-pile guard would duplicate cards a1/a2
+    // here instead of rejecting. Nothing in the reducer mutates `main` while a
+    // pending stands, so this drives the state directly to simulate the case
+    // the guard exists for (a concurrent change reaching the pile another way).
+    const played = reduce(table([REBASE], [pile('a', 5)]), {
+      type: 'PLAY',
+      player: 'p1',
+      card: REBASE.uid,
+      target: { kind: 'pile', pile: 0 },
+      at: 1,
+    }).state
+    const moved: GameState = {
+      ...played,
+      decks: {
+        ...played.decks,
+        main: [[{ uid: 'attack-bug#zz0', id: 'attack-bug' }, ...played.decks.main[0].slice(1)]],
+      },
+    }
+    const { state: next, events } = reduce(moved, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: {
+        kind: 'reorderTop',
+        order: [{ pile: 0, cards: ['attack-bug#a0', 'attack-bug#a1', 'attack-bug#a2'] }],
+      },
+      at: 2,
+    })
+    expect(next).toBe(moved)
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+  })
 })
