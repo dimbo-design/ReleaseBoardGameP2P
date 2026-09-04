@@ -6,9 +6,20 @@ import { bankToDiscard, createLog, type Log, reject } from './core'
 
 // Cherry-pick offers the whole pile; Inside offers only Releases. Everything
 // else about the two effects is identical, which is why they share a pending.
-export function discardOptions(state: GameState, releasesOnly: boolean): CardInstance[] {
-  if (!releasesOnly) return state.decks.discard
-  return state.decks.discard.filter((c) => rulesFor(c.id)?.kind === 'release')
+//
+// A trigger is the one card the pile may hold that a hand may not: "обе карты
+// нельзя держать в руке" (docs/rules/cards.md). Under sudo it stays on offer —
+// the rules let a trigger be the card that goes onto the DECK — and
+// onPickFromDiscard is what refuses it the hand slot. Without sudo there is no
+// slot it could legally fill, so it is not offered at all.
+export function discardOptions(
+  state: GameState,
+  releasesOnly: boolean,
+  sudo = false,
+): CardInstance[] {
+  if (releasesOnly) return state.decks.discard.filter((c) => rulesFor(c.id)?.kind === 'release')
+  if (sudo) return state.decks.discard
+  return state.decks.discard.filter((c) => rulesFor(c.id)?.kind !== 'trigger')
 }
 
 const discard = (state: GameState, cards: CardInstance[]): GameState => bankToDiscard(state, cards)
@@ -28,7 +39,7 @@ export function openPickFromDiscard(
   combo: CardInstance | undefined,
   releasesOnly: boolean,
 ): GameState {
-  const options = discardOptions(state, releasesOnly)
+  const options = discardOptions(state, releasesOnly, combo !== undefined)
   const spent = combo ? [card, combo] : [card]
   // Every other spend path logs a `discarded` event for the card it consumes
   // (release.ts's release-cost pay, reduce.ts's hand-limit discard,

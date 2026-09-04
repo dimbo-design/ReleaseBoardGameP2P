@@ -209,6 +209,50 @@ describe('Git Cherry-pick', () => {
     const pending = opponentView.pending as { options: { uid: string }[] }
     expect(pending.options).toEqual([])
   })
+
+  // "Обе карты нельзя держать в руке" (docs/rules/cards.md, the trigger
+  // section). Both trigger types reach the discard in ordinary play, because
+  // that is where fireTrigger banks them.
+  it('does not offer a trigger to a base pick — it could only go to the hand', () => {
+    const state = gameWith(['trigger-error-503', 'attack-bug'], [CHERRY])
+    const { state: next } = engine.reduce(state, {
+      type: 'PLAY',
+      player: 'p1',
+      card: `${CHERRY}#h0`,
+      at: 1,
+    })
+    const pending = next.pending as { options: { id: string }[]; picks: number }
+    expect(pending.options.map((o) => o.id)).toEqual(['attack-bug'])
+    expect(pending.picks).toBe(1)
+  })
+
+  it('raises no pending at all when the discard holds nothing but triggers', () => {
+    const state = gameWith(['trigger-error-503', 'trigger-ai'], [CHERRY])
+    const { state: next } = engine.reduce(state, {
+      type: 'PLAY',
+      player: 'p1',
+      card: `${CHERRY}#h0`,
+      at: 1,
+    })
+    // Rules answer 11: a play with nothing to take is the player's own blunder,
+    // not a rejected action — the card is spent and the turn goes on.
+    expect(next.pending).toBeNull()
+    expect(next.decks.discard.map((c) => c.id)).toContain('operation-git-cherry-pick')
+  })
+
+  it('keeps offering triggers under sudo, where one may take the deck slot', () => {
+    const state = gameWith(['trigger-error-503', 'attack-bug'], [CHERRY, 'support-sudo'])
+    const { state: next } = engine.reduce(state, {
+      type: 'PLAY',
+      player: 'p1',
+      card: `${CHERRY}#h0`,
+      combo: 'support-sudo#h1',
+      at: 1,
+    })
+    const pending = next.pending as { options: { id: string }[]; picks: number }
+    expect(pending.options.map((o) => o.id)).toEqual(['trigger-error-503', 'attack-bug'])
+    expect(pending.picks).toBe(2)
+  })
 })
 
 describe('Inside', () => {
