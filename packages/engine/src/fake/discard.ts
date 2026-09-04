@@ -75,6 +75,14 @@ export function onPickFromDiscard(
   // selection the current pending never offered must not resolve.
   if (!toHand) return reject(state, action, 'that card is not on offer')
 
+  // The offer may legitimately contain a trigger (a sudo pick can put one on
+  // the deck), so the hand slot is guarded here rather than by withholding it.
+  // A hostile or stale RESOLVE never passes through the board, which is why
+  // this cannot live in the UI.
+  if (rulesFor(toHand.id)?.kind === 'trigger') {
+    return reject(state, action, 'that card cannot go to a hand')
+  }
+
   const toDeck = pending.picks === 2 && choice.toDeck ? offered(choice.toDeck) : undefined
   if (pending.picks === 2 && choice.toDeck && !toDeck) {
     return reject(state, action, 'that card is not on offer')

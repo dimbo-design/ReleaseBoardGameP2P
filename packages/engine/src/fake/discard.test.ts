@@ -253,6 +253,45 @@ describe('Git Cherry-pick', () => {
     expect(pending.options.map((o) => o.id)).toEqual(['trigger-error-503', 'attack-bug'])
     expect(pending.picks).toBe(2)
   })
+
+  it('refuses a trigger as the card taken to hand, even under sudo', () => {
+    const state = gameWith(['trigger-error-503', 'attack-bug'], [CHERRY, 'support-sudo'])
+    const played = engine.reduce(state, {
+      type: 'PLAY',
+      player: 'p1',
+      card: `${CHERRY}#h0`,
+      combo: 'support-sudo#h1',
+      at: 1,
+    }).state
+    const { state: next, events } = engine.reduce(played, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: { kind: 'pickFromDiscard', card: 'trigger-error-503#d0', toDeck: 'attack-bug#d1' },
+      at: 2,
+    })
+    expect(next).toBe(played)
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+    expect(next.players.p1.hand.map((c) => c.id)).not.toContain('trigger-error-503')
+  })
+
+  it('lets a trigger be the sudo card that goes onto the deck', () => {
+    const state = gameWith(['trigger-error-503', 'attack-bug'], [CHERRY, 'support-sudo'])
+    const played = engine.reduce(state, {
+      type: 'PLAY',
+      player: 'p1',
+      card: `${CHERRY}#h0`,
+      combo: 'support-sudo#h1',
+      at: 1,
+    }).state
+    const { state: next } = engine.reduce(played, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: { kind: 'pickFromDiscard', card: 'attack-bug#d1', toDeck: 'trigger-error-503#d0' },
+      at: 2,
+    })
+    expect(next.players.p1.hand.map((c) => c.id)).toContain('attack-bug')
+    expect(next.decks.main[0][0].id).toBe('trigger-error-503')
+  })
 })
 
 describe('Inside', () => {
