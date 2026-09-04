@@ -1,12 +1,36 @@
 /* The whole discard, face up, over the heap it still belongs to (#108). Wider
    than Inside's row (`_useInsideStaging.module.css`), because Cherry-pick
    offers the pile rather than its Releases — so it wraps and scrolls in its own
-   box instead of pushing the table around. */
+   box instead of pushing the table around.
+
+   NO transform on `.grid` (fix round 2, task-A4-findings-r2.md). `confirmPick()`'s
+   pass 2 pins each `.cell` to `position: fixed` at its own viewport rect
+   (Task A4's flights) — a transformed ancestor becomes the containing block
+   for a `position: fixed` descendant, so under a `transform` here the pin
+   would resolve against THIS box instead of the viewport and every card
+   would jump the instant it's pinned (reproduced in a real browser: a 120px
+   jump from doing nothing but copying an element's own rect into
+   `position: fixed`). Centre via full-area flex instead, and let clicks
+   through (`pointer-events: none`) so only `.cells` and the confirm bar are
+   interactive — the same shape, and the same reason, as `.suCenter` in
+   `GitCards.module.css` (the playground scene this ports from). Do NOT put a
+   transform back on this element. */
 .grid {
   position: absolute;
-  inset-block-start: 18%;
-  inset-inline: 0;
+  inset: 0;
   z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* the actual card row — owns the scroll box `.grid` used to before this fix.
+   `overflow-y: auto` does NOT establish a containing block for
+   `position: fixed` (only `transform`/`filter`/`backdrop-filter`/
+   `perspective`/`contain`/`will-change` do), so pinning a cell still escapes
+   this clip exactly as intended. */
+.cells {
   display: flex;
   flex-wrap: wrap;
   gap: 24px;
@@ -15,7 +39,7 @@
   max-block-size: 56vh;
   padding-inline: 40px;
   overflow-y: auto;
-  transform: translateY(-50%);
+  pointer-events: auto;
 }
 
 /* while dealing out of the pile, don't clip — cards fly in from outside the

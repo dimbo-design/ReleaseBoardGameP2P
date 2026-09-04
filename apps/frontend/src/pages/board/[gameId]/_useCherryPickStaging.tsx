@@ -235,10 +235,12 @@ export function useCherryPickStaging(args: {
   const ready = ours ? picks.length === ours.picks : false
 
   // confirm: freeze every cell at its viewport rect first — position:fixed
-  // both escapes the grid's own scroll clip AND, pinned all at once, causes no
+  // both escapes `.cells`'s own scroll clip AND, pinned all at once, causes no
   // reflow (ALL cells are pinned, not just the two that travel — leaving an
   // unpicked neighbour unpinned would reflow it into the space a picked
-  // card's own `position: fixed` vacates). Then the chosen card reveals to
+  // card's own `position: fixed` vacates). This is exactly why `.grid` (the
+  // pins' own ancestor) must never carry a transform — see its module CSS
+  // comment. Then the chosen card reveals to
   // centre and drops into the hand, and the sudo card flips then flies onto
   // the deck top. The rest simply stay put — pinned at the exact rect they
   // already stood in, which changes nothing, since the heap under this grid
@@ -362,66 +364,69 @@ export function useCherryPickStaging(args: {
 
   return {
     grid: (
-      <div
-        className={`${styles.grid} ${dealing ? styles.dealing : ''}`}
-        data-testid="board-cherry-grid"
-      >
-        {options.map((o) => {
-          const data = cardById(o.id)
-          if (!data) return null
-          const handRole = roles.hand === o.uid
-          const deckRole = roles.deck === o.uid
-          const selected = handRole || deckRole
-          const blocked = !confirmed && !selected && !canSelect(o.uid, o.id)
-          return (
-            <button
-              key={o.uid}
-              ref={(el) => {
-                if (el) cellRefs.current.set(o.uid, el)
-                else cellRefs.current.delete(o.uid)
-              }}
-              type="button"
-              data-testid={`cherry-cell-${o.uid}`}
-              className={`${styles.cell} ${blocked ? styles.blocked : ''}`}
-              onClick={() => {
-                if (confirmed) return
-                setPicks((p) =>
-                  p.includes(o.uid)
-                    ? p.filter((u) => u !== o.uid)
-                    : canSelect(o.uid, o.id)
-                      ? [...p, o.uid]
-                      : p,
-                )
-              }}
-            >
-              <Card
-                card={data}
-                interactive={false}
-                width="100%"
-                faceDown={flipped.has(o.uid)}
-                state={selected ? 'selected' : 'idle'}
-                // one out of a set — the uniform selection colour, never the
-                // per-category accent
-                accent="var(--select-accent)"
-              />
-              {handRole && (
-                <Typography variant="tag" className={styles.roleTag}>
-                  {copy.toHand}
-                </Typography>
-              )}
-              {deckRole && (
-                <Typography variant="tag" className={styles.roleTag}>
-                  {copy.toDeck}
-                </Typography>
-              )}
-              {!sudo && isTrigger(o.id) && (
-                <Typography variant="tag" className={styles.lockTag}>
-                  {copy.noHand}
-                </Typography>
-              )}
-            </button>
-          )
-        })}
+      // Full-area, transform-free and `pointer-events: none` — see the
+      // header comment on `.grid` in the module CSS for why. `.cells` (the
+      // actual card row) and the confirm bar re-enable their own pointer
+      // events, so clicks pass through everywhere else on this layer.
+      <div className={styles.grid} data-testid="board-cherry-grid">
+        <div className={`${styles.cells} ${dealing ? styles.dealing : ''}`}>
+          {options.map((o) => {
+            const data = cardById(o.id)
+            if (!data) return null
+            const handRole = roles.hand === o.uid
+            const deckRole = roles.deck === o.uid
+            const selected = handRole || deckRole
+            const blocked = !confirmed && !selected && !canSelect(o.uid, o.id)
+            return (
+              <button
+                key={o.uid}
+                ref={(el) => {
+                  if (el) cellRefs.current.set(o.uid, el)
+                  else cellRefs.current.delete(o.uid)
+                }}
+                type="button"
+                data-testid={`cherry-cell-${o.uid}`}
+                className={`${styles.cell} ${blocked ? styles.blocked : ''}`}
+                onClick={() => {
+                  if (confirmed) return
+                  setPicks((p) =>
+                    p.includes(o.uid)
+                      ? p.filter((u) => u !== o.uid)
+                      : canSelect(o.uid, o.id)
+                        ? [...p, o.uid]
+                        : p,
+                  )
+                }}
+              >
+                <Card
+                  card={data}
+                  interactive={false}
+                  width="100%"
+                  faceDown={flipped.has(o.uid)}
+                  state={selected ? 'selected' : 'idle'}
+                  // one out of a set — the uniform selection colour, never the
+                  // per-category accent
+                  accent="var(--select-accent)"
+                />
+                {handRole && (
+                  <Typography variant="tag" className={styles.roleTag}>
+                    {copy.toHand}
+                  </Typography>
+                )}
+                {deckRole && (
+                  <Typography variant="tag" className={styles.roleTag}>
+                    {copy.toDeck}
+                  </Typography>
+                )}
+                {!sudo && isTrigger(o.id) && (
+                  <Typography variant="tag" className={styles.lockTag}>
+                    {copy.noHand}
+                  </Typography>
+                )}
+              </button>
+            )
+          })}
+        </div>
         <ConfirmAction
           open={!confirmed}
           label={copy.confirm}
