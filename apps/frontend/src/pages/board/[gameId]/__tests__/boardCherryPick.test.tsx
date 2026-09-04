@@ -10,6 +10,33 @@ import { mockReducedMotion } from '~/test/reducedMotion'
 import Board from '../_Board'
 import { makeBoardProps } from './fixture'
 
+// Task A4's fix round 1: the unpicked cards never leave the projection
+// (`decks.discard` still holds them, and `_Board.tsx` renders the heap off
+// that same array the whole time the grid is open), so a confirmed pick must
+// never send one to the discard-exit step — that step's own flight is what
+// used to draw each unpicked card twice, once flying and once already
+// resting in the heap underneath. Mocking `useDiscardExit` turns its own
+// calls into the assertion surface, the same pattern `boardHandLimit.test.tsx`
+// already uses to track a discard-exit step's calls — a card count across the
+// DOM couldn't tell a fixed grid cell from a translating one in jsdom, which
+// has no Web Animations API to observe.
+const exits = vi.hoisted(() => ({ items: [] as string[][] }))
+vi.mock('@release/ui/animations', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@release/ui/animations')>()
+  return {
+    ...actual,
+    useDiscardExit: () => ({
+      overlay: [],
+      send: (items: { key: string }[]) => {
+        exits.items.push(items.map((item) => item.key))
+        return Promise.resolve()
+      },
+      reset: () => {},
+      FLIGHT_MS: 0,
+    }),
+  }
+})
+
 // Same shape as `boardAi.test.tsx`'s own `cherryPending` (not exported from
 // there, so mirrored here rather than reached for across files) — the
 // regression suite that first proved Cherry-pick must NOT land on Inside's
@@ -96,5 +123,26 @@ describe("the grid that answers Git Cherry-pick's own pick", () => {
     expect(onResolve).toHaveBeenCalledWith({ kind: 'pickFromDiscard', card: 'c2' })
     expect(screen.queryByTestId('board-cherry-grid')).toBeNull()
     mm.mockRestore()
+  })
+
+  // Findings round 1: the unpicked card (c1 here) is already on screen in the
+  // discard heap the whole time this grid is open — `_Board.tsx` renders
+  // `decks.discardHeap` off the same projection the engine never removes it
+  // from. A confirmed pick must not additionally hand it to the discard-exit
+  // step; that step's own flight is what used to draw it twice.
+  it('never sends an unpicked card to the discard-exit step — the heap already shows it', () => {
+    exits.items = []
+    const onResolve = vi.fn()
+    renderBoard({
+      pending: cherryPending([
+        { uid: 'c1', id: 'attack-bug' },
+        { uid: 'c2', id: 'release-frontend' },
+      ]),
+      actions: { onResolve },
+    })
+    fireEvent.click(screen.getByTestId('cherry-cell-c2'))
+    fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+    expect(onResolve).toHaveBeenCalledWith({ kind: 'pickFromDiscard', card: 'c2' })
+    expect(exits.items.flat()).not.toContain('c1')
   })
 })

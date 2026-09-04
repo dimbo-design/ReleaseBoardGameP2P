@@ -1,6 +1,6 @@
 import type { TableActions } from '@release/ui'
 import { Card, ConfirmAction, cardById, Typography } from '@release/ui'
-import { HEAP_SHOW, play, scatterAt, useDiscardExit, useHandArrival } from '@release/ui/animations'
+import { play, useHandArrival } from '@release/ui/animations'
 import type { ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BoardAnchors, BoardState } from '~/entities/game/board'
@@ -22,19 +22,30 @@ import styles from './_useCherryPickStaging.module.css'
 // `decks.discard` until the pick resolves, so nothing is lifted out of the
 // projection while it is being chosen from.
 //
-// THE FLIGHTS (Task A4): ported from the approved playground scene
-// (`apps/playground/stories/interactive/GitCards/CherryPick.tsx`'s own
-// `confirmPick()`), timings verbatim. Two things differ from that story, both
+// THE FLIGHTS (Task A4, corrected in a fix round after review): ported from
+// the approved playground scene (`apps/playground/stories/interactive/
+// GitCards/CherryPick.tsx`'s own `confirmPick()`), timings verbatim for the
+// two legs that actually travel. Two things differ from that story, both
 // load-bearing on the board rather than a sandbox:
-//   • the unpicked land on their OWN scatter (I7) — `scatterAt(i, PILE_W)`,
-//     not a random `jitter()` — so the last frame of the flight is the
-//     projection's own resting pose, no re-layout on landing.
+//   • only the CHOSEN cards fly — the hand card to the centre and into the
+//     fan, the sudo card flipping and onto the deck. The UNPICKED cards never
+//     leave the projection and so never fly either: the engine keeps them in
+//     `decks.discard` until the pick resolves, and the heap above this grid
+//     renders that same `decks.discard` the whole time the grid is open. A
+//     return flight for them would draw each one TWICE — once as a flying
+//     cell, once already resting in the heap underneath — and land it on a
+//     scatter pose the heap doesn't key by (array position, not the discard
+//     event's own id), so even without the double-draw it would jump at the
+//     moment the flight ends. The story needs that leg because its own
+//     discard is local state it emptied into the grid; the board's discard
+//     was never emptied, so the grid simply reveals it again when it goes.
 //   • a game action must never wait on an animation nobody plays
 //     (`_useInsideStaging`'s rule): under reduced motion the RESOLVE fires at
 //     once and the grid unmounts with nothing ever having flown.
 const isTrigger = (id: string) => cardById(id)?.category === 'trigger'
 
-// timings — the approved scene, all four legs
+// timings — the approved scene, the three legs that actually travel (deal,
+// hand-reveal, deck)
 const DEAL_DUR = 360 // dealing out of the pile into the grid
 const DEAL_STEP = 16 // per-card stagger, dealing out
 const STAGGER_CAP = 40 // don't stagger past this many cards
@@ -45,9 +56,6 @@ const HAND_MIN = REVEAL_DUR + REVEAL_HOLD + 520 // total before the round can fi
 const FLIP_DUR = 420 // = the flipCard preset duration (flip before the deck flight)
 const DECK_DUR = 480 // = the returnToDeck preset duration
 const DECK_HOLD = 360 // deck card holds face-down before it merges
-const RETURN_DUR = 420 // = the centerToDiscard preset duration
-const RETURN_STEP = 14 // per-card stagger, returning to the pile
-const PILE_W = 116 // discard pile width — the Table screen's own value (_Board.tsx)
 
 // centre-to-centre translate + scale to move an element from one rect to
 // another — the story's own `between()`, ported verbatim.
@@ -128,10 +136,6 @@ export function useCherryPickStaging(args: {
   // arrival on the board uses) — nothing here mirrors the hand locally, the
   // fan already renders straight off the projection's own `you.hand`.
   const arrival = useHandArrival(anchors.hand, () => {})
-  // the unpicked cards leave the grid for the discard — no `onLanded`: the
-  // heap keeps its own books (it was never lifted out of the projection to
-  // begin with — see the header above).
-  const exit = useDiscardExit(anchors.discardBox)
 
   // One candidate is not a choice — `_useInsideStaging`'s precedent, and
   // #105's Decision 2 before it. Latched on the pending rather than the mount,
@@ -232,9 +236,14 @@ export function useCherryPickStaging(args: {
 
   // confirm: freeze every cell at its viewport rect first — position:fixed
   // both escapes the grid's own scroll clip AND, pinned all at once, causes no
-  // reflow. Then the chosen card reveals to centre and drops into the hand,
-  // the sudo card flips then flies onto the deck top, and the rest fly back
-  // into the pile with a scattered landing. Ported from the story's own
+  // reflow (ALL cells are pinned, not just the two that travel — leaving an
+  // unpicked neighbour unpinned would reflow it into the space a picked
+  // card's own `position: fixed` vacates). Then the chosen card reveals to
+  // centre and drops into the hand, and the sudo card flips then flies onto
+  // the deck top. The rest simply stay put — pinned at the exact rect they
+  // already stood in, which changes nothing, since the heap under this grid
+  // has held them the whole time (see the header above); they surface again,
+  // unmoved, the instant the grid goes. Ported from the story's own
   // `confirmPick()` — the two-pass rect capture is kept exactly as written,
   // for exactly its own reason: pinning one cell reflows the rest, so a single
   // read-and-pin loop would capture already-shifted positions for every card
@@ -271,7 +280,6 @@ export function useCherryPickStaging(args: {
     const handData = cardById(ours.options.find((o) => o.uid === hand)?.id ?? '')
     const deckOpt = deck ? ours.options.find((o) => o.uid === deck) : undefined
     const deckData = deckOpt ? cardById(deckOpt.id) : undefined
-    const remaining = ours.options.filter((o) => o.uid !== hand && o.uid !== deck)
     const deckRect = anchors.pileBox(0)?.getBoundingClientRect()
 
     // pass 1: read EVERY cell's rect first, before touching layout.
@@ -334,38 +342,19 @@ export function useCherryPickStaging(args: {
       }, FLIP_DUR)
     }
 
-    // the rest → back into the pile, each landing at its OWN stored scatter —
-    // the value the resting heap will render (I7), so there's no position
-    // swap when the animation ends. The top HEAP_SHOW stay visible; the ones
-    // beneath fade out (merge into the pile) instead of vanishing.
-    const leaving = remaining
-      .map((o, i) => {
-        const data = cardById(o.id)
-        if (!data) return null
-        return {
-          key: o.uid,
-          card: data,
-          node: cellRefs.current.get(o.uid),
-          // The unpicked land on their OWN scatter, the value the resting
-          // heap will render (I7) — so the last frame of the flight IS the
-          // projection it hands over to, with no re-layout when the
-          // animation ends.
-          scatter: scatterAt(i, PILE_W),
-          fade: i < remaining.length - HEAP_SHOW,
-          delay: Math.min(i, STAGGER_CAP) * RETURN_STEP,
-          layer: i,
-        }
-      })
-      .filter((x): x is NonNullable<typeof x> => x != null)
-    void exit.send(leaving)
+    // the rest never travel — see the header above. They stay exactly where
+    // pass 2 pinned them (unmoved) until the grid unmounts below, at which
+    // point the heap that was rendering them the whole time is all that's
+    // left on screen. No flight, so nothing here to start or to wait on.
 
-    const returnDone = RETURN_DUR + Math.min(remaining.length, STAGGER_CAP) * RETURN_STEP
+    // The round ends when the two legs that actually fly are both done — a
+    // stationary cell has nothing to finish.
     const deckDone = deck ? FLIP_DUR + DECK_DUR + DECK_HOLD : 0
     const handDone = handData ? HAND_MIN : 0
-    later(() => setFlying(false), Math.max(returnDone, deckDone, handDone) + 100)
+    later(() => setFlying(false), Math.max(deckDone, handDone) + 100)
   }
 
-  const overlay = [...arrival.overlay, ...exit.overlay]
+  const overlay = arrival.overlay
 
   if (!flying && (!ours || confirmed || (ours.picks === 1 && ours.options.length < 2))) {
     return { grid: null, overlay }
