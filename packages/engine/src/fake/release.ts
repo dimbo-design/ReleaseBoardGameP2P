@@ -15,6 +15,7 @@ import { openPickFromDiscard } from './discard'
 import { openHandAttack, resolveDdos } from './handAttacks'
 import { mergePiles, splitPile } from './piles'
 import { playableFor } from './project'
+import { openReorderTop } from './rebase'
 import { openWindow } from './window'
 
 // Structural target equality — targets are small value objects, so a field-wise
@@ -131,9 +132,9 @@ export function onPlay(state: GameState, action: Action & { type: 'PLAY' }): Red
       hand.filter((c) => c.uid !== action.card && c.uid !== sudoCombo?.uid),
     )
 
-    // Cherry-pick asks a question; the pile operations just act. Dispatching on
-    // the id rather than on the kind, because `operation` is now three cards
-    // that share only where they are played from.
+    // Cherry-pick and Rebase ask a question; the pile operations just act.
+    // Dispatching on the id rather than on the kind, because `operation` is
+    // now four cards that share only where they are played from.
     if (card.id === 'operation-git-branch') {
       // With one pile there is nothing to choose, so an absent target means it.
       const chosen = action.target?.kind === 'pile' ? action.target.pile : 0
@@ -144,6 +145,16 @@ export function onPlay(state: GameState, action: Action & { type: 'PLAY' }): Red
     if (card.id === 'operation-git-merge') {
       const merged = mergePiles(withoutCards, log, sudoCombo !== undefined)
       return { state: discard(merged, log, action.player, spentCards), events: log.events }
+    }
+
+    if (card.id === 'operation-git-rebase') {
+      // With one pile there is nothing to choose, so an absent target means it
+      // — the same reading Git Branch above gives an absent target.
+      const chosen = action.target?.kind === 'pile' ? action.target.pile : 0
+      return {
+        state: openReorderTop(withoutCards, log, action.player, card, sudoCombo, chosen),
+        events: log.events,
+      }
     }
 
     return {
