@@ -78,6 +78,7 @@ import { useHandOrder } from '~/features/hand-order/useHandOrder'
 import opening from './_Board.module.css'
 import { useBoardInteractions } from './_useBoardInteractions'
 import { useBoardStaging } from './_useBoardStaging'
+import { useCherryPickStaging } from './_useCherryPickStaging'
 import { useDefenseStaging } from './_useDefenseStaging'
 import { useHandLimit } from './_useHandLimit'
 import { useInsideStaging } from './_useInsideStaging'
@@ -459,6 +460,22 @@ export default function Board({
     state,
     actions,
     copy: { prompt: copy.table.insidePrompt, confirm: copy.pending.confirm },
+    enabled: !(deal.active || beats.exclusive),
+  })
+  // Git Cherry-pick's own grid (#108) — the OTHER `pickFromDiscard`. Gated on
+  // `source` for the same reason Inside is: the two effects share a pending
+  // kind and nothing else.
+  const cherry = useCherryPickStaging({
+    state,
+    actions,
+    copy: {
+      prompt: copy.table.cherryPickPrompt,
+      sudoPrompt: copy.table.cherryPickSudoPrompt,
+      toHand: copy.table.cherryPickToHand,
+      toDeck: copy.table.cherryPickToDeck,
+      noHand: copy.table.cherryPickNoHand,
+      confirm: copy.pending.confirm,
+    },
     enabled: !(deal.active || beats.exclusive),
   })
   // the answer once its own flight has landed (or at once under reduced
@@ -1715,14 +1732,15 @@ export default function Board({
         // …and this one is not a question: the copies differ only by uid, so
         // `_useRequestStaging` answers it and the victim watches the scene
         state.pending.kind !== 'giveCard' &&
-        // the row on the table asks Inside's own pick, for the same reason
-        // the others above are asked by the cards themselves (#106) — but
-        // only Inside's: Git Cherry-pick raises the same pending kind over
-        // the whole discard (and a sudo second pick to the draw deck), a
-        // shape the row was never built for, so it falls through to this
-        // panel, which already has a complete case for it
-        // (`PendingPrompt.tsx`'s own `pickFromDiscard`, `toDeck` included)
-        !(state.pending.kind === 'pickFromDiscard' && state.pending.source === 'ai-inside') && (
+        // Both `pickFromDiscard` surfaces replace the generic panel: Inside's
+        // row (#106) and Cherry-pick's grid (#108). A panel that unmounts when
+        // the pending clears cannot hold a flight, which is what the grid is
+        // about to do.
+        !(
+          state.pending.kind === 'pickFromDiscard' &&
+          (state.pending.source === 'ai-inside' ||
+            state.pending.source === 'operation-git-cherry-pick')
+        ) && (
           <PendingPrompt
             pending={state.pending}
             hand={you.hand}
@@ -1917,6 +1935,7 @@ export default function Board({
       {neutralizing.overlay}
       {requesting.band}
       {inside.row}
+      {cherry.grid}
       {previewOverlay}
 
       {/* the pair flyer — a persistent node (I10: position: fixed against the

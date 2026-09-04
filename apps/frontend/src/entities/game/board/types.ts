@@ -195,6 +195,16 @@ export interface BoardChromeCopy {
   // above it. Shared with Git Cherry-pick once #61 lands: the two effects
   // resolve through the same pending, so they read the same line.
   insidePrompt: string
+  // Git Cherry-pick's own grid (#108, `pickFromDiscard`, `operation-git-
+  // cherry-pick`) — its own captions, not Inside's `insidePrompt`: a base
+  // pick asks for one card, a sudo pick asks for two with different
+  // destinations, and a trigger card sitting in the offer needs a reason it
+  // cannot take the hand slot.
+  cherryPickPrompt: string
+  cherryPickSudoPrompt: string
+  cherryPickToHand: string
+  cherryPickToDeck: string
+  cherryPickNoHand: string
   // поле паузы (опционально — рендерится только вместе с обработчиком паузы):
   // подпись поля, состояние тумблера (вкл / выкл) и строка-пояснение
   pauseGame?: string

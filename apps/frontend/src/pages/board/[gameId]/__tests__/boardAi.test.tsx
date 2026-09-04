@@ -230,13 +230,16 @@ describe('the row that takes a Release out of the discard (ai-inside)', () => {
   })
 })
 
-// THE PANEL THAT ANSWERS GIT CHERRY-PICK'S OWN PICK (regression). Cherry-pick
+// THE GRID THAT ANSWERS GIT CHERRY-PICK'S OWN PICK (regression). Cherry-pick
 // (`operation-git-cherry-pick`) raises the same `pickFromDiscard` kind Inside
 // does, but over the whole discard rather than its releases, and under sudo
-// takes two — a shape `_useInsideStaging`'s row was never built for. This is
-// the missing case Task 11 shipped without: both cards were routed onto the
-// one surface built for Inside alone.
-describe("the panel that answers Git Cherry-pick's own pick", () => {
+// takes two — a shape `_useInsideStaging`'s row was never built for. Task 11
+// shipped without a case for it (both cards fell onto the one surface built
+// for Inside alone); the shared panel covered the gap until `_useCherryPick
+// Staging` (#108) gave Cherry-pick a grid of its own — see
+// `boardCherryPick.test.tsx` for that grid's own behavioural coverage
+// (selection, sudo roles, confirm).
+describe("the grid that answers Git Cherry-pick's own pick", () => {
   const cherryPending = (options: { uid: string; id: string }[], picks: 1 | 2 = 1) => ({
     kind: 'pickFromDiscard' as const,
     player: 'you',
@@ -245,7 +248,7 @@ describe("the panel that answers Git Cherry-pick's own pick", () => {
     source: 'operation-git-cherry-pick',
   })
 
-  it('offers the shared panel over any discard card, and not the Inside row', () => {
+  it('offers its own grid over any discard card, and not the Inside row or the shared panel', () => {
     const base = makeBoardProps()
     render(
       <Board
@@ -260,7 +263,8 @@ describe("the panel that answers Git Cherry-pick's own pick", () => {
         })}
       />,
     )
-    expect(screen.getByTestId('pending-prompt')).not.toBeNull()
+    expect(screen.getByTestId('board-cherry-grid')).not.toBeNull()
+    expect(screen.queryByTestId('pending-prompt')).toBeNull()
     expect(screen.queryByTestId('board-inside-row')).toBeNull()
   })
 
