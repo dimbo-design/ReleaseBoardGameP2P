@@ -264,4 +264,32 @@ describe('System Upgrade', () => {
     })
     expect(events.map((e) => e.type)).toEqual(['rejected'])
   })
+
+  it('refuses a pick while a seat still owes', () => {
+    // Only p2 has answered — p3 is still on the roster and the phase has not
+    // flipped to 'picking' yet. p2's card is already sitting in `thrown`, so a
+    // dropped phase guard would find it there and let the actor jump the
+    // queue; the phase check is the only thing standing in the way.
+    const s = reduce(seats({ p1: [UPGRADE, SUDO], p2: [card('b')], p3: [card('c')] }), {
+      type: 'PLAY',
+      player: 'p1',
+      card: UPGRADE.uid,
+      combo: SUDO.uid,
+      at: 1,
+    }).state
+    const stillOwed = reduce(s, {
+      type: 'RESOLVE',
+      player: 'p2',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#b' },
+      at: 2,
+    }).state
+    const { state: next, events } = reduce(stillOwed, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: { kind: 'upgradeTake', card: 'attack-bug#b' },
+      at: 3,
+    })
+    expect(next).toBe(stillOwed)
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+  })
 })
