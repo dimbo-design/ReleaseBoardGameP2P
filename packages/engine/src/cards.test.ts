@@ -29,11 +29,8 @@ it('treats every release attack as a supported attack card', () => {
   expect(RELEASE_ATTACKS.has('attack-ddos')).toBe(false)
 })
 
-it('omits the deferred cards', () => {
-  // Git Branch and Git Merge left this list with #61 slice B, Git Rebase with
-  // #108. System Upgrade needs a pending owed to several players at once and is
-  // still ahead.
-  expect(rulesFor('operation-system-upgrade')).toBeUndefined()
+it('implements System Upgrade as a sudo-capable operation', () => {
+  expect(rulesFor('operation-system-upgrade')).toEqual({ kind: 'operation', sudo: true })
 })
 
 it('implements Git Cherry-pick as a sudo-capable operation', () => {

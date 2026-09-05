@@ -240,9 +240,22 @@ it('never sends a peer a card identity it is not entitled to', () => {
       // elsewhere in the payload. Walking the parsed payload and comparing
       // the exact string values is what a genuine substring collision cannot
       // fool — do not revert this to `wire.includes(uid)`.
+      //
+      // One deck card may legitimately be on this wire: Git Rebase's private
+      // look at the top of a pile (#108). The rules give those cards to the
+      // player using it — "не показывая другим" — so `pendingView` puts them
+      // in that one viewer's projection and nobody else's, and they are still
+      // in `decks.main` while the decision is open. Excused only for the
+      // viewer this SYNC is addressed to, and only the uids their own pending
+      // offers; every other card in every other SYNC stays forbidden.
       const onWire = collectStringValues(outgoing.message.payload)
+      const ownReorder =
+        state.pending?.kind === 'reorderTop' && state.pending.player === viewer.playerId
+          ? new Set(state.pending.piles.flatMap((e) => e.cards.map((c) => c.uid)))
+          : new Set<string>()
       const hidden = [...state.decks.main.flat(), ...state.decks.events]
       for (const uid of hidden.map((c) => c.uid)) {
+        if (ownReorder.has(uid)) continue
         expect(onWire.has(uid)).toBe(false)
       }
 

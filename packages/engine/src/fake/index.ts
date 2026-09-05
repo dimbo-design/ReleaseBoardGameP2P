@@ -9,9 +9,9 @@ export { botAction, runUntilIdle } from './bots'
 // keeper and the reducer cannot disagree about when a turn may end.
 export { drawObligationMet, TURN_ACTION_MS } from './core'
 
-// Quantities mirror apps/ui/src/cards/catalogue.ts. Only the ids the fake
-// implements appear — System Upgrade is deferred per the design, and
-// createGame filters anything unsupported anyway.
+// Quantities mirror apps/ui/src/cards/catalogue.ts. Every id the fake
+// implements appears — nothing is deferred any more — and createGame filters
+// anything unsupported anyway.
 export const FAKE_DECK: DeckEntry[] = [
   { id: 'release-frontend', qty: 4 },
   { id: 'release-backend', qty: 4 },
@@ -38,6 +38,7 @@ export const FAKE_DECK: DeckEntry[] = [
   { id: 'trigger-ai', qty: 12 },
   { id: 'operation-git-cherry-pick', qty: 3 },
   { id: 'operation-git-rebase', qty: 3 },
+  { id: 'operation-system-upgrade', qty: 2 },
 ]
 
 export const FAKE_EVENTS: DeckEntry[] = [

@@ -169,6 +169,65 @@ export type Pending =
       piles: { pile: number; cards: CardInstance[] }[]
       source: CardId
     }
+  // System Upgrade — the first pending owed to SEVERAL seats at once. It
+  // carries no `player`, deliberately: every other variant has one, so the
+  // union-wide reads compile today, and dropping it here makes the compiler
+  // enumerate each place that must now decide whether it means the actor, the
+  // seats still owing, or something else. `pendingOwes` below is the answer
+  // most of them want.
+  //
+  // `thrown` holds the cards face up at the centre — out of every hand and in
+  // no pile, the same mid-air state a `defend`'s attack card is in, and it must
+  // be counted by conformance's census for the same reason.
+  | {
+      kind: 'systemUpgrade'
+      actor: PlayerId
+      // Drains as each answers. Never the actor, never an eliminated seat,
+      // never an empty-handed one (rules decisions 2026-09-04 answer 3).
+      owed: PlayerId[]
+      thrown: { player: PlayerId; card: CardInstance }[]
+      sudo: boolean
+      // 'picking' is reachable only under sudo and only with something thrown.
+      phase: 'discarding' | 'picking'
+      source: CardId
+    }
+
+// The part of a pending that says whose move it is — the only part the two
+// predicates below read. Declared structurally rather than as `Pending`, so
+// the same two answers serve a projected `PendingView` (fake/bots.ts drives
+// off the projection, never off GameState) without `state.ts` having to import
+// `view.ts` back and make the pair circular. Both unions are assignable to it
+// because the projection mirrors the variant field for field.
+export type PendingOwnership =
+  | {
+      kind: 'systemUpgrade'
+      actor: PlayerId
+      owed: readonly PlayerId[]
+      phase: 'discarding' | 'picking'
+    }
+  | { kind: Exclude<Pending['kind'], 'systemUpgrade'>; player: PlayerId }
+
+// Who a pending is waiting on. Every variant but `systemUpgrade` waits on one
+// seat; that one waits on its roster while it is discarding, and on the actor
+// once it is picking. One predicate, so the keeper, the bot and the board
+// cannot disagree about whose move it is.
+export function pendingOwes(
+  pending: PendingOwnership | null | undefined,
+  player: PlayerId,
+): boolean {
+  if (!pending) return false
+  if (pending.kind !== 'systemUpgrade') return pending.player === player
+  return pending.phase === 'picking' ? pending.actor === player : pending.owed.includes(player)
+}
+
+// The seat a headless driver should act as next. Undefined when nothing is
+// pending, so callers fall back to the player on turn — which is what both of
+// them did before a pending could owe more than one seat.
+export function seatOwing(pending: PendingOwnership | null | undefined): PlayerId | undefined {
+  if (!pending) return undefined
+  if (pending.kind !== 'systemUpgrade') return pending.player
+  return pending.phase === 'picking' ? pending.actor : pending.owed[0]
+}
 
 export interface GameState {
   gameId: string

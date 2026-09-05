@@ -28,6 +28,7 @@ import type { ReleaseSlots } from '@/table/ReleaseZone/ReleaseZone'
 import Seat from '@/table/Seat'
 import TurnDock from '@/table/TurnDock/TurnDock'
 import { deriveDock } from './dock'
+import { pendingOwesSelf } from './intents'
 import PendingPrompt from './PendingPrompt'
 import { PILE_WIDTH } from './piles'
 import styles from './Table.module.css'
@@ -410,8 +411,13 @@ export default function Table({
         </div>
 
         {/* the engine is waiting on a decision from you — a pending owed to you
-            always renders, regardless of whose turn the projection says it is */}
-        {state.pending?.player === state.selfId && (
+            always renders, regardless of whose turn the projection says it is.
+            "Owed to you" through `pendingOwesSelf`, because a `systemUpgrade`
+            is owed to several seats at once: every seat on its roster sees the
+            panel while it is discarding, and the actor sees it once it is
+            picking — a comparison against one `player` could show it to at
+            most one of them */}
+        {state.pending && pendingOwesSelf(state.pending, state.selfId) && (
           <PendingPrompt
             pending={state.pending}
             hand={you.hand}

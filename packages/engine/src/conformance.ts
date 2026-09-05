@@ -4,7 +4,7 @@ import type { DeckEntry, Engine, GameConfig } from './engine'
 import type { Event } from './events'
 import { botAction } from './fake/bots'
 import { randomAt } from './rng'
-import type { GameState, PlayerId, ReleaseSlot, Setup } from './state'
+import { type GameState, type PlayerId, type ReleaseSlot, type Setup, seatOwing } from './state'
 
 export interface ConformanceOptions {
   deck: DeckEntry[]
@@ -403,6 +403,12 @@ function realCardUids(state: GameState): string[] {
   if (state.pending?.kind === 'neutralize503' && state.pending.card) {
     uids.push(state.pending.card.uid)
   }
+  // System Upgrade's thrown cards, face up at the centre while the pending
+  // drains — out of every hand and in no pile yet, the same mid-air state as
+  // the two above and counted for the same reason.
+  if (state.pending?.kind === 'systemUpgrade') {
+    for (const t of state.pending.thrown) uids.push(t.card.uid)
+  }
   return uids.sort()
 }
 
@@ -540,7 +546,11 @@ export function describeEngine(
         const engine = make()
         let state = engine.createGame(configFor(options, 3))
         let sawOpen = false
-        for (let n = 0; n < 3200; n += 1) {
+        // 4800, not 3200: #108 added System Upgrade to FAKE_DECK and seed 3's
+        // game now ends at step 3945 (measured, not assumed — see 'ends
+        // exactly once'). Budget raised rather than seed swept, so the run is
+        // the same trajectory this test has always walked, only far enough.
+        for (let n = 0; n < 4800; n += 1) {
           const view = engine.project(state, state.seating[0])
           if (state.over) {
             expect(view.tally).not.toBeNull()
@@ -552,8 +562,8 @@ export function describeEngine(
           state = engine.reduce(state, fuzzAction(state, 3, n)).state
         }
         expect(sawOpen).toBe(true)
-        // Seed 3 reaches gameOver around step 2592 (see 'ends exactly once'),
-        // so the non-null half above is genuinely exercised.
+        // Seed 3 reaches gameOver at step 3945 (see 'ends exactly once'), so
+        // the non-null half above is genuinely exercised.
         expect(state.over).not.toBeNull()
       })
     })
@@ -749,8 +759,25 @@ export function describeEngine(
                 expect(serialized, `${viewer} can see ${other}'s ${c.uid}`).not.toContain(c.uid)
               }
             }
+            // The one deck card a viewer may legitimately hold in their own
+            // view: Git Rebase's private look at the top of a pile. The rules
+            // hand those cards to the player using it — "не показывая другим"
+            // — and pendingView gates them behind `mine`, so they appear in
+            // exactly one projection and stay forbidden in every other. Only
+            // this viewer's own `reorderTop` is excused, and only the uids it
+            // actually offers; the deck is otherwise still opaque to everyone.
+            //
+            // This carve-out was owed from the moment `reorderTop` existed
+            // (#108, Task B2) — no fixed-seed run had happened to reach one
+            // inside 150 steps until adding System Upgrade to FAKE_DECK moved
+            // the trajectory onto one.
+            const ownReorder =
+              state.pending?.kind === 'reorderTop' && state.pending.player === viewer
+                ? new Set(state.pending.piles.flatMap((e) => e.cards.map((c) => c.uid)))
+                : new Set<string>()
             for (const pile of state.decks.main) {
               for (const c of pile) {
+                if (ownReorder.has(c.uid)) continue
                 expect(serialized, `${viewer} can see deck card ${c.uid}`).not.toContain(c.uid)
               }
             }
@@ -868,18 +895,25 @@ export function describeEngine(
         // Seed 7, not 6267: #108 added Git Rebase to FAKE_DECK, the same class
         // of shift, and 6267 stopped shipping two releases in one turn under
         // 'fast'. Swept again against the current deck.
+        //
+        // Seed 7 kept when #108 then added System Upgrade: its 'fast' run
+        // still ships two releases in one turn, only later — at step 1999
+        // (measured), past the old 600-step budget. Budget raised rather than
+        // the seed swept a third time, which keeps the trajectory this test
+        // has been reading and gives the `base` half 1800 more steps of the
+        // cap actually holding.
         const engine = make()
         const fastSetup: Setup = { ...BASE_SETUP, releases: 'fast' }
 
         let base = engine.createGame(configFor(options, 7))
-        for (let n = 0; n < 600; n += 1) {
+        for (let n = 0; n < 2400; n += 1) {
           expect(base.turn.releasesPlayed).toBeLessThanOrEqual(1)
           base = engine.reduce(base, fuzzAction(base, 7, n)).state
         }
 
         let fast = engine.createGame(configFor(options, 7, fastSetup))
         let sawMoreThanOne = false
-        for (let n = 0; n < 600; n += 1) {
+        for (let n = 0; n < 2400; n += 1) {
           if (fast.turn.releasesPlayed > 1) sawMoreThanOne = true
           fast = engine.reduce(fast, fuzzAction(fast, 7, n)).state
         }
@@ -898,26 +932,40 @@ export function describeEngine(
         const handLimit = 5
         let state = engine.createGame(configFor(options, 6363, MEMORY_SETUP))
         let previousIndex = state.turn.index
+        // Whose turn the boundary below ends — the only seat the rule clamps.
+        let previousPlayer = state.turn.player
         let sawMidTurnOverflow = false
+        let sawBoundary = false
         for (let n = 0; n < 900; n += 1) {
           state = engine.reduce(state, fuzzAction(state, 6363, n)).state
           for (const id of state.seating) {
             if (state.players[id].hand.length > handLimit) sawMidTurnOverflow = true
           }
-          // Checked only at a turn boundary: mid-turn a hand may legitimately
-          // sit over the limit until the discard prompt resolves (that is
-          // exactly the "per the mode axis, at the end of a turn" scope of this
-          // rule, not "at all times").
+          // Checked only at a turn boundary, and only for the seat whose turn
+          // just ended: mid-turn a hand may legitimately sit over the limit
+          // until the discard prompt resolves (that is exactly the "per the
+          // mode axis, at the end of a turn" scope of this rule, not "at all
+          // times"). The scope is per-seat as well as per-moment — «в конце
+          // своего хода» — and `endTurn` (fake/core.ts) clamps `turn.player`
+          // and nobody else. A seat pushed over the limit during SOMEBODY
+          // ELSE's turn (a Rollback handing their attack card back, say) is
+          // legitimately over it until their own turn ends, so asserting over
+          // every seat at every boundary asserted something the rule never
+          // said. Latent since this test was written; the deck shift from
+          // adding System Upgrade (#108) was what first produced the case.
           if (state.turn.index !== previousIndex) {
+            sawBoundary = true
+            const ended = previousPlayer
             previousIndex = state.turn.index
-            for (const id of state.seating) {
-              expect(
-                state.players[id].hand.length,
-                `${id}'s hand is still over the limit at a turn boundary`,
-              ).toBeLessThanOrEqual(handLimit)
-            }
+            previousPlayer = state.turn.player
+            expect(
+              state.players[ended].hand.length,
+              `${ended}'s hand is still over the limit at the end of their own turn`,
+            ).toBeLessThanOrEqual(handLimit)
           }
         }
+        // Otherwise the clamp above was never reached at all.
+        expect(sawBoundary).toBe(true)
         // Otherwise this test could pass merely because the limit was never
         // exceeded at all, proving nothing about *when* it gets enforced.
         expect(sawMidTurnOverflow).toBe(true)
@@ -927,8 +975,18 @@ export function describeEngine(
         // A mixed driver: `forceCodeReviewCombo` overrides the plain fuzz
         // stream (which never attaches a combo) whenever a protected release is
         // currently playable, so one reliably gets created within the run.
+        //
+        // Seed 2, not 6464: #108 added System Upgrade to FAKE_DECK, the same
+        // class of shift the sweeps below record, and 6464 stopped creating a
+        // protected release at all — not within budget, but at all: raising the
+        // budget to 20000 steps left `sawProtectedRelease` false, so this one
+        // genuinely needed a new seed rather than more of the old one. Swept
+        // against the current deck, and the negative half was checked across
+        // seeds 1-120 before picking: no seed in that range ever opened a
+        // window on a protected release, so the property this test is actually
+        // about is not being dodged by the choice.
         const engine = make()
-        const result = driveProtectedReleaseAndDdos(engine, options, 6464, 1500)
+        const result = driveProtectedReleaseAndDdos(engine, options, 2, 1500)
         expect(
           result.sawProtectedRelease,
           'never created a protected release to test the property against',
@@ -964,11 +1022,18 @@ export function describeEngine(
         // Seed 1, not 55: #108 added Git Rebase to FAKE_DECK, the same class of
         // shift again, and 55 stopped reaching a round-2+ defended window
         // within budget. Swept again against the current deck.
+        //
+        // Seed 1 kept when #108 then added System Upgrade: the round-2+ window
+        // still arrives, at step 3136 (measured) instead of 76. Budget raised
+        // to 3600 rather than the seed swept a fourth time — the per-window
+        // deadline assertion inside the loop runs on every window the stream
+        // opens, so a longer run of the same trajectory checks strictly more
+        // than a shorter run of a new one.
         const engine = make()
         let state = engine.createGame(configFor(options, 1))
         let sawRound1 = false
         let sawLaterRound = false
-        for (let n = 0; n < 600 && !state.over; n += 1) {
+        for (let n = 0; n < 3600 && !state.over; n += 1) {
           const r = engine.reduce(state, fuzzAction(state, 6, n))
           for (const e of r.events) {
             if (e.type !== 'windowOpened') continue
@@ -994,7 +1059,7 @@ export function describeEngine(
         let state = engine.createGame(configFor(options, 6767))
         const at = 1
         for (let i = 0; i < 200 && !state.window && !state.over; i += 1) {
-          const seat = state.pending?.player ?? state.turn.player
+          const seat = seatOwing(state.pending) ?? state.turn.player
           const action = botAction(engine, state, seat, at)
           if (!action) break
           state = engine.reduce(state, action).state
@@ -1047,8 +1112,16 @@ export function describeEngine(
         // class of shift again, and 23 stopped reaching a protected release
         // inside the budget. Swept again against the current deck; the negative
         // half still held throughout.
+        //
+        // Seed 4 now, not 2: #108 then added System Upgrade, and under seed 2
+        // the forced DDoS never lands on a protected release any more — not
+        // within budget but at all (20000 steps left `sawDdosOnProtectedRelease`
+        // false), so more of the same run could not have helped. Swept again;
+        // `sawNonDdosZoneTarget`, the negative half and the actual property
+        // here, was false for every seed 1-120 in the sweep, so the choice is
+        // not what makes it pass.
         const engine = make()
-        const result = driveProtectedReleaseAndDdos(engine, options, 2, 1500)
+        const result = driveProtectedReleaseAndDdos(engine, options, 4, 1500)
         expect(
           result.sawNonDdosZoneTarget,
           'a non-DDoS attack was offered a release or Monitoring target',
@@ -1060,17 +1133,17 @@ export function describeEngine(
       it('ends exactly once and then accepts nothing', () => {
         // Fuzz-driven: reaching gameOver at all, then continuing to throw
         // actions at the ended game, is exactly what the stream already does
-        // for free over a long enough run. Git Rebase opening a reorderTop
-        // decision (now answered by resolvePendingAction) consumes steps that
-        // used to go elsewhere, so under this seed the game now ends around
-        // step 2592 (measured directly, not assumed) instead of the old 1821.
-        // 3200 steps leaves the same proportion of headroom the old budget
-        // did, so the next card added to the deck doesn't immediately
-        // re-break this the way Git Rebase just did.
+        // for free over a long enough run. Every card added to FAKE_DECK moves
+        // where that happens, because a longer deck consumes a different amount
+        // of the shuffle's RNG stream: Git Rebase (#108) pushed this seed's end
+        // from step 1821 to 2592, and System Upgrade (#108, the same issue)
+        // pushed it on to 3945 — each measured directly, not assumed. 4800
+        // keeps roughly the proportion of headroom the old budgets did, so the
+        // next card added does not immediately re-break this.
         const engine = make()
         let state = engine.createGame(configFor(options, 3))
         let overAt = -1
-        for (let n = 0; n < 3200; n += 1) {
+        for (let n = 0; n < 4800; n += 1) {
           const r = engine.reduce(state, fuzzAction(state, 3, n))
           if (r.state.over && overAt < 0) overAt = n
           if (overAt >= 0 && n > overAt) {

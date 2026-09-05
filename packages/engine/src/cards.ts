@@ -22,8 +22,9 @@ export interface CardRules {
   slot?: ReleaseSlot
 }
 
-// The ids the fake implements. Only System Upgrade is still absent — it needs
-// a pending owed to several players at once, deferred per the design.
+// Every id the fake implements. Nothing is deferred any more: System Upgrade
+// was the last one out, and it arrived with the first pending owed to several
+// players at once (state.ts's `systemUpgrade`).
 export const CARD_RULES: Record<CardId, CardRules> = {
   'release-frontend': { kind: 'release', slot: 'frontend' },
   'release-backend': { kind: 'release', slot: 'backend' },
@@ -52,6 +53,7 @@ export const CARD_RULES: Record<CardId, CardRules> = {
   'operation-git-branch': { kind: 'operation', sudo: true },
   'operation-git-merge': { kind: 'operation', sudo: true },
   'operation-git-rebase': { kind: 'operation', sudo: true },
+  'operation-system-upgrade': { kind: 'operation', sudo: true },
 
   'trigger-error-503': { kind: 'trigger' },
   'trigger-ai': { kind: 'trigger' },

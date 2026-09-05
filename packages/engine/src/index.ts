@@ -19,6 +19,7 @@ export type {
   GameState,
   NeutralizeMethod,
   Pending,
+  PendingOwnership,
   PlayerId,
   PlayerState,
   ReactionWindow,
@@ -26,6 +27,10 @@ export type {
   ReleaseSlot,
   Setup,
 } from './state'
+// Whose move it is, asked one way by everyone — the board and the keeper get
+// the same answer the reducer gives itself, so a pending owed to several seats
+// cannot be read differently on either side of the wire.
+export { pendingOwes, seatOwing } from './state'
 export type { PlayerTally, Tallies } from './tally'
 export { emptyTally, foldTally, seedTally } from './tally'
 export type {

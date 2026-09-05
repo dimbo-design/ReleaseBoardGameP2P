@@ -33,6 +33,7 @@ const copy: PendingPromptCopy = {
   handLimit: { prompt: 'Discard down to the hand limit', action: 'Discard' },
   pickFromDiscard: { prompt: 'Pick a card from the discard', action: 'Pick' },
   reorderTop: { prompt: 'Reorder the top of a pile', action: 'Reorder' },
+  systemUpgrade: { prompt: 'Throw a card into the upgrade', action: 'Throw' },
 }
 
 const defendPending: TablePending = {

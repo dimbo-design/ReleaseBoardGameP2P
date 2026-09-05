@@ -32,6 +32,7 @@ import {
   PauseGame,
   PendingPrompt,
   Pile,
+  pendingOwesSelf,
   pileWidthFor,
   Reconnect,
   type ReleaseSlots,
@@ -1719,7 +1720,13 @@ export default function Board({
           flying to or from the cover slot (a carrier at `--z-flight`, 250)
           vanished the instant it landed. What only the panel could do —
           decline — is the board's own affordance now, in the ask below. */}
-      {state.pending?.player === state.selfId &&
+      {state.pending &&
+        // "owed to you" is a predicate now, not a comparison: a `systemUpgrade`
+        // is owed to every seat on its roster at once while it is discarding,
+        // and to the actor alone once it is picking — `pendingOwesSelf` is the
+        // kit's one answer to that question, shared with the dock and Table so
+        // the panel and the ring cannot disagree about whose move it is.
+        pendingOwesSelf(state.pending, state.selfId) &&
         state.pending.kind !== 'discardForRelease' &&
         state.pending.kind !== 'handLimit' &&
         state.pending.kind !== 'defend' &&

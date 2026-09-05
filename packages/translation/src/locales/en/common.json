@@ -266,6 +266,10 @@
     "reorderTop": {
       "prompt": "look at the top three cards and set their order",
       "action": "reorder"
+    },
+    "systemUpgrade": {
+      "prompt": "system upgrade — discard a card from your hand",
+      "action": "discard"
     }
   },
   "window": {

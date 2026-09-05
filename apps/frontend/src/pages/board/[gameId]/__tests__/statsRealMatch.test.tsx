@@ -64,15 +64,17 @@ function playedOut(): GameState {
   const engine = createFakeEngine()
   let state = engine.createGame({
     gameId: 'real',
-    // Seed 153, not 3: task B1 (#108) added Git Rebase to FAKE_DECK, which
-    // shifts createGame's shuffle the same way every earlier deck-size change
+    // Seed 2, not 153 (and 153 was not 3): every card added to FAKE_DECK
+    // shifts createGame's shuffle, the same way every earlier deck-size change
     // has elsewhere in this codebase (packages/engine/src/conformance.ts
-    // carries the same class of comment at each of its own swept seeds) —
-    // seed 3's game no longer reaches `over` within this helper's 40-round
-    // budget. Swept for the same match shape the tests below still need: a
-    // finished game, an err503 tie, a sole attackedInto leader, and nobody
-    // scoring a DDoS.
-    seed: 153,
+    // carries the same class of comment at each of its own swept seeds). Git
+    // Rebase (#108) took seed 3's game past this helper's 40-round budget
+    // without finishing; System Upgrade (#108) then broke seed 153's err503
+    // tie — p1 turned up two 503s to p2's one, so the tie the test is about
+    // stopped existing. Swept again for the same match shape the tests below
+    // need, all four conditions together: a finished game, an err503 tie, a
+    // sole attackedInto leader, and nobody scoring a DDoS.
+    seed: 2,
     players: SEATS.map((s) => ({ id: s.playerId, name: s.name })),
     setup: {
       handLimit: 'base',
@@ -97,7 +99,7 @@ function playedOut(): GameState {
   }
 
   if (!state.over) {
-    throw new Error('seed 3 no longer plays out to a winner — pick a new seed and say which')
+    throw new Error('this seed no longer plays out to a winner — pick a new one and say which')
   }
   return state
 }

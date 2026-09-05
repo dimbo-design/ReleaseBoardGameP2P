@@ -1,4 +1,5 @@
 import type { Engine, GameConfig } from '../engine'
+import { seatOwing } from '../state'
 import { botAction, runUntilIdle } from './bots'
 import { createFakeEngine, FAKE_DECK, FAKE_EVENTS } from './index'
 
@@ -33,7 +34,7 @@ it('offers nothing to a seat with no outstanding action', () => {
 it('only ever proposes an action the engine accepts', () => {
   let state = engine.createGame(config())
   for (let n = 0; n < 400 && !state.over; n += 1) {
-    const seat = state.pending?.player ?? state.turn.player
+    const seat = seatOwing(state.pending) ?? state.turn.player
     const action = botAction(engine, state, seat, 1000 + n * 100)
     if (!action) break
     const r = engine.reduce(state, action)
@@ -54,7 +55,7 @@ it('drives the table back to the human without hanging', () => {
 it('reaches a finished game when every seat is driven', () => {
   let state = engine.createGame(config())
   for (let n = 0; n < 2000 && !state.over; n += 1) {
-    const seat = state.pending?.player ?? state.turn.player
+    const seat = seatOwing(state.pending) ?? state.turn.player
     const action = botAction(engine, state, seat, 1000 + n * 100)
     if (!action) break
     state = engine.reduce(state, action).state

@@ -574,7 +574,13 @@ it('lets a stalled defence resolve even after its window has expired', () => {
   // seed 1 this fixture's window no longer closes on the release-scope defend
   // path within this test's own trace. Swept against the current deck; every
   // other call site keeps the shared default, which still fits their needs.
-  const { session } = twoPlayerSession(4)
+  //
+  // Seed 2 now, not 4: #108 then added System Upgrade, the same class of shift
+  // again, and under seed 4 the responder reaches the open window holding no
+  // release attack at all — the fixture's premise, not the property. Swept
+  // again; 34 of the first 60 seeds satisfy it, so this is an abundant
+  // condition the shuffle happens to place, not a narrow one being hunted for.
+  const { session } = twoPlayerSession(2)
   const opened = openWindowFixture(session)
   const window = opened.state.window
   if (!window) throw new Error('fixture failed to open a window')
@@ -631,7 +637,11 @@ it('never closes a live reaction window on an absent seat`s behalf', () => {
 })
 
 it('leaves a stalled defence for a disconnected seat to resolve on reconnection', () => {
-  const { session } = twoPlayerSession()
+  // Seed 2, not the shared helper's default 1: this fixture needs the
+  // responder to reach the open window holding a release attack to throw, and
+  // #108's addition of System Upgrade to FAKE_DECK moved seed 1's shuffle off
+  // that. Same sweep, same seed as the sibling test above.
+  const { session } = twoPlayerSession(2)
   const opened = openWindowFixture(session)
   const window = opened.state.window
   if (!window) throw new Error('fixture failed to open a window')
