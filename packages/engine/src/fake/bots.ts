@@ -89,6 +89,15 @@ export function botAction(
           at,
         }
       }
+      case 'reorderTop': {
+        // A bot has no opinion about deck order; leaving it alone is a legal
+        // answer and keeps the seat from stalling the table.
+        const order = pending.piles.map((e) => ({
+          pile: e.pile,
+          cards: e.cards.map((c) => c.uid),
+        }))
+        return { type: 'RESOLVE', player: me, choice: { kind: 'reorderTop', order }, at }
+      }
       default:
         return null
     }

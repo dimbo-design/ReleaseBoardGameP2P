@@ -174,6 +174,15 @@ function resolvePendingAction(state: GameState, n: number): Action | null {
         at,
       }
     }
+    case 'reorderTop': {
+      // The identity permutation is always valid, which is what makes this a
+      // progress-only answer rather than a strategy.
+      const order = pending.piles.map((e) => ({
+        pile: e.pile,
+        cards: e.cards.map((c) => c.uid),
+      }))
+      return { type: 'RESOLVE', player: pending.player, choice: { kind: 'reorderTop', order }, at }
+    }
     default:
       return null
   }
@@ -531,7 +540,7 @@ export function describeEngine(
         const engine = make()
         let state = engine.createGame(configFor(options, 3))
         let sawOpen = false
-        for (let n = 0; n < 2200; n += 1) {
+        for (let n = 0; n < 3200; n += 1) {
           const view = engine.project(state, state.seating[0])
           if (state.over) {
             expect(view.tally).not.toBeNull()
@@ -543,7 +552,7 @@ export function describeEngine(
           state = engine.reduce(state, fuzzAction(state, 3, n)).state
         }
         expect(sawOpen).toBe(true)
-        // Seed 3 reaches gameOver around step 1821 (see 'ends exactly once'),
+        // Seed 3 reaches gameOver around step 2592 (see 'ends exactly once'),
         // so the non-null half above is genuinely exercised.
         expect(state.over).not.toBeNull()
       })
@@ -1051,13 +1060,17 @@ export function describeEngine(
       it('ends exactly once and then accepts nothing', () => {
         // Fuzz-driven: reaching gameOver at all, then continuing to throw
         // actions at the ended game, is exactly what the stream already does
-        // for free over a long enough run. Under this seed the game ends
-        // around step 1821; 2200 steps leaves margin to also exercise the
-        // "accepts nothing" half afterwards.
+        // for free over a long enough run. Git Rebase opening a reorderTop
+        // decision (now answered by resolvePendingAction) consumes steps that
+        // used to go elsewhere, so under this seed the game now ends around
+        // step 2592 (measured directly, not assumed) instead of the old 1821.
+        // 3200 steps leaves the same proportion of headroom the old budget
+        // did, so the next card added to the deck doesn't immediately
+        // re-break this the way Git Rebase just did.
         const engine = make()
         let state = engine.createGame(configFor(options, 3))
         let overAt = -1
-        for (let n = 0; n < 2200; n += 1) {
+        for (let n = 0; n < 3200; n += 1) {
           const r = engine.reduce(state, fuzzAction(state, 3, n))
           if (r.state.over && overAt < 0) overAt = n
           if (overAt >= 0 && n > overAt) {
