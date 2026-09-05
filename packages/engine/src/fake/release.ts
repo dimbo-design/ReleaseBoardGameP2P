@@ -16,6 +16,7 @@ import { openHandAttack, resolveDdos } from './handAttacks'
 import { mergePiles, splitPile } from './piles'
 import { playableFor } from './project'
 import { openReorderTop } from './rebase'
+import { openSystemUpgrade } from './upgrade'
 import { openWindow } from './window'
 
 // Structural target equality — targets are small value objects, so a field-wise
@@ -153,6 +154,13 @@ export function onPlay(state: GameState, action: Action & { type: 'PLAY' }): Red
       const chosen = action.target?.kind === 'pile' ? action.target.pile : 0
       return {
         state: openReorderTop(withoutCards, log, action.player, card, sudoCombo, chosen),
+        events: log.events,
+      }
+    }
+
+    if (card.id === 'operation-system-upgrade') {
+      return {
+        state: openSystemUpgrade(withoutCards, log, action.player, card, sudoCombo),
         events: log.events,
       }
     }
