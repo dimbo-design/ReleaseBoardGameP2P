@@ -200,4 +200,68 @@ describe('System Upgrade', () => {
     })
     expect(next.pending).toMatchObject({ phase: 'picking', owed: [], actor: 'p1' })
   })
+
+  // The three reductions C3's sudo test already drives, as a named state the
+  // pick tests share. Local to this file: it is a fixture, not machinery.
+  const sudoUpToPicking = (): GameState => {
+    let s = reduce(seats({ p1: [UPGRADE, SUDO], p2: [card('b')], p3: [card('c')] }), {
+      type: 'PLAY',
+      player: 'p1',
+      card: UPGRADE.uid,
+      combo: SUDO.uid,
+      at: 1,
+    }).state
+    s = reduce(s, {
+      type: 'RESOLVE',
+      player: 'p2',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#b' },
+      at: 2,
+    }).state
+    return reduce(s, {
+      type: 'RESOLVE',
+      player: 'p3',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#c' },
+      at: 3,
+    }).state
+  }
+
+  it('gives the actor the card they picked and discards the rest', () => {
+    const picking = sudoUpToPicking()
+    const { state: next, events } = reduce(picking, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: { kind: 'upgradeTake', card: 'attack-bug#c' },
+      at: 4,
+    })
+    expect(next.players.p1.hand.map((c) => c.uid)).toContain('attack-bug#c')
+    expect(next.decks.discard.map((c) => c.uid)).toContain('attack-bug#b')
+    expect(next.decks.discard.map((c) => c.uid)).not.toContain('attack-bug#c')
+    expect(next.pending).toBeNull()
+    expect(events.map((e) => e.type)).toEqual(['upgradeTaken', 'discarded'])
+  })
+
+  it('refuses a card that was not thrown this time', () => {
+    const picking = sudoUpToPicking()
+    const { state: next, events } = reduce(picking, {
+      type: 'RESOLVE',
+      player: 'p1',
+      // In the discard, but not in `thrown` — "выбор из того, что сброшено в
+      // этот раз, а не из всего сброса".
+      choice: { kind: 'upgradeTake', card: 'operation-system-upgrade#0' },
+      at: 4,
+    })
+    expect(next).toBe(picking)
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+  })
+
+  it('refuses a take from anyone but the actor', () => {
+    const picking = sudoUpToPicking()
+    const { events } = reduce(picking, {
+      type: 'RESOLVE',
+      player: 'p2',
+      choice: { kind: 'upgradeTake', card: 'attack-bug#c' },
+      at: 4,
+    })
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+  })
 })

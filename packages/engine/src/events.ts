@@ -49,6 +49,8 @@ export type Event = EventBase &
     // because the rules put it there face up — and because the board animates
     // each arrival as it happens rather than the whole roster at the end.
     | { type: 'upgradeThrown'; player: PlayerId; card: CardId }
+    // Sudo System Upgrade: the actor takes one of the open cards at the centre.
+    | { type: 'upgradeTaken'; player: PlayerId; card: CardId }
     // Belongs to no player: the table recycles its own discard, and the count
     // is the only detail worth showing — the cards themselves were public on
     // the way in and are secret again on the way out.

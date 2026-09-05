@@ -98,3 +98,45 @@ export function onUpgradeDiscard(
   )
   return { state: { ...banked, pending: null, eventSeq: log.seq }, events: log.events }
 }
+
+// Sudo's pick, once every seat has answered. The offer is `thrown`, never the
+// discard pile it is about to join — "выбор из того, что сброшено в этот раз,
+// а не из всего сброса". The rest of `thrown` banks to the discard in the same
+// reduction: a pending's thrown cards are touched nowhere else while it is
+// open, so this is the one and only place any of them can leave it — the pick
+// to a hand, the remainder to the discard, and nothing left behind.
+export function onUpgradeTake(state: GameState, action: Action & { type: 'RESOLVE' }): Reduction {
+  const pending = state.pending
+  if (pending?.kind !== 'systemUpgrade') return reject(state, action, 'no upgrade is pending')
+  if (pending.phase !== 'picking') return reject(state, action, 'nothing to pick yet')
+  if (pending.actor !== action.player) return reject(state, action, 'not your decision')
+  const choice = action.choice
+  if (choice.kind !== 'upgradeTake') return reject(state, action, 'wrong choice for pending')
+
+  const taken = pending.thrown.find((t) => t.card.uid === choice.card)
+  if (!taken) return reject(state, action, 'that card is not on offer')
+
+  const log = createLog(state.eventSeq)
+  log.add({ type: 'upgradeTaken', player: action.player, card: taken.card.id })
+  const rest = pending.thrown.filter((t) => t.card.uid !== choice.card)
+  for (const t of rest) {
+    log.add({ type: 'discarded', player: t.player, card: t.card.id, reason: 'effect' })
+  }
+  const banked = bankToDiscard(
+    state,
+    rest.map((t) => t.card),
+  )
+  const actor = banked.players[action.player]
+  return {
+    state: {
+      ...banked,
+      players: {
+        ...banked.players,
+        [action.player]: { ...actor, hand: [...actor.hand, taken.card] },
+      },
+      pending: null,
+      eventSeq: log.seq,
+    },
+    events: log.events,
+  }
+}
