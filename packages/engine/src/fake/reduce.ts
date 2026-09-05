@@ -25,6 +25,7 @@ import { playableFor } from './project'
 import { onReorderTop } from './rebase'
 import { onCancelRelease, onDiscardForRelease, onPlay } from './release'
 import { fireTrigger, onDecline503, onNeutralize } from './triggers'
+import { onUpgradeDiscard } from './upgrade'
 import { onPass, onUnpass, onWindowExpired } from './window'
 
 export { handLimitFor, nextSeat }
@@ -297,6 +298,8 @@ function onResolve(state: GameState, action: Action & { type: 'RESOLVE' }): Redu
       return onPickFromDiscard(state, action)
     case 'reorderTop':
       return onReorderTop(state, action)
+    case 'upgradeDiscard':
+      return onUpgradeDiscard(state, action)
     // Every Choice variant is now handled above; this default only guards
     // against a malformed choice (any `kind` string) surviving deserialization.
     default:

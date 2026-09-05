@@ -1,5 +1,7 @@
+import type { Action } from '../actions'
+import type { Reduction } from '../engine'
 import type { CardInstance, GameState, PlayerId } from '../state'
-import { bankToDiscard, type Log } from './core'
+import { bankToDiscard, createLog, type Log, reject, setHand } from './core'
 
 // System Upgrade — "все остальные игроки сбрасывают по одной карте", each for
 // themselves and simultaneously, so the pending owes a roster rather than a
@@ -36,4 +38,63 @@ export function openSystemUpgrade(
     },
     eventSeq: log.seq,
   }
+}
+
+// A seat on the roster answers. The card leaves that hand and joins `thrown`
+// on the pending — not banked yet: the rules put the thrown cards face up at
+// the centre until every seat has answered. The roster drains one seat per
+// call; the last answer either opens the sudo pick or banks everything at
+// once, so no future path can bank a card twice or leave one unbanked.
+export function onUpgradeDiscard(
+  state: GameState,
+  action: Action & { type: 'RESOLVE' },
+): Reduction {
+  const pending = state.pending
+  if (pending?.kind !== 'systemUpgrade') return reject(state, action, 'no upgrade is pending')
+  if (pending.phase !== 'discarding') return reject(state, action, 'that phase is over')
+  if (!pending.owed.includes(action.player)) return reject(state, action, 'not your decision')
+  const choice = action.choice
+  if (choice.kind !== 'upgradeDiscard') return reject(state, action, 'wrong choice for pending')
+
+  const hand = state.players[action.player].hand
+  const given = hand.find((c) => c.uid === choice.card)
+  if (!given) return reject(state, action, 'you do not hold that card')
+
+  const log = createLog(state.eventSeq)
+  log.add({ type: 'upgradeThrown', player: action.player, card: given.id })
+
+  const owed = pending.owed.filter((id) => id !== action.player)
+  const thrown = [...pending.thrown, { player: action.player, card: given }]
+  const withHand = setHand(
+    state,
+    action.player,
+    hand.filter((c) => c.uid !== choice.card),
+  )
+
+  // Still owed by somebody: hold everything at the centre and wait.
+  if (owed.length > 0) {
+    return {
+      state: { ...withHand, pending: { ...pending, owed, thrown }, eventSeq: log.seq },
+      events: log.events,
+    }
+  }
+  // The last answer. Sudo hands the actor a pick; otherwise it all goes now.
+  if (pending.sudo) {
+    return {
+      state: {
+        ...withHand,
+        pending: { ...pending, owed: [], thrown, phase: 'picking' },
+        eventSeq: log.seq,
+      },
+      events: log.events,
+    }
+  }
+  for (const t of thrown) {
+    log.add({ type: 'discarded', player: t.player, card: t.card.id, reason: 'effect' })
+  }
+  const banked = bankToDiscard(
+    withHand,
+    thrown.map((t) => t.card),
+  )
+  return { state: { ...banked, pending: null, eventSeq: log.seq }, events: log.events }
 }

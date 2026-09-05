@@ -728,6 +728,7 @@
     "turnEnded": "turn over",
     "turnStarted": "turn",
     "unpassed": "back in",
+    "upgradeThrown": "discarded to the centre",
     "windowClosed": "reaction over",
     "windowOpened": "reaction"
   }

@@ -28,10 +28,7 @@ const config: GameConfig = {
 }
 
 const UPGRADE: CardInstance = { uid: 'operation-system-upgrade#0', id: 'operation-system-upgrade' }
-// SUDO is not needed by this task's four tests (the opener only computes the
-// roster; the sudo pick is C4's work) — left out rather than kept unused,
-// since `noUnusedLocals` is on. A later task reintroduces it alongside the
-// tests that exercise it.
+const SUDO: CardInstance = { uid: 'support-sudo#0', id: 'support-sudo' }
 const card = (tag: string) => ({ uid: `attack-bug#${tag}`, id: 'attack-bug' })
 
 // Three-seat table, built on gitPiles.test.ts's `table()`. Hands come in by
@@ -110,5 +107,97 @@ describe('System Upgrade', () => {
     })
     expect(next.pending).toBeNull()
     expect(next.decks.discard.map((c) => c.id)).toContain('operation-system-upgrade')
+  })
+
+  it('takes the card out of that hand and holds it at the centre', () => {
+    const played = reduce(seats({ p1: [UPGRADE], p2: [card('b')], p3: [card('c')] }), {
+      type: 'PLAY',
+      player: 'p1',
+      card: UPGRADE.uid,
+      at: 1,
+    }).state
+    const { state: next, events } = reduce(played, {
+      type: 'RESOLVE',
+      player: 'p2',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#b' },
+      at: 2,
+    })
+    expect(next.players.p2.hand).toHaveLength(0)
+    // Held on the pending, not banked: the cards lie face up at the centre
+    // until everyone has answered.
+    expect(next.decks.discard.some((c) => c.uid === 'attack-bug#b')).toBe(false)
+    expect(next.pending).toMatchObject({ owed: ['p3'], thrown: [{ player: 'p2' }] })
+    expect(events.map((e) => e.type)).toEqual(['upgradeThrown'])
+  })
+
+  it('rejects a seat that is not on the roster', () => {
+    // p1 (the actor, never on its own roster) keeps a spare card it actually
+    // holds — 'attack-bug#a' — so a dropped `owed.includes` guard would find
+    // it in p1's own hand and let the discard through. Naming a card p1 does
+    // not hold would let the separate "you do not hold that card" guard catch
+    // it instead, and the roster check would never be exercised at all.
+    const played = reduce(seats({ p1: [UPGRADE, card('a')], p2: [card('b')], p3: [card('c')] }), {
+      type: 'PLAY',
+      player: 'p1',
+      card: UPGRADE.uid,
+      at: 1,
+    }).state
+    const { state: next, events } = reduce(played, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#a' },
+      at: 2,
+    })
+    expect(next).toBe(played)
+    expect(events.map((e) => e.type)).toEqual(['rejected'])
+  })
+
+  it('banks everything to the discard when the last seat answers, without sudo', () => {
+    let s = reduce(seats({ p1: [UPGRADE], p2: [card('b')], p3: [card('c')] }), {
+      type: 'PLAY',
+      player: 'p1',
+      card: UPGRADE.uid,
+      at: 1,
+    }).state
+    s = reduce(s, {
+      type: 'RESOLVE',
+      player: 'p2',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#b' },
+      at: 2,
+    }).state
+    const { state: next, events } = reduce(s, {
+      type: 'RESOLVE',
+      player: 'p3',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#c' },
+      at: 3,
+    })
+    expect(next.pending).toBeNull()
+    expect(next.decks.discard.map((c) => c.uid)).toEqual(
+      expect.arrayContaining(['attack-bug#b', 'attack-bug#c']),
+    )
+    expect(events.map((e) => e.type)).toEqual(['upgradeThrown', 'discarded', 'discarded'])
+  })
+
+  it('opens the pick instead of banking, under sudo', () => {
+    let s = reduce(seats({ p1: [UPGRADE, SUDO], p2: [card('b')], p3: [card('c')] }), {
+      type: 'PLAY',
+      player: 'p1',
+      card: UPGRADE.uid,
+      combo: SUDO.uid,
+      at: 1,
+    }).state
+    s = reduce(s, {
+      type: 'RESOLVE',
+      player: 'p2',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#b' },
+      at: 2,
+    }).state
+    const { state: next } = reduce(s, {
+      type: 'RESOLVE',
+      player: 'p3',
+      choice: { kind: 'upgradeDiscard', card: 'attack-bug#c' },
+      at: 3,
+    })
+    expect(next.pending).toMatchObject({ phase: 'picking', owed: [], actor: 'p1' })
   })
 })
