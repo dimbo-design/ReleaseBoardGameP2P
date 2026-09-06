@@ -173,6 +173,15 @@ export type BeatPlan =
        */
       homeward?: string
     }
+  // SYSTEM UPGRADE'S ARRIVALS (#108), and only the arrivals. The cards that
+  // have already landed are rendered by the projection (`_useUpgradeStaging`),
+  // because `pending.thrown` is public and survives a batch boundary — so this
+  // plan never has to describe the centre, only what is flying into it.
+  | {
+      kind: 'upgrade'
+      key: string
+      throws: { eventId: number; player: string; card: string }[]
+    }
   | { kind: 'reshuffle'; key: string; cards: number }
   | { kind: 'piles'; key: string; steps: PileStep[] }
   // ANY victory celebrates, and the poppers are its finale — the rules owner's
@@ -667,6 +676,10 @@ export function planBeats(
   // The hand limit's own run — coalesced per PLAYER: two seats can pay the
   // price in one relayed batch, and each pays it into a grid of its own.
   let handLimit: Extract<BeatPlan, { kind: 'handLimit' }> | null = null
+  // System Upgrade's run — several seats can answer inside one relayed batch,
+  // and they read as one staggered gesture; seats answering in separate batches
+  // become separate short beats over a centre that persists on its own.
+  let upgradeRun: Extract<BeatPlan, { kind: 'upgrade' }> | null = null
   // The player a sweep is open for — set by `eliminated`, read by the
   // `discarded` branch that follows it to mark that run gathered. Cleared
   // INSIDE `flush()`, alongside the other run locals: `flush()` runs on every
@@ -687,6 +700,7 @@ export function planBeats(
     if (pileRun) plans.push(pileRun)
     if (pairOut) plans.push(pairOut)
     if (handLimit) plans.push(handLimit)
+    if (upgradeRun) plans.push(upgradeRun)
     // LAST: everything this run flew has to be off the table before the video
     // covers it.
     if (elimination) plans.push(elimination)
@@ -696,11 +710,24 @@ export function planBeats(
     pairOut = null
     sweeping = null
     handLimit = null
+    upgradeRun = null
     elimination = null
   }
 
   for (let i = 0; i < events.length; i++) {
     const e = events[i]
+    if (e.type === 'upgradeThrown') {
+      // Several seats answering inside ONE batch become one staggered beat;
+      // seats answering in separate batches become separate short beats over a
+      // centre that persists on its own (the projection holds `thrown`). Same
+      // folding the `discarded` run does, for the same reason — and the same
+      // rule that a run never reaches across something else, which is what the
+      // `flush()` on the first throw of a new run is for.
+      if (!upgradeRun) flush()
+      upgradeRun ??= { kind: 'upgrade', key: `upgrade:${e.id}`, throws: [] }
+      upgradeRun.throws.push({ eventId: e.id, player: e.player, card: e.card })
+      continue
+    }
     if (e.type === 'drawn') {
       // AN AI TRIGGER IS NOT A DRAW. It is its own scene from the pile onward,
       // so it is claimed whole here and the draw plan never sees it — the

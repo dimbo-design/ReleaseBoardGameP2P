@@ -22,6 +22,7 @@ import { useHandLimitBeat } from './handLimitBeat'
 import type { BeatPlan } from './planBeats'
 import { planBeats } from './planBeats'
 import { useTransferBeat } from './transferBeat'
+import { useUpgradeBeat } from './upgradeBeat'
 
 // The board's beat queue. `useGame` accumulates engine events off the wire in
 // BATCHES — a peer can receive several moves in one sync — so a board that
@@ -187,6 +188,7 @@ export function useBeats(args: {
   const handLimits = useHandLimitBeat(anchors, handLimit)
   const transfers = useTransferBeat(anchors)
   const ais = useAiBeat(anchors)
+  const upgrades = useUpgradeBeat(anchors)
 
   // `intro` rides along because the arming effect below reads the beat from here
   // rather than from its own closure: the effect fires on the match key, and the
@@ -249,6 +251,18 @@ export function useBeats(args: {
           exclusive: false,
           alarm: false,
           run: (ctx) => handLimits.run(plan, ctx),
+        }
+      }
+      if (plan.kind === 'upgrade') {
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          // A throw does not own the table: other beats may follow it in the
+          // same batch, and the centre it lands in is the projection's, not
+          // this beat's to hold.
+          alarm: false,
+          run: (ctx) => upgrades.run(plan, ctx),
         }
       }
       if (plan.kind === 'draw') {
@@ -425,6 +439,7 @@ export function useBeats(args: {
       elimination.run,
       gameEnd.run,
       handLimits.run,
+      upgrades.run,
       transfers.runTransfer,
       transfers.runRequested,
       ais.run,
@@ -672,6 +687,7 @@ export function useBeats(args: {
       ...handLimits.overlay,
       ...transfers.overlay,
       ...ais.overlay,
+      ...upgrades.overlay,
     ],
     exclusive: running?.exclusive ?? false,
     alarm: running?.alarm ?? false,

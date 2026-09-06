@@ -25,5 +25,6 @@ export type {
 } from './planBeats'
 export { classifyPiles, planBeats } from './planBeats'
 export { useTransferBeat } from './transferBeat'
+export { useUpgradeBeat } from './upgradeBeat'
 export type { Beats } from './useBeats'
 export { useBeats } from './useBeats'

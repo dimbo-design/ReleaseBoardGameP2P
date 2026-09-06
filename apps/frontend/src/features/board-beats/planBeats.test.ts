@@ -1863,3 +1863,45 @@ describe('planBeats — a Release comes back out of the discard (#106, Task 11)'
     expect(plans).toHaveLength(0)
   })
 })
+
+// SYSTEM UPGRADE'S ARRIVALS (#108). Several seats answer one pending, and how
+// their answers reach this peer is not fixed: the keeper may send them in one
+// batch or in several. Folding a run is what makes both look the same on the
+// table — one staggered beat when they arrive together, one short beat each
+// when they do not — over a centre the projection holds either way.
+describe('planBeats — System Upgrade (#108)', () => {
+  const thrown = (id: number, player: string, cardId: string) =>
+    ({ id, type: 'upgradeThrown', player, card: cardId }) as unknown as Event
+
+  it('folds consecutive upgrade throws into one beat', () => {
+    const plans = planBeats(
+      [thrown(1, 'p2', 'attack-bug'), thrown(2, 'p3', 'defense-hotfix')],
+      boardBefore(),
+    )
+    expect(plans).toHaveLength(1)
+    expect(plans[0]).toMatchObject({ kind: 'upgrade' })
+    expect((plans[0] as { throws: unknown[] }).throws).toHaveLength(2)
+  })
+
+  // What the `flush()` on a new run is actually for. Without it the upgrade run
+  // opens alongside a draw run that is still standing, and the SECOND draw then
+  // folds into the first — one gesture reaching across a throw that happened in
+  // between it. Mutation-checked: dropping that line turns the two draws into
+  // one and only this test notices.
+  it('does not let a draw run reach across an upgrade throw', () => {
+    const plans = planBeats([drawn(1), thrown(2, 'p2', 'attack-bug'), drawn(3)], boardBefore())
+    expect(plans.map((p) => p.kind)).toEqual(['draw', 'upgrade', 'draw'])
+  })
+
+  it('does not let an upgrade run swallow one on the far side of an unrelated event', () => {
+    const plans = planBeats(
+      [
+        thrown(1, 'p2', 'attack-bug'),
+        { id: 2, type: 'turnEnded', player: 'p1' } as Event,
+        thrown(3, 'p3', 'defense-hotfix'),
+      ],
+      boardBefore(),
+    )
+    expect(plans.map((p) => p.kind)).toEqual(['upgrade', 'upgrade'])
+  })
+})
