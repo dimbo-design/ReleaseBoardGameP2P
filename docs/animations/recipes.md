@@ -243,8 +243,9 @@ the discard on its own.
    - **`d.card` absent, no `d.reveal`** → somebody else's, closed. Straight from the centre:
      `play('dealToSeat', { from: centre, to: cardBoxIn(seatBox(d.player), CARD_W * SEAT_SHRINK) })`,
      no flip, `drop('draw')`, and the shadow's `handCount` for that opponent is bumped and published.
-   - **`d.reveal` present** → a trigger, turned up for the whole table. `wait(BEFORE_FLIP)` →
-     `patch('draw', { faceDown: false })` → `wait(AFTER_FLIP)` → `wait(REVEAL_HOLD)` → the flyer
+   - **`d.reveal` present** → a trigger, turned up for the whole table (an AI trigger is claimed
+     whole by its own beat and never reaches this branch — see the AI recipe below). `wait(BEFORE_FLIP)`
+     → `patch('draw', { faceDown: false })` → `wait(AFTER_FLIP)` → `wait(TABLE_HOLD)` → the flyer
      itself (not a copy) is handed to `useDiscardExit.send`, with `node: elOf('draw')` and
      `scatter: scatterAt(d.reveal.discardId)` — the same scatter the heap rests the card on (**I7**)
      — then `drop('draw')`.
@@ -257,7 +258,7 @@ the discard on its own.
 | pile → centre | `drawToCenter` | 480 ms |
 | stand before flipping | `wait(BEFORE_FLIP)` | 220 ms |
 | flip settle | `wait(AFTER_FLIP)` | 560 ms |
-| a trigger's stand at the centre | `wait(REVEAL_HOLD)` | 900 ms on the board — **not the approved value.** The source is the `AI cards` scene, whose subject the behaviour of AI cards at the centre is: `TABLE_HOLD = 2600` (twice that for Hallucination), and the trigger stands beside the AI card for exactly that hold before both leave. `Draw card`'s `AI_HOLD = 4000` is another scene's number — its subject is the draw piles. The board edit is what is left (`docs/animations/backlog.md`) |
+| a trigger's stand at the centre | `wait(TABLE_HOLD)` | 2600 ms — imported from `features/board-beats/toCentre.ts`, the same constant the AI recipe below holds its own pair on (there doubled, `HALLUCINATION_HOLD`, for `ai-hallucination`; this branch never sees that card, so it never doubles) |
 | own card → hand | `useHandArrival` | `FLIGHT_MS = 480` |
 | trigger → discard | `useDiscardExit` | `FLIGHT_MS = 420`, on `scatterAt(discardId)` |
 | opponent's card → seat | `dealToSeat` | 460 ms, `to = cardBoxIn(seat, CARD_W * 0.7)` |
@@ -1650,6 +1651,126 @@ Vibe).
 
 **Live reference**
 `AI cards` — `apps/playground/stories/interactive/AiCardsStory.tsx`.
+
+---
+
+## An AI trigger resolves (live board) — cause, effect, one of six endings
+
+Driven by `aiRevealed` and `takenFromDiscard`, planned by `planBeats` (`aiTailAfter`) and run by
+`aiBeat` (`useAiBeat`). The playground recipe above is its original; the board keeps the shared
+opening and the vocabulary of endings, and translates the rest — there is no fan of Inside
+candidates here, an opponent is a seat and a count, and a prompt an effect raises can outlive the
+batch that revealed it.
+
+**When to call**
+Never directly. `useBeats` plans an `aiEvent` beat from `aiRevealed` — paired with the `discarded`
+that banks the trigger in the same reduction — and runs it through `run`; a `takenFromDiscard` event
+with `to: 'hand'` plans its own beat and runs through `runTaken`. Neither is `exclusive`: an AI card
+is read, not obeyed, and nothing about it needs input dead.
+
+**Visual result**
+One shared opening for every ending: the trigger comes off its pile and stands at `cause`, left of
+centre; the events deck gives up the card that explains it to `effect`, wider and to the right; both
+flip face up and hold — `TABLE_HOLD`, doubled for Hallucination. Only then do the endings differ,
+each one read off what the plan already decided rather than re-derived from the card's own id:
+
+| Ending | What the table sees |
+|---|---|
+| `zone` | the effect card settles into an empty release/monitoring slot (`playToReleaseZone`) and STAYS — a card standing in a zone slot is what the batch's own `released`/`placed` looks like from outside this beat. |
+| `crush` | the destroyed release rises as its own flyer at its own slot, in the same commit the zone lets go of it, and takes its own road — the events deck (`returnToDeck`) or the discard (the discard-exit step), whichever the plan's `destination` says (read off `releaseEventsOf`, never guessed from the card's id); the effect card goes home once the trigger and the destroyed release have left. |
+| `turnEnded` | the turn simply ends; the effect goes home. |
+| `alarm` | the effect mimics an Error 503 that resolved with nobody able to answer it (no pending raised); the effect goes home. |
+| `none` | nothing else followed in the batch; the effect goes home. |
+| `standing` | a prompt is now owed — `crush`, `neutralize503`'s mimic, `handLimit` (Bad Vibe) or `pickFromDiscard` (Inside) — and the effect card is dropped exactly where it stands rather than sent home. |
+
+"Goes home" is one leg, `goHome`, shared by every ending but `zone` and `standing`: the card flips
+face down where it stands and shrinks back into the events deck (`returnToDeck`).
+
+> **The trigger never gets the `standing` treatment, and that is not a stylistic choice.** The
+> engine banks it — `discarded(trigger-ai)` in `fireTrigger` — in the very reduction that reveals
+> it, before `resolveAiEvent` ever runs; by the time this beat plans, the projection already has the
+> trigger in the discard heap. Holding it on screen would contradict a projection that has already
+> moved it. The effect card CAN stand, because `decks.events` is projected only as a count — one
+> fewer, and nothing on screen disagrees with the card still standing at `effect`. Do not "fix" this
+> into a matching pair: the asymmetry is downstream of an open backlog entry on the engine banking
+> the trigger before its own effect resolves, not a gap in this beat (`docs/animations/backlog.md`).
+
+**Elements / refs** — all from `BoardAnchors`
+- `pileBox(index)` — the pile the trigger drew off.
+- `cause` / `effect` — the AI pair's own centre places, from `centrePlaceStyle('ai', …)`
+  (`TableCentre/centre.ts`).
+- `eventsBox` — the events deck: both ends of the effect card's trip home.
+- `releaseSlot(player, slot)` — a `zone` ending's destination, and a `crush`'s victim.
+- `discardBox` / the discard-exit step — the trigger's own road, and an ordinary `crush`
+  destination's.
+
+**Sequence — `run` (`aiEvent`)**
+1. `toSlot({ key: TRIG, card: trigger, from: cardAreaOf(pileBox(plan.pile)), to: cause })`; flip
+   after `BEFORE_FLIP`; hold `AFTER_FLIP`.
+2. `toSlot({ key: EFF, card: event, from: cardAreaOf(eventsBox), to: effect })`; flip; hold.
+3. `wait(plan.eventCard === 'ai-hallucination' ? HALLUCINATION_HOLD : TABLE_HOLD)` — the one place
+   this runner reads the card's own id, and only to size the READING; `plan.tail` alone still
+   decides what the effect DOES.
+4. A `crush` raises the destroyed release as its own flyer, at its own slot, in the same commit the
+   zone lets go of it.
+5. Three legs run together (`Promise.all`): the trigger to the discard on
+   `scatterAt(plan.triggerDiscardId)` (**I7**); the effect down its ending's road; a `crush`'s
+   destroyed release down `plan.tail.destination`'s road.
+
+**Sequence — `runTaken` (`takenFromDiscard`)**
+`ai-inside`'s own answer, resolved. One path, two audiences:
+1. `toSlot({ key: EFF, card, from: cardAreaOf(discardBox), to: effect, faceDown: false })`; hold
+   `SHOW_HOLD` — open at the centre for the WHOLE table, the same way `AiCardsStory`'s own
+   `insideGrab` holds it, regardless of who it belongs to.
+2. **Mine** — `useHandArrival` into the fan.
+3. **Someone else's** — `dealToSeat` into their seat; their `handCount` is bumped in the same step
+   the flight lands, so the hand-over to `live` does not pop their fan by one the instant the queue
+   drains.
+4. If this batch also answers a standing prompt (`plan.homeward`), the AI card that has been
+   standing at `effect` since the batch that raised it goes home now: a no-travel raise at the place
+   it already occupies, flip, `returnToDeck`. Written out here rather than shared with
+   `handLimitBeat.tsx`'s or `defenseBeat.tsx`'s own `sendHomeward` — a carrier passed between hooks
+   is how this codebase has already grown two latch bugs of that family.
+
+**Params & timings**
+| Step | Preset / wait | Value |
+|---|---|---|
+| pile → `cause`, events deck → `effect` | `drawToCenter` (via `toSlot`) | 480 ms each |
+| flip, before / after | `wait(BEFORE_FLIP)` / `wait(AFTER_FLIP)` | 220 ms / 560 ms |
+| table hold | `wait(TABLE_HOLD)` | 2600 ms (`HALLUCINATION_HOLD` = 5200 ms) |
+| effect home | `returnToDeck` | 480 ms |
+| trigger / an ordinary crush → discard | the discard-exit step | — |
+| Inside, shown to the table | `wait(SHOW_HOLD)` | 1500 ms |
+
+**Invariants**
+- **I2** — the `standing` leg waits a frame before dropping its carrier, so the projection's own
+  `aiStanding` render (`_Board.tsx`, off `pending.source`) is up before the flyer lets go.
+- **I4** — `toSlot` pins after every arrival, so the flip and the next leg start from where the card
+  visibly stands.
+- **I7** — the trigger's discard-exit reads `scatterAt(plan.triggerDiscardId)`, the same call the
+  heap rests it on.
+- Local: what an ending DOES is never re-derived from `eventCard`'s id — only the Hallucination
+  hold's length is, and that is a presentation question, not a mechanic one.
+
+**End state & cleanup**
+`zone` — the card stays in its slot. `crush` — the slot is empty; the destroyed release and the
+effect card have each taken their own road. `standing` — the effect card is left exactly where it
+stands; its trip home belongs to whichever batch answers the prompt. Every other ending — the effect
+is back in the events deck. The trigger is always in the discard.
+
+**Building blocks**
+[`drawToCenter`/`playToReleaseZone`/`returnToDeck`](./reference.md#presets) · `flipCard` (auto, via
+`Card`) · [`useHandArrival`](./reference.md#hand-arrival--cards-arrive-in-the-hand) ·
+[`useDiscardExit`](./reference.md#discard-exit--cards-leave-the-table-for-the-discard) ·
+[`useToCentre`/`toSlot`](./reference.md#the-movement-steps-and-the-carrier-under-them) ·
+[`cardAreaOf`](./reference.md#card-geometry-helpers) ·
+[`centrePlaceStyle`](./reference.md#centre-of-the-table--the-places-a-card-lands-in).
+
+**Live reference**
+Not a playground scene — this beat runs on the real board:
+`apps/frontend/src/features/board-beats/aiBeat.tsx`, with the plans in
+`features/board-beats/planBeats.ts` (`aiTailAfter`) and the standing render in
+`pages/board/[gameId]/_Board.tsx`. The playground original is the recipe above.
 
 ---
 

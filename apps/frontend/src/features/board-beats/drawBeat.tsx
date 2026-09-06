@@ -6,13 +6,13 @@ import {
   play,
   scatterAt,
   useDiscardExit,
-  useFlyer,
   useHandArrival,
   wait,
 } from '@release/ui/animations'
 import { useCallback, useRef } from 'react'
 import type { BeatRun, BoardAnchors, BoardState } from '~/entities/game/board'
 import type { BeatPlan, PlannedDraw } from './planBeats'
+import { TABLE_HOLD, useToCentre } from './toCentre'
 
 // A card is drawn. One flight to the centre, then a branch on who drew it and
 // what it turned out to be — the scene is `DrawCardStory`, driven here by the
@@ -27,7 +27,6 @@ import type { BeatPlan, PlannedDraw } from './planBeats'
 
 const BEFORE_FLIP = 220 // the card rests at the centre before it turns over
 const AFTER_FLIP = 560 // flipCard is 420; the rest is a pause to read it by
-const REVEAL_HOLD = 900 // how long a revealed trigger stands for the table
 const SEAT_SHRINK = 0.7 // an opponent's card lands smaller, dissolving into the count
 
 // An opponent's closed card. The projection never says what it is, so nothing
@@ -50,7 +49,7 @@ const rectOf = (el: Element | null): Rect | null => {
 }
 
 export function useDrawBeat(anchors: BoardAnchors) {
-  const { overlay: flyerOverlay, raise, pin, patch, drop, elOf } = useFlyer()
+  const { overlay: flyerOverlay, patch, drop, elOf, toSlot } = useToCentre()
   const exit = useDiscardExit(anchors.discardBox)
 
   // The run's own state, held in a ref because the whole beat is one closure and
@@ -82,23 +81,16 @@ export function useDrawBeat(anchors: BoardAnchors) {
 
   // deck -> centre, face down. The one leg every draw has, whoever drew it.
   const toCentre = useCallback(
-    async (d: PlannedDraw): Promise<Rect | null> => {
+    (d: PlannedDraw): Promise<Rect | null> => {
       const a = latest.current.anchors
       const cell = rectOf(a.pileBox(d.pile))
       const centre = rectOf(a.centre.current)
-      if (!cell || !centre) return null
-      const from = cardAreaOf(cell)
+      if (!cell || !centre) return Promise.resolve(null)
       const face = d.card ?? d.reveal?.card
       const card = (face ? cardById(face) : null) ?? COVER
-      const [el] = await raise([{ key: 'draw', card, at: from, faceDown: true }])
-      if (el) {
-        const anim = play('drawToCenter', el, { from, to: centre })
-        if (anim) await anim.finished
-        pin('draw', centre) // I4 — the next leg starts from where it stands
-      }
-      return centre
+      return toSlot({ key: 'draw', card, from: cardAreaOf(cell), to: centre })
     },
-    [raise, pin],
+    [toSlot],
   )
 
   const run = useCallback(
@@ -113,7 +105,7 @@ export function useDrawBeat(anchors: BoardAnchors) {
           await wait(BEFORE_FLIP)
           patch('draw', { faceDown: false })
           await wait(AFTER_FLIP)
-          await wait(REVEAL_HOLD)
+          await wait(TABLE_HOLD)
           const card = cardById(d.reveal.card)
           if (card && d.reveal.discardId !== undefined) {
             // It leaves from the centre on the same scatter the heap already

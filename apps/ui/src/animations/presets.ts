@@ -293,7 +293,18 @@ export const PRESETS: Record<string, Preset> = {
     return el.animate(
       [
         { opacity: 0, transform: `translate(${dx}px, ${dy}px)` },
-        { opacity: 1, transform: 'translate(0, 0)' },
+        // `none`, NOT `translate(0, 0)`. They look identical and are not: with
+        // `fill: 'both'` below, this keyframe persists forever, and ANY
+        // transform value other than `none` makes the block a permanent
+        // stacking context. A pile's counter (`Pile.module.css`'s `.count`)
+        // then loses to a card flying past it — the badge is trapped inside the
+        // block's context while the flyer is outside it, so the counter's own
+        // `z-index: calc(var(--z-flight) + 40)` cannot reach over it and the
+        // number blinks as each card leaves. `.count`'s comment names exactly
+        // this precondition: it works "only while the consumer's placement is
+        // not a stacking context". Interpolating to `none` is well defined —
+        // it is the identity transform — so the movement is unchanged.
+        { opacity: 1, transform: 'none' },
       ],
       // fill both: пока идёт delay, блок держится невидимым — иначе он мигнёт
       // на своём месте до старта своей очереди

@@ -22,6 +22,17 @@ Fill: `forwards` everywhere except `shake` (none — it returns to the origin by
 `rollIn` / `hudIn` (**`both`**, so a `delay` holds the element invisible until its turn instead of
 letting it flash in place first).
 
+> **A persisted end state must not leave a transform behind.** Fill `forwards`/`both` means the last
+> keyframe stays on the element for good — and any transform value other than `none` makes that
+> element a permanent **stacking context**, which traps its children's `z-index` inside it however
+> high they set it. That is invisible until something outside the block flies past: a pile's counter
+> sits at `calc(var(--z-flight) + 40)` precisely so a card passes UNDER the badge, and
+> `Pile.module.css`'s own comment says it works "only while the consumer's placement is not a
+> stacking context". `hudIn` ends on `transform: 'none'` for this reason — `translate(0, 0)` looks
+> identical and is not. Found on the board as a counter that blinked behind every card leaving a
+> pile (PR #132); pinned by `apps/ui/src/animations/presets.test.ts`. **A new block preset should
+> end on `none` too.**
+
 | Preset | Duration | Easing | Fade | Params | Purpose |
 |---|---|---|---|---|---|
 | `flipCard` | 420 | EASE | — | `{ faceDown }` | flip face ↔ back (used by `Card` itself) |
@@ -195,10 +206,12 @@ runner lifted out of `useBeats` unchanged, `drawBeat.tsx` and `deckBeat.tsx` are
 | `reshuffle` | `features/board-beats/deckBeat.tsx` (`runReshuffle`) | `deckReshuffled` | `gatherToDeck`, `flipCard` (via `patch`) |
 | `piles` | `features/board-beats/deckBeat.tsx` (`runPiles`/`step`) | `pilesChanged`, classified by `classifyPiles` (`planBeats.ts`) against the running pile counts — the event itself names neither the operation nor the split index | `flyFrom` (split), `absorbToDeck` (merge), `gatherToDeck` (fromDiscard) |
 | `transfer` | `features/board-beats/transferBeat.tsx` (`runRequested`/`runTransfer`) | `requested` — public, whole; `handTransfer` — with `role` off `selfId`, `named` off `base.pending`, and `card` only if the event carried one | `popIn`, `shake`, `takeFromSeat`, `playToCenter`, `dealToSeat`, `flipCard` (via `patch`), the hand-arrival step |
+| `ai` | `features/board-beats/aiBeat.tsx` (`run`/`runTaken`) | `aiEvent` — the trigger off its own pile to `cause`, the card the events deck gives up to `effect`, both held `TABLE_HOLD` (doubled, `HALLUCINATION_HOLD`, for `ai-hallucination`), then one of `AiTail`'s six endings (`zone`/`crush`/`turnEnded`/`alarm`/`standing`/`none`) read off what follows in the batch, never re-derived from the card's own id; the plan behind it reads two facts outside its own batch — `releaseEventsOf` (a crush's destination, events deck or discard) and `owed` (the live pending, to tell a standing prompt from an unanswered mimic). `takenFromDiscard` — `ai-inside`'s answer, shown open at the centre for the whole table before it splits by `mine` | `drawToCenter` (×2, via `toSlot`), `flipCard` (via `patch`), `playToReleaseZone`, `returnToDeck`, `dealToSeat`, the discard-exit step |
 
 See [`recipes.md`](./recipes.md#a-card-is-drawn-live-board),
-[`recipes.md`](./recipes.md#the-deck-is-rebuilt-split-merged-live-board) and
-[`recipes.md`](./recipes.md#a-card-changes-hands-live-board--taker-victim-watcher-and-the-ask-before-them)
+[`recipes.md`](./recipes.md#the-deck-is-rebuilt-split-merged-live-board),
+[`recipes.md`](./recipes.md#a-card-changes-hands-live-board--taker-victim-watcher-and-the-ask-before-them) and
+[`recipes.md`](./recipes.md#an-ai-trigger-resolves-live-board--cause-effect-one-of-six-endings)
 for the sequences; the classification table for `piles` is written out there, not repeated here.
 
 **One scatter, two readers.** A discard flies on `scatterAt(eventId)` and the heap

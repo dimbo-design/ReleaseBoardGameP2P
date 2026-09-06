@@ -49,6 +49,9 @@ export interface BoardOpponent {
   // A played Code Review lying under the release it protects.
   support?: ReleaseSupport
   eliminated?: boolean
+  // Which of this opponent's release slots is a standing AI card wearing an
+  // ordinary id, keyed to its events-deck id — see `you.releaseEvent` below.
+  releaseEvent?: Partial<Record<'frontend' | 'backend' | 'database' | 'monitoring', string>>
 }
 
 // Everything the engine's projection can answer. Assembled by the consumer's
@@ -66,6 +69,13 @@ export interface BoardState {
     // the engine has to act on names a uid (`neutralize503`'s sacrifice), so
     // the adapter keeps them here rather than widening the kit's own type.
     releaseUid?: Partial<Record<'frontend' | 'backend' | 'database' | 'monitoring', string>>
+    // Which of this player's release slots is a standing AI card wearing an
+    // ordinary id (`release-<slot>`), keyed to the events-deck id it actually
+    // goes home as. Same reasoning as `releaseUid`: the kit's `ReleaseSlots` is
+    // domain-free and has no member for it, so the adapter keeps it beside the
+    // slot rather than widening the kit's own type. Absent slot means an
+    // ordinary card.
+    releaseEvent?: Partial<Record<'frontend' | 'backend' | 'database' | 'monitoring', string>>
   }
   opponents: BoardOpponent[]
   decks: {
@@ -180,6 +190,11 @@ export interface BoardChromeCopy {
   // interpolation to put a number into — and the grid's own empty cells already
   // show how many are owed.
   askHandLimit: string
+  // Inside's own caption (#106, `pickFromDiscard`) — the row over the
+  // discard asks this one, the same way the fan itself asks the four lines
+  // above it. Shared with Git Cherry-pick once #61 lands: the two effects
+  // resolve through the same pending, so they read the same line.
+  insidePrompt: string
   // поле паузы (опционально — рендерится только вместе с обработчиком паузы):
   // подпись поля, состояние тумблера (вкл / выкл) и строка-пояснение
   pauseGame?: string

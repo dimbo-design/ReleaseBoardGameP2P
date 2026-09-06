@@ -36,6 +36,14 @@ export interface BoardAnchors {
   hand: RefObject<HTMLDivElement | null>
   /** the discard's CARD box — what a flight into the heap aims at */
   discardBox: RefObject<HTMLDivElement | null>
+  /** the AI trigger — the cause, standing left of the card it pulled */
+  cause: RefObject<HTMLDivElement | null>
+  /** the AI card itself — wider than the rest, because the table reads it */
+  effect: RefObject<HTMLDivElement | null>
+  /** what an AI effect asked for: the card given up, standing open beside it */
+  picked: RefObject<HTMLDivElement | null>
+  /** the events pile's CARD box — where an event card goes home */
+  eventsBox: RefObject<HTMLDivElement | null>
   seatOf: (player: string) => HTMLElement | null
   /** a card-sized box centred on a seat: a seat is far wider than a card (I6) */
   seatBox: (player: string) => Rect | null
@@ -63,6 +71,10 @@ export function useBoardAnchors(): BoardAnchors {
   const cover = useRef<HTMLDivElement>(null)
   const hand = useRef<HTMLDivElement>(null)
   const discardBox = useRef<HTMLDivElement>(null)
+  const cause = useRef<HTMLDivElement>(null)
+  const effect = useRef<HTMLDivElement>(null)
+  const picked = useRef<HTMLDivElement>(null)
+  const eventsBox = useRef<HTMLDivElement>(null)
   const seatEls = useRef<Record<string, HTMLElement | null>>({})
   const slotEls = useRef<Record<string, HTMLElement | null>>({})
   const pileEls = useRef<Record<number, HTMLDivElement | null>>({})
@@ -116,6 +128,10 @@ export function useBoardAnchors(): BoardAnchors {
       cover,
       hand,
       discardBox,
+      cause,
+      effect,
+      picked,
+      eventsBox,
       seatOf,
       seatBox,
       handSlotAt,

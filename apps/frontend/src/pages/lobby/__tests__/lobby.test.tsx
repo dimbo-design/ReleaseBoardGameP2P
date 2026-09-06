@@ -318,8 +318,8 @@ it('walking back from the results screen shows the lobby with everyone still in 
     ...inSession(),
     gameId: null,
     seats: [
-      { playerId: 'p1', peerId: 'h', name: 'Host' },
-      { playerId: 'p2', peerId: 'p1', name: 'Pat' },
+      { playerId: 'p1', peerId: 'h', clientId: 'client-h', name: 'Host' },
+      { playerId: 'p2', peerId: 'p1', clientId: 'client-p1', name: 'Pat' },
     ],
   }
 

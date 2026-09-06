@@ -438,6 +438,7 @@ export function pendingView(state: GameState, viewerId: PlayerId): PendingView |
         player: p.player,
         excess: p.excess,
         options: mine ? state.players[p.player].hand.map((c) => c.uid) : [],
+        ...(p.source ? { source: p.source } : {}),
       }
     case 'requestCard':
       return { kind: 'requestCard', player: p.player, target: p.target }
@@ -451,9 +452,16 @@ export function pendingView(state: GameState, viewerId: PlayerId): PendingView |
         // the ai-error-503 mimic, which has no card standing anywhere.
         card: p.card ? p.card.id : null,
         methods: [...p.methods],
+        ...(p.source ? { source: p.source } : {}),
       }
     case 'crush':
-      return { kind: 'crush', player: p.player, slot: p.slot, methods: [...p.methods] }
+      return {
+        kind: 'crush',
+        player: p.player,
+        slot: p.slot,
+        methods: [...p.methods],
+        ...(p.source ? { source: p.source } : {}),
+      }
     case 'pickFromDiscard':
       // Only discardTop/discardCount are ever projected of the discard pile
       // (project.ts) — its full contents are not public. Gated behind `mine`

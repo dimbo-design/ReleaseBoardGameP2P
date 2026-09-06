@@ -13,6 +13,7 @@ import {
   Card,
   CardPair,
   cardById,
+  centrePlaceStyle,
   type DockView,
   Drawer,
   deriveDock,
@@ -79,6 +80,7 @@ import { useBoardInteractions } from './_useBoardInteractions'
 import { useBoardStaging } from './_useBoardStaging'
 import { useDefenseStaging } from './_useDefenseStaging'
 import { useHandLimit } from './_useHandLimit'
+import { useInsideStaging } from './_useInsideStaging'
 import { useNeutralizeStaging } from './_useNeutralizeStaging'
 import { useRequestStaging } from './_useRequestStaging'
 
@@ -386,6 +388,24 @@ export default function Board({
   // 503 goes to the COVER slot, never over the alarm's own.
   const pendingAlarm = state.pending?.kind === 'neutralize503' ? state.pending : null
   const alarmMine = pendingAlarm?.player === state.selfId
+  // The AI card a prompt belongs to — `source` on `crush`, `neutralize503`,
+  // `handLimit` and `pickFromDiscard`, and only those four: the rest of
+  // `TablePending`'s union does not declare the field at all, so the `in`
+  // check is what narrows to the branches that do, rather than an optional
+  // chain TS would refuse across the wider union. Public on all four: the
+  // whole table watched the card be revealed, so every peer stands the same
+  // one.
+  //
+  // `pickFromDiscard`'s `source` is not always an AI card, though:
+  // `operation-git-cherry-pick` raises the same pending kind and is a base-deck
+  // Operation, not an events-deck draw. Standing it here would put Cherry-pick
+  // in the AI pair's own slot, which is not where its own visible card goes —
+  // so this only stands a source whose catalogue entry is genuinely
+  // `deck === 'ai'`, which leaves Cherry-pick to render nowhere here (it has
+  // no dedicated slot of its own on this branch).
+  const pendingSource = state.pending && 'source' in state.pending ? state.pending.source : null
+  const pendingSourceCard = pendingSource ? (cardById(pendingSource) ?? null) : null
+  const aiStanding = pendingSourceCard?.deck === 'ai' ? pendingSourceCard : null
   // …or a sweep is running, which is the defenceless path's own alarm: it
   // raises no `pending` at all (the engine eliminates in the same batch as
   // the reveal), so without this the hand would fly away with nothing on
@@ -422,6 +442,18 @@ export default function Board({
     },
     enabled: !(deal.active || beats.exclusive),
     matchKey: intro?.gameId ?? null,
+  })
+  // taking a Release back out of the discard (#106, `ai-inside`) — the row
+  // over the discard replaces the panel, the same way the band above
+  // replaces it for `requestCard`. No `matchKey`: the row's own local state
+  // clears itself the moment this hook stops holding an ours-`pickFromDiscard`
+  // pending, which happens whenever the pending resolves or changes kind —
+  // and it always does before a second one of the same kind can open.
+  const inside = useInsideStaging({
+    state,
+    actions,
+    copy: { prompt: copy.table.insidePrompt, confirm: copy.pending.confirm },
+    enabled: !(deal.active || beats.exclusive),
   })
   // the answer once its own flight has landed (or at once under reduced
   // motion) — the same gate, and the same reason, as `stagedCover` above.
@@ -1062,13 +1094,20 @@ export default function Board({
               />
             ))}
           </div>
-          <Pile
-            label={copy.table.events}
-            deck="ai"
-            count={decks.events}
-            width={150}
-            countPos="tl"
-          />
+          {/* Pile has a closed prop list — no arbitrary attribute passes
+              through it — so the events pile's card box is a wrapping node
+              instead of `boxRef` on the pile itself (matching the discard
+              pile's own `boxRef` would leave nothing here for a test, or a
+              future flight, to find by attribute). */}
+          <div ref={anchors.eventsBox} data-events-box>
+            <Pile
+              label={copy.table.events}
+              deck="ai"
+              count={decks.events}
+              width={150}
+              countPos="tl"
+            />
+          </div>
         </div>
       </div>
 
@@ -1111,6 +1150,44 @@ export default function Board({
             comboBeat.tsx's `runRelease`) */}
         {staging.paidCost && <Card card={staging.paidCost.card} interactive={false} width="100%" />}
       </div>
+
+      {/* THE AI PAIR (#106). The trigger that caused it stands left; the card
+          it pulled stands right, and wider — it is the card of the moment.
+          Positioned from `centrePlaceStyle`, the declared single source for
+          centre geometry, rather than from literals of their own: the four
+          slots above predate that source and still carry copies of its numbers
+          (recorded in the register), and three more copies is how a duplication
+          becomes the house style. */}
+      <div
+        className={opening.aiSlot}
+        data-centre-slot="cause"
+        style={centrePlaceStyle('ai', 'cause')}
+        ref={anchors.cause}
+      />
+      <div
+        className={opening.aiSlot}
+        data-centre-slot="effect"
+        style={centrePlaceStyle('ai', 'effect')}
+        ref={anchors.effect}
+      >
+        {/* The card standing behind a prompt, held publicly while the engine
+            waits for an answer. This is what carries it across the gap between
+            the batch that revealed it and the batch that answers — they are
+            different batches, so no beat overlay can span it, and `source` is
+            public on every one of the four pendings that can raise it. */}
+        {aiStanding && (
+          <div className={opening.aiCard} data-testid="board-ai-effect">
+            <Card card={aiStanding} interactive={false} width="100%" />
+          </div>
+        )}
+      </div>
+      <div
+        className={opening.aiSlot}
+        data-centre-slot="picked"
+        style={centrePlaceStyle('aiPick', 'picked')}
+        ref={anchors.picked}
+      />
+
       {/* the defender's own Sudo waits in its OWN place until a defence is
           chosen for it — the arrow says what it is aimed at. Rendered once its
           own flight there has landed (or at once under reduced motion, Task
@@ -1299,11 +1376,20 @@ export default function Board({
                 key={i}
                 className={opening.gridCell}
                 data-grid-cell={i}
-                style={{
-                  insetBlockStart: `${GRID_TOP}%`,
-                  inlineSize: `${cell.w}px`,
-                  transform: `translate(calc(-50% + ${cell.dx}px), calc(-50% + ${cell.dy}px))`,
-                }}
+                style={
+                  // Bad Vibe-Coding's one card does not belong in the grid's own
+                  // shape: `gridCells(1)` centres it at dx 0, underneath the AI
+                  // card standing at the `effect` place. `centrePlaceStyle`
+                  // supplies its own `insetInlineStart`/`inlineSize`/`transform`,
+                  // so the two branches are complete alternatives, not a merge.
+                  handLimit.aiPicked
+                    ? centrePlaceStyle('aiPick', 'picked')
+                    : {
+                        insetBlockStart: `${GRID_TOP}%`,
+                        inlineSize: `${cell.w}px`,
+                        transform: `translate(calc(-50% + ${cell.dx}px), calc(-50% + ${cell.dy}px))`,
+                      }
+                }
                 ref={(el) => handLimit.bindCell(i, el)}
               >
                 {held ? (
@@ -1621,7 +1707,15 @@ export default function Board({
         state.pending.kind !== 'requestCard' &&
         // …and this one is not a question: the copies differ only by uid, so
         // `_useRequestStaging` answers it and the victim watches the scene
-        state.pending.kind !== 'giveCard' && (
+        state.pending.kind !== 'giveCard' &&
+        // the row on the table asks Inside's own pick, for the same reason
+        // the others above are asked by the cards themselves (#106) — but
+        // only Inside's: Git Cherry-pick raises the same pending kind over
+        // the whole discard (and a sudo second pick to the draw deck), a
+        // shape the row was never built for, so it falls through to this
+        // panel, which already has a complete case for it
+        // (`PendingPrompt.tsx`'s own `pickFromDiscard`, `toDeck` included)
+        !(state.pending.kind === 'pickFromDiscard' && state.pending.source === 'ai-inside') && (
           <PendingPrompt
             pending={state.pending}
             hand={you.hand}
@@ -1815,6 +1909,7 @@ export default function Board({
       {handLimit.overlay}
       {neutralizing.overlay}
       {requesting.band}
+      {inside.row}
       {previewOverlay}
 
       {/* the pair flyer — a persistent node (I10: position: fixed against the

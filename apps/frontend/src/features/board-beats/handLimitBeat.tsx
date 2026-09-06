@@ -1,4 +1,4 @@
-import { cardById, GRID_TOP, gridCells } from '@release/ui'
+import { cardAreaOf, cardById, GRID_TOP, gridCells } from '@release/ui'
 import type { Leaving, Rect } from '@release/ui/animations'
 import { nextFrames, play, scatterAt, useDiscardExit, useFlyer, wait } from '@release/ui/animations'
 import { type RefObject, useCallback, useRef } from 'react'
@@ -81,6 +81,39 @@ export function useHandLimitBeat(
     return a.seatBox(c.source.player)
   }, [])
 
+  // The AI card standing behind this prompt goes home now that the batch has
+  // answered it. It has been standing on the projection's own render
+  // (`_Board.tsx`'s `aiStanding`, off `pending.source`) since the batch that
+  // revealed it — that beat could not fly it home, because it still had to
+  // stand and explain the prompt this beat is what answers.
+  //
+  // Written out here rather than imported from `defenseBeat.tsx`'s own
+  // `sendHomeward`, or `aiBeat.tsx`'s `goHome`: each runner owns its own
+  // `useFlyer` carrier, and a carrier passed between hooks is how this
+  // codebase has already grown two latch bugs of that family (`useBeats.ts`'s
+  // own comments). `isStale` is this file's own — a reset mid-flight must not
+  // let a card from an abandoned match keep travelling.
+  const sendHomeward = useCallback(
+    async (id: string, isStale: () => boolean) => {
+      const a = latest.current.anchors
+      const card = cardById(id)
+      const from = rectOf(a.effect.current)
+      const deck = rectOf(a.eventsBox.current)
+      if (!card || !from || !deck) return
+      // a no-travel raise at the card's own standing spot — the honest answer
+      // to "it is here already"
+      const [el] = await flyer.raise([{ key: 'homeward', at: from, card }])
+      if (!el || isStale()) return
+      flyer.patch('homeward', { faceDown: true })
+      await wait(420) // `flipCard`'s own duration — matches `aiBeat.tsx`'s `goHome`
+      if (isStale()) return
+      const anim = play('returnToDeck', el, { from, to: cardAreaOf(deck) })
+      if (anim) await anim.finished
+      flyer.drop('homeward')
+    },
+    [flyer.raise, flyer.patch, flyer.drop],
+  )
+
   const run = useCallback(
     async (plan: Extract<BeatPlan, { kind: 'handLimit' }>, ctx: BeatRun) => {
       const runGeneration = generation.current
@@ -114,7 +147,8 @@ export function useHandLimitBeat(
       // TAKEOFF: the cards are gone from wherever they stood — publish before
       // the movement, or the board shows each card twice for its whole flight.
       // The discard end stays `ctx.base`'s own (see `withoutFlown`).
-      ctx.publish(withoutFlown(ctx.base, plan.cards))
+      const flown = withoutFlown(ctx.base, plan.cards)
+      ctx.publish(flown)
 
       let items: Leaving[] = []
 
@@ -133,6 +167,13 @@ export function useHandLimitBeat(
           // Geometry is animation input, never game truth. Keep the complete
           // grid through its hold, then yield every card together to the
           // accepted projection instead of releasing it under a partial exit.
+          //
+          // The road home is deliberately skipped on this bail-out (#106):
+          // once the pending clears, `_Board.tsx`'s `aiStanding` derivation
+          // yields null anyway, so the card leaves the standing slot
+          // regardless of whether this beat flies it — and flying it home
+          // from a beat that has already given up on its own geometry risks
+          // a flight from a stale rect, which is worse than no flight.
           await wait(GATHER_HOLD)
           if (isStale()) return
           held?.release()
@@ -150,8 +191,28 @@ export function useHandLimitBeat(
       } else {
         // BUILD. Cells are computed, not rendered — a gathered card stands on
         // its own carrier until the exit takes over.
+        //
+        // …except Bad Vibe-Coding's, which has no grid at all (#106, Decision
+        // 6): `gridCells(1)` centres its one cell at `dx 0`, underneath the AI
+        // card standing at the `effect` place. `plan.picked` is the same fact
+        // `_useHandLimit`'s own `aiPicked` render reads, carried on the plan
+        // because THIS path is every peer who is not the discarder — they have
+        // no handoff to adopt, so without it they would build that overlap.
+        //
+        // The box is MEASURED off the board's own `picked` anchor rather than
+        // computed here: that node is positioned by
+        // `centrePlaceStyle('aiPick', 'picked')`, so the beat and the render
+        // read one geometry instead of two copies of `CENTRE_SLOTS.picked`.
         const table = rectOf(a.bg.current)
-        const boxes = table ? cellBoxes(plan.cards.length, table) : []
+        const pickedBox = plan.picked ? rectOf(a.picked.current) : null
+        // One card by construction — the pending's `excess` is 1 for Bad Vibe
+        // — and if that ever stopped being true this stacks them exactly as
+        // the page's own `aiPicked` render already stacks its cells there.
+        const boxes = pickedBox
+          ? plan.cards.map(() => pickedBox)
+          : table
+            ? cellBoxes(plan.cards.length, table)
+            : []
         const flying: {
           key: string
           planCard: DiscardCard
@@ -201,6 +262,11 @@ export function useHandLimitBeat(
         }))
       }
 
+      // Same deliberate omission as the adopted-mismatch bail-out above: the
+      // road home (#106) is not sent from here either. Nothing measurable
+      // means the grid itself never played, so there is nothing for the
+      // homeward leg to follow either — and the same "a stale rect is worse
+      // than no flight" reasoning applies.
       if (items.length === 0) return
 
       // HELD OPEN — the same beat the no-defence sweep holds for, and the same
@@ -220,8 +286,29 @@ export function useHandLimitBeat(
       if (isStale()) return
       await latest.current.send(items)
       if (isStale()) return
+
+      // The AI card that raised this prompt goes home now that the batch has
+      // answered it — its own road, not this grid's (#106).
+      //
+      // The pending goes FIRST, in its own publish, exactly as
+      // `defenseBeat.runNeutralized` does it and for the same reason: the
+      // shadow still carries the prompt, so `_Board.tsx`'s `aiStanding`
+      // (off `pending.source`) is still rendering that card in the `effect`
+      // slot — and `sendHomeward` is about to raise a carrier at that very
+      // rect and fly it away. Without this the table sees a duplicate stand
+      // still while its own copy leaves.
+      //
+      // A publish, not a flag the render could be told to obey: the two
+      // early returns above deliberately skip this leg (see their comments),
+      // and they rely on the PROJECTION clearing the card once the pending
+      // does. Suppressing the render instead would leave those paths with a
+      // card both suppressed and never flown — genuinely vanished.
+      if (plan.homeward) {
+        ctx.publish({ ...flown, pending: null })
+        await sendHomeward(plan.homeward, isStale)
+      }
     },
-    [whereFrom, flyer.raise, flyer.elOf, flyer.pin, flyer.drop],
+    [whereFrom, flyer.raise, flyer.elOf, flyer.pin, flyer.drop, sendHomeward],
   )
 
   // A new match cancels what is in the air: both the exit step's flights and

@@ -77,3 +77,8 @@ it('renders an empty centre slot with no stray children', () => {
   const cover = document.querySelector('[data-centre-slot="cover"]') as HTMLElement
   expect(cover.children).toHaveLength(0)
 })
+
+it('binds the events pile so a card can fly home to it', () => {
+  render(<Board {...makeBoardProps()} />)
+  expect(document.querySelector('[data-events-box]')).not.toBeNull()
+})

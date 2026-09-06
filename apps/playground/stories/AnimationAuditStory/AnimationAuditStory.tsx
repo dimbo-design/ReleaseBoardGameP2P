@@ -621,6 +621,8 @@ const SCENARIOS: Scenario[] = [
       en: 'draw the AI trigger from the base deck → the chosen AI card from the events deck to the center (drawToCenter, larger) → hold → resolve by effect. An event card ALWAYS returns to the AI deck (returnToDeck); only the trigger (centerToDiscard) and a destroyed ORDINARY release reach the common discard. Release/Monitoring → into an empty slot (playToReleaseZone) and stays. Crush → destroys the matching release (AI release → AI deck, ordinary → discard). Inside → a release from the discard through the center into the hand (useHandArrival); with several, an open row choice + ConfirmAction, the rest fly back to the discard. Good Vibe → draws 2 cards; a drawn trigger resolves fully first, Hallucination raises a turn-interrupt flag — the 2nd draw is skipped. Bad Vibe → the card is pulled OUT of the fan and, in the same movement, takes its place to the right of the AI card; it stands open for PICK_HOLD, and then everything leaves at once: the trigger to the discard, the AI card back to its deck, the given-up card to the discard. Hand hover is muted during animations (pointer-events).',
     },
     where: 'AiCardsStory',
+    board:
+      'features/board-beats/aiBeat.tsx, features/board-beats/planBeats.ts, pages/board/[gameId]/_Board.tsx',
   },
   {
     name: { ru: 'Забрать конкретную карту', en: 'Take a specific card' },
@@ -922,14 +924,14 @@ const ISSUES: Issue[] = [
       en: 'How long a revealed trigger stands at the centre — no approved value',
     },
     problem: {
-      ru: 'Такт добора держит вскрытый триггер на столе `REVEAL_HOLD = 900` перед уходом в сброс. `DrawCardStory` держит `AI_HOLD = 4000`, но это пауза AI-ветки (стол читает эффект), не обычного вскрытия — а для голого reveal подтверждённого значения нет вовсе. `REVEAL_HOLD = 900` — число этой задачи, ничем не подтверждённое. — ОТВЕТ ВЛАДЕЛЬЦА: значение берётся из сцены-примера, и сцена здесь — AI cards (поведение карт AI в центре её предмет), а не Draw card (её предмет колоды добора). Найдено: TABLE_HOLD = 2600, у Галлюцинации вдвое дольше. Осталась правка на борде.',
-      en: 'The draw beat holds a revealed trigger at the centre for `REVEAL_HOLD = 900` before it leaves for the discard. `DrawCardStory` has `AI_HOLD = 4000`, but that is the AI branch’s pause (the table reads the effect), not a plain reveal’s — and a plain reveal has no approved value at all. `REVEAL_HOLD = 900` is this task’s own number, unconfirmed by anything. — OWNER: the value comes from the example scene, and the scene here is AI cards (the behaviour of AI cards at the centre is its subject), not Draw card (whose subject is the draw piles). Found: TABLE_HOLD = 2600, twice as long for Hallucination. The board edit is what is left.',
+      ru: 'Такт добора держит вскрытый триггер на столе `REVEAL_HOLD = 900` перед уходом в сброс. `DrawCardStory` держит `AI_HOLD = 4000`, но это пауза AI-ветки (стол читает эффект), не обычного вскрытия — а для голого reveal подтверждённого значения нет вовсе. `REVEAL_HOLD = 900` — число этой задачи, ничем не подтверждённое. — ОТВЕТ ВЛАДЕЛЬЦА: значение берётся из сцены-примера, и сцена здесь — AI cards (поведение карт AI в центре её предмет), а не Draw card (её предмет колоды добора). Найдено: TABLE_HOLD = 2600, у Галлюцинации вдвое дольше. Осталась правка на борде. — ЗАКРЫТО (#106): правка сделана. `REVEAL_HOLD = 900` больше не существует — `drawBeat.tsx` держит вскрытый (не-AI) триггер на `TABLE_HOLD`, импортированным из `features/board-beats/toCentre.ts`, тем же модулем, которым теперь держит свою пару и AI-карта (`aiBeat.tsx`). Одно число, оба читателя.',
+      en: 'The draw beat holds a revealed trigger at the centre for `REVEAL_HOLD = 900` before it leaves for the discard. `DrawCardStory` has `AI_HOLD = 4000`, but that is the AI branch’s pause (the table reads the effect), not a plain reveal’s — and a plain reveal has no approved value at all. `REVEAL_HOLD = 900` is this task’s own number, unconfirmed by anything. — OWNER: the value comes from the example scene, and the scene here is AI cards (the behaviour of AI cards at the centre is its subject), not Draw card (whose subject is the draw piles). Found: TABLE_HOLD = 2600, twice as long for Hallucination. The board edit is what is left. — CLOSED (#106): the edit is made. `REVEAL_HOLD = 900` no longer exists — `drawBeat.tsx` holds a revealed (non-AI) trigger on `TABLE_HOLD`, imported from `features/board-beats/toCentre.ts`, the same module the AI card now holds its own pair on (`aiBeat.tsx`). One number, both readers.',
     },
     where: {
-      ru: 'frontend: features/board-beats/drawBeat.tsx (REVEAL_HOLD)',
-      en: 'frontend: features/board-beats/drawBeat.tsx (REVEAL_HOLD)',
+      ru: 'frontend: features/board-beats/drawBeat.tsx, features/board-beats/toCentre.ts (TABLE_HOLD)',
+      en: 'frontend: features/board-beats/drawBeat.tsx, features/board-beats/toCentre.ts (TABLE_HOLD)',
     },
-    status: 'open',
+    status: 'ok',
   },
   {
     what: {
@@ -1162,14 +1164,14 @@ const ISSUES: Issue[] = [
       en: 'An event card banked home is announced as `discarded`',
     },
     problem: {
-      ru: '`bankToDiscard` (`packages/engine/src/fake/core.ts`) уводит карту с полем `event` обратно в колоду событий, но `discarded`, которым это отчитывается, называет пунктом назначения сброс всегда, а стоящая на столе карта несёт обычный `release-<slot>` id (нарочно, чтобы читаться как рядовой релиз) — доске нечем отличить один случай от другого. Не новое и не только про 503: `discardBeat` несёт тот же слепой пробел для любой событийной карты. #102-й `neutralized`-план сацерифайса утверждает один такой сброс как обычный, и сожжённый `ai-release` летит в кучу сброса, где никогда по-настоящему не приземляется. Закроет пункт назначения на `discarded`, или отдельное событие для «событийная карта вернулась в свою колоду».',
-      en: '`bankToDiscard` (`packages/engine/src/fake/core.ts`) routes a card carrying an `event` field back to the events deck, but the `discarded` it reports names discard as the destination always, and the placed card carries the plain `release-<slot>` id on purpose (so it reads as an ordinary release) — the board has no way to tell the two apart. Pre-existing and general, not only about a 503: `discardBeat` carries the same blind spot for any event card. #102’s `neutralized` sacrifice plan claims one such discard as ordinary, and the burnt `ai-release` flies to the discard heap, where it never really lands. Closed by a destination on `discarded`, or an event of its own for “an event card went home”.',
+      ru: '`bankToDiscard` (`packages/engine/src/fake/core.ts`) уводит карту с полем `event` обратно в колоду событий, но `discarded`, которым это отчитывается, называет пунктом назначения сброс всегда, а стоящая на столе карта несёт обычный `release-<slot>` id (нарочно, чтобы читаться как рядовой релиз) — доске нечем отличить один случай от другого. Не новое и не только про 503: `discardBeat` несёт тот же слепой пробел для любой событийной карты. #102-й `neutralized`-план сацерифайса утверждает один такой сброс как обычный, и сожжённый `ai-release` летит в кучу сброса, где никогда по-настоящему не приземляется. Закроет пункт назначения на `discarded`, или отдельное событие для «событийная карта вернулась в свою колоду». — ЗАКРЫТО (#106): `packages/engine/src/view.ts`’s `ReleasedView` несёт поле `event?: CardId` — events-deck id, которым карта уходит домой, если он у неё есть; `toBoardState.ts` кладёт его в `you.releaseEvent`/`opponents[].releaseEvent`, и `planBeats.ts` читает его через `releaseEventsOf` везде, где раньше пришлось бы гадать по `discarded`. `defenseBeat.tsx`’s `runNeutralized` (~:440) теперь посылает сожжённый в жертву событийный релиз `returnToDeck`, а не в кучу сброса.',
+      en: '`bankToDiscard` (`packages/engine/src/fake/core.ts`) routes a card carrying an `event` field back to the events deck, but the `discarded` it reports names discard as the destination always, and the placed card carries the plain `release-<slot>` id on purpose (so it reads as an ordinary release) — the board has no way to tell the two apart. Pre-existing and general, not only about a 503: `discardBeat` carries the same blind spot for any event card. #102’s `neutralized` sacrifice plan claims one such discard as ordinary, and the burnt `ai-release` flies to the discard heap, where it never really lands. Closed by a destination on `discarded`, or an event of its own for “an event card went home”. — CLOSED (#106): `packages/engine/src/view.ts`’s `ReleasedView` carries an `event?: CardId` field — the events-deck id the card goes home as, when it has one; `toBoardState.ts` puts it on `you.releaseEvent`/`opponents[].releaseEvent`, and `planBeats.ts` reads it through `releaseEventsOf` everywhere it used to have to guess off `discarded`. `defenseBeat.tsx`’s `runNeutralized` (~:440) now sends a sacrificed events-deck release `returnToDeck` instead of to the discard heap.',
     },
     where: {
-      ru: 'packages/engine: fake/core.ts (bankToDiscard), fake/triggers.ts (bankAlarm) + frontend: features/board-beats/planBeats.ts, discardBeat.tsx, defenseBeat.tsx',
-      en: 'packages/engine: fake/core.ts (bankToDiscard), fake/triggers.ts (bankAlarm) + frontend: features/board-beats/planBeats.ts, discardBeat.tsx, defenseBeat.tsx',
+      ru: 'packages/engine: fake/core.ts (bankToDiscard), view.ts (ReleasedView.event) + frontend: entities/game/board/toBoardState.ts (releaseEvent), features/board-beats/planBeats.ts (releaseEventsOf), discardBeat.tsx, defenseBeat.tsx (runNeutralized)',
+      en: 'packages/engine: fake/core.ts (bankToDiscard), view.ts (ReleasedView.event) + frontend: entities/game/board/toBoardState.ts (releaseEvent), features/board-beats/planBeats.ts (releaseEventsOf), discardBeat.tsx, defenseBeat.tsx (runNeutralized)',
     },
-    status: 'open',
+    status: 'ok',
   },
   {
     what: {
@@ -1183,6 +1185,51 @@ const ISSUES: Issue[] = [
     where: {
       ru: 'frontend: network/session/referee.ts',
       en: 'frontend: network/session/referee.ts',
+    },
+    status: 'open',
+  },
+  {
+    what: {
+      ru: 'Триггер AI сбанчен раньше, чем разрешится его собственный эффект',
+      en: 'An AI trigger is banked before its own effect resolves',
+    },
+    problem: {
+      ru: 'Правила отпускают триггер и эффект одним движением — оба стоят и уходят вместе (сценарный `resolveGeneric` у `AiCardsStory`, и собственный текст Bad Vibe в #106: «всё уходит разом: триггер в сброс, AI-карта в свою колоду»). Движок этого не делает: `fireTrigger` (`packages/engine/src/fake/triggers.ts`, ветка `trigger-ai`) заносит `discarded(trigger-ai)` сразу следом за `aiRevealed`, ДО того как `resolveAiEvent` вообще запускается, — а именно он решает, стоит ли AI-карта дальше и не открыт ли ею пендинг. К моменту, когда прогон доходит до вопроса «выдан ли прогноз», триггер уже в куче сброса, и когда прогноз остаётся висеть (`crush`, `neutralize503`-мимик, `handLimit`, `pickFromDiscard`), такт (`aiBeat.tsx`) вынужден оставить эффект стоять, а триггер отправить домой сразу — асимметрия, записанная в новом рецепте борда как чужая, движковая, а не решение такта. Та же форма, что у соседней находки про Security Bug — движок банкует карту в той же редукции, что поднимает пендинг, до того как стол успевает её показать.',
+      en: 'The rules let go of the trigger and the effect in one movement — both stand and leave together (`AiCardsStory`’s own `resolveGeneric`, and #106’s own Bad Vibe text: “everything leaves at once: trigger to the discard, AI card back to its deck”). The engine does not: `fireTrigger` (`packages/engine/src/fake/triggers.ts`, the `trigger-ai` branch) files `discarded(trigger-ai)` immediately after `aiRevealed`, BEFORE `resolveAiEvent` ever runs — and it is `resolveAiEvent` that decides whether the AI card stands on and whether it opens a pending. By the time the walk reaches the question of whether a prompt is owed, the trigger is already in the discard heap, and on the four endings that leave a prompt standing (`crush`, `neutralize503`’s mimic, `handLimit`, `pickFromDiscard`) the beat (`aiBeat.tsx`) is forced to leave the effect standing while sending the trigger home at once — an asymmetry the new board recipe records as the engine’s own, not a choice this beat made. Same shape as the neighbouring Security Bug finding — the engine banks a card in the same reduction that raises the pending, before the table gets a chance to show it.',
+    },
+    where: {
+      ru: 'packages/engine/src/fake/triggers.ts (fireTrigger, trigger-ai) + frontend: features/board-beats/aiBeat.tsx',
+      en: 'packages/engine/src/fake/triggers.ts (fireTrigger, trigger-ai) + frontend: features/board-beats/aiBeat.tsx',
+    },
+    status: 'open',
+  },
+  {
+    what: {
+      ru: 'Четыре старых слота центра на борде дублируют `centre.ts`',
+      en: 'The board’s four existing centre slots duplicate `centre.ts`',
+    },
+    problem: {
+      ru: '`_Board.module.css:74-102` несёт `-92px` (`.stageSlot`), `+92px` (`.costSlot`), `-180px` (`.sudoSlot`) и `42%` как обычные CSS-литералы — те же числа, что `TableCentre/centre.ts` называет единственным источником и отдаёт через `centrePlaceStyle`. Три новых места AI (#106) — `cause`, `effect`, `picked` — уже читают его; четыре старых — нет, они старше самого файла-источника. Пока оба места держат одни и те же четыре числа порознь, правка одного — это правка, которую нужно не забыть повторить во втором, и ничто не роняет сборку, если её забыли. Закроет перевод четырёх слотов на `centrePlaceStyle`, читающий наборы release и defence вместо своих чисел — то же движение, каким в этой задаче уже пошли три новых слота AI; не сделано здесь, потому что слоты уже отгружены и приняты (Defense Release, #101), а регрессия в раскладке боя хуже записанного дублирования.',
+      en: '`_Board.module.css:74-102` carries `-92px` (`.stageSlot`), `+92px` (`.costSlot`), `-180px` (`.sudoSlot`) and `42%` as plain CSS literals — the same numbers `TableCentre/centre.ts` declares the single source for and hands out through `centrePlaceStyle`. The three new AI places (#106) — `cause`, `effect`, `picked` — already read it; the four old ones do not, being older than the source file itself. While both places hold the same four numbers apart, editing one is an edit that has to be remembered for the other, and nothing fails the build if it is forgotten. What closes it: migrating the four slots onto `centrePlaceStyle`, reading the release and defence sets instead of their own numbers — the same move the three new AI slots already made in this task; not done here because the slots are shipped and approved (Defense Release, #101) and a layout regression is worse than a recorded duplication.',
+    },
+    where: {
+      ru: 'frontend: pages/board/[gameId]/_Board.module.css:74-102, table/TableCentre/centre.ts',
+      en: 'frontend: pages/board/[gameId]/_Board.module.css:74-102, table/TableCentre/centre.ts',
+    },
+    status: 'open',
+  },
+  {
+    what: {
+      ru: 'Крашу нечем показать вторую карту: релиз под своим Code Review',
+      en: 'A crush has no place for its second card: a release under its own Code Review',
+    },
+    problem: {
+      ru: 'Автоматическое разрушение слота (`destroySlot` без `reason`, `packages/engine/src/fake/triggers.ts:88-92`) выдаёт только `releaseDestroyed` — ни одного `discarded`, — а `toDiscardHeap` складывает кучу по одной карте на `discarded`. Половина закрыта: куча всё-таки показывает одну карту, свою заглушку верха сброса, и у заглушки есть поза `standInScatter(count)`; послебатчевый счётчик приезжает в `planBeats` четвёртым аргументом — так же и по той же причине, что `owed`, — такт летит ровно на эту позу (поле `rest` у `AiTail.crush`), и обе стороны читают одно значение, а не две копии формулы (I7). Осталась вторая карта: `bankToDiscard` кладёт spoils в порядке `[релиз, Code Review]` (проверено на движке), поэтому при наличии Code Review сверху оказывается он, релиз лежит под ним, и в куче для релиза нет ничего — ни события, ни заглушки; позы нет и у самого Code Review. Эти две карты такт отпускает без разброса: придумать им место значит завести второй источник для того, что рисует `toDiscardHeap`. Ветка сегодня недостижима — краш открывает пендинг всегда, потому что целевой слот занят по условию, а значит `sacrifice` всегда в `neutralizeOptions`. Закроет `reason` у автоматического `destroySlot`, чтобы он выдавал `discarded` на каждую карту spoils, как любая другая банковка.',
+      en: 'An automatic slot destruction (`destroySlot` with no `reason`, `packages/engine/src/fake/triggers.ts:88-92`) emits `releaseDestroyed` and no `discarded` at all, while `toDiscardHeap` folds the heap one card per `discarded`. Half of this is closed: the heap does still show one card — its stand-in for the discard’s top — and that stand-in has a pose, `standInScatter(count)`; the post-batch count now reaches `planBeats` as a fourth argument, the same way and for the same reason as `owed`, the beat flies onto exactly that pose (`AiTail.crush`’s `rest`), and both ends read one value rather than two copies of a formula (I7). What is left is the second card: `bankToDiscard` banks the spoils as `[release, Code Review]` (verified against the engine), so with a Code Review present it is the Code Review on top, the release lies buried under it, and the heap holds nothing for the release — no event, no stand-in; the Code Review has no pose of its own either. The beat releases those two with no scatter: inventing a place for them would make the board a second source for what `toDiscardHeap` draws. The branch is unreachable today — a crush always opens a pending, because its target slot is occupied by construction and `sacrifice` is therefore always in `neutralizeOptions`. What closes it: a `reason` on the automatic `destroySlot` so it emits `discarded` per spoil, like every other bank.',
+    },
+    where: {
+      ru: 'packages/engine/src/fake/triggers.ts:76-100 + frontend: entities/game/board/toBoardState.ts:160, features/board-beats/aiBeat.tsx',
+      en: 'packages/engine/src/fake/triggers.ts:76-100 + frontend: entities/game/board/toBoardState.ts:160, features/board-beats/aiBeat.tsx',
     },
     status: 'open',
   },

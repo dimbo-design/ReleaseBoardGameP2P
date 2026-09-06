@@ -1,6 +1,8 @@
 import type { DiscardReason, Event } from '@release/engine'
-import type { ReleaseSlots } from '@release/ui'
+import type { ReleaseSlots, ReleaseSupport, TablePending } from '@release/ui'
+import type { Scatter } from '@release/ui/animations'
 import type { BoardState } from '~/entities/game/board'
+import { standInScatter } from '~/entities/game/board'
 
 // A batch of engine events becomes the movements the board should play. Pure:
 // it reads the projection as it stood BEFORE the batch, because that is the
@@ -67,8 +69,71 @@ export type PileStep =
 /** who this peer is to a transfer — the same shape `PlannedDraw.mine` has, widened */
 export type TransferRole = 'taker' | 'victim' | 'watcher'
 
+// How an AI event's own scene ends, read off the events that follow it rather
+// than off the trigger's card id (see `aiTailAfter`). `standing` and `none`
+// are the pair no batch can tell apart on its own — see `owed` there.
+export type AiTail =
+  | { kind: 'zone'; slot: string; card: string }
+  | {
+      kind: 'crush'
+      slot: string
+      card: string
+      destination: 'events' | 'discard'
+      /**
+       * Where the heap will actually REST this release — the pose the board's
+       * own `toDiscardHeap` gives its stand-in for the discard's top, read
+       * through the shared `standInScatter` rather than spelled out again
+       * here (I7: one value, two readers; the flight and the rest must agree
+       * or the card jumps on its last frame).
+       *
+       * A stand-in, because there is no `discarded` event to key a real
+       * scatter off: an automatic `destroySlot` emits `releaseDestroyed`
+       * alone (fake/triggers.ts:88-92). Present ONLY when this release is
+       * what the discard's top will be — that is, when it goes to the heap at
+       * all AND wears no Code Review. `bankToDiscard` banks the spoils in the
+       * order `destroySlot` lists them, `[release, codeReview]`, so a
+       * protected release is buried under its own Code Review and the heap
+       * holds nothing for it; that half stays recorded in
+       * `docs/animations/backlog.md` rather than guessed at here.
+       */
+      rest?: Scatter
+      /**
+       * The Code Review tucked under the destroyed release. `destroySlot`'s
+       * spoils are the release AND its Code Review (fake/triggers.ts:87), so
+       * the two leave the zone together; without this the board flies one of
+       * them and the other simply blinks out of the zone.
+       *
+       * Read off the pre-batch projection's `support`, not off an event:
+       * an automatic destruction emits `releaseDestroyed` alone and names
+       * only the release. Same shape of answer `neutralized.spent[1]` gives
+       * the sacrifice ending, which is the same pair leaving for the same
+       * reason.
+       */
+      codeReview?: string
+    }
+  | { kind: 'turnEnded' }
+  | { kind: 'alarm' }
+  | { kind: 'standing'; alarm?: true }
+  | { kind: 'none' }
+
 export type BeatPlan =
   | { kind: 'draw'; key: string; draws: PlannedDraw[] }
+  // An AI trigger's whole scene, claimed from the pile onward — the card-less
+  // `drawn` that turned it up, its own reveal, and its own exit, folded into
+  // ONE beat rather than left for the draw plan to see (#106). `trigger` is
+  // the drawn card itself (`aiRevealed.aiCard`); `eventCard` is what it
+  // becomes on the table — the two are never the same id.
+  | {
+      kind: 'aiEvent'
+      key: string
+      eventId: number
+      player: string
+      pile: number
+      trigger: string
+      triggerDiscardId: number
+      eventCard: string
+      tail: AiTail
+    }
   // `gather` marks a defenceless player's whole table leaving as one sweep —
   // everything they owned gathered at the centre and held before it scatters
   // (#102). Absent for an ordinary discard, never `false`.
@@ -82,7 +147,32 @@ export type BeatPlan =
   //
   // `player` is carried because the runner asks whether the grid is ours before
   // it decides to adopt one; a relayed batch can carry two players' discards.
-  | { kind: 'handLimit'; key: string; player: string; cards: DiscardCard[] }
+  | {
+      kind: 'handLimit'
+      key: string
+      player: string
+      cards: DiscardCard[]
+      /**
+       * Bad Vibe-Coding's own shape (#106, Decision 6): the prompt was raised
+       * by an AI card, so the one card given up does NOT stand in the grid's
+       * own cell — `gridCells(1)` centres that at `dx 0`, underneath the AI
+       * card standing at the `effect` place. It stands at the `picked` place
+       * beside it instead.
+       *
+       * The runner needs this told to it, not left to the page: only the
+       * DISCARDER's board has a handoff to adopt (`_useHandLimit`'s own
+       * `aiPicked` render), and every other peer builds the grid from
+       * computed boxes — so without a plan fact those peers would build the
+       * overlap Decision 6 exists to prevent.
+       */
+      picked?: true
+      /**
+       * The AI card standing behind the prompt this batch answers, on its way
+       * back to the events deck. Same fact, same reasoning, as the
+       * `neutralized` plan's own `homeward` — see it for the full comment.
+       */
+      homeward?: string
+    }
   | { kind: 'reshuffle'; key: string; cards: number }
   | { kind: 'piles'; key: string; steps: PileStep[] }
   // A player is out: the full-screen video plays over a board that has already
@@ -223,6 +313,15 @@ export type BeatPlan =
       /** sacrifice only: the zone slot the answer flies out of */
       slot?: string
       /**
+       * Sacrifice only, alongside `slot`: where the destroyed release actually
+       * goes, read the same way `AiTail`'s crush reads it — an events-deck
+       * release is already claimed back by `bankToDiscard` regardless of what
+       * this resolution's own `discarded(reason: 'neutralized')` says, so the
+       * board must fly it home rather than into the heap it never really
+       * reaches (docs/animations/backlog.md:1062).
+       */
+      destination?: 'events' | 'discard'
+      /**
        * The alarm's own discard. Optional, not guaranteed: a `crush` shares
        * this event with no card standing anywhere, so the plan must survive
        * having no alarm to take away.
@@ -230,6 +329,34 @@ export type BeatPlan =
       alarm?: { eventId: number; card: string }
       /** the Debugger, or the sacrificed release and its Code Review */
       spent: { eventId: number; card: string }[]
+      /**
+       * The AI card standing behind the prompt this batch answers, on its way
+       * back to the events deck. Selected off the pre-batch projection —
+       * `before.pending` is by definition the projection that still had the
+       * prompt open (I1) — with a plain equality rather than a rule
+       * reconstructed from card ids, the same way `handTransfer`'s `named` is
+       * selected (#105).
+       *
+       * The card does not fly home in the beat that revealed it, because it
+       * has to stand and explain the prompt. This is where it goes.
+       */
+      homeward?: string
+    }
+  // A Release comes back out of the discard — `ai-inside` (#106), and Git
+  // Cherry-pick once #61 lands. The CHOICE is private (`pendingView` gates
+  // `pickFromDiscard.options` behind `mine`), so it is a staging hook's job,
+  // not this file's; what this plans is the OUTCOME, which `takenFromDiscard`
+  // makes public for the whole table the instant it is resolved.
+  | {
+      kind: 'takenFromDiscard'
+      key: string
+      eventId: number
+      player: string
+      card: string
+      mine: boolean
+      /** the AI card standing behind the prompt this batch answers — same
+       * fact, same reasoning, as `neutralized`'s own `homeward` above. */
+      homeward?: string
     }
 
 // Reasons that CAN take a card out of a release slot — "can", not "always do".
@@ -316,14 +443,17 @@ export function classifyPiles(before: number[], after: number[]): PileStep | nul
 // that turned it up, and its `discarded` immediately after that
 // (fake/triggers.ts:123,139). Looking ahead by position rather than scanning the
 // batch is what keeps a later, unrelated reveal from being read as this draw's.
+//
+// Handles only the base Error 503 (`revealed`) now: an AI trigger is claimed
+// whole by the `drawn` branch below, before its own reveal is ever reached
+// here.
 function revealAfter(
   events: Event[],
   i: number,
 ): { card: string; discardId?: number; neutralized?: true } | null {
   const reveal = events[i + 1]
   if (!reveal) return null
-  const card =
-    reveal.type === 'revealed' ? reveal.card : reveal.type === 'aiRevealed' ? reveal.aiCard : null
+  const card = reveal.type === 'revealed' ? reveal.card : null
   if (card == null) return null
   // A standing Monitoring answers a 503 inside the very draw that turned it up
   // (#103 testing, problem 2), and the `neutralized` that says so sits between
@@ -341,6 +471,107 @@ function revealAfter(
   // a 503 answered this way never raised a pending, so nothing lights the alarm
   // off the projection and the draw has to carry that fact itself.
   return { card, discardId: filed.id, ...(answered ? { neutralized: true as const } : {}) }
+}
+
+// The zone a player's releases stand in, on the board that is still on screen
+// (I1). `sourceOf` reaches for the same two places; this asks a different
+// question of them, so it is its own two lines rather than a parameter on that.
+const releaseEventsOf = (before: BoardState, player: string) =>
+  player === before.selfId
+    ? before.you.releaseEvent
+    : before.opponents.find((o) => o.id === player)?.releaseEvent
+
+// The Code Review lying under a release, on the board that is still on screen
+// (I1) — the third question asked of those same two places, and its own two
+// lines for the same reason `releaseEventsOf` is.
+const releaseSupportOf = (before: BoardState, player: string) =>
+  player === before.selfId
+    ? before.you.support
+    : before.opponents.find((o) => o.id === player)?.support
+
+// The AI card standing behind whatever prompt this batch answers, read off the
+// PRE-BATCH projection with a plain equality — `before.pending` is by
+// definition the projection that still had the prompt open (I1), so there is
+// nothing here to reconstruct from a card id. `'source' in before.pending` is
+// what makes this compile against the union: only `neutralize503`, `crush`,
+// `handLimit` and `pickFromDiscard` carry `source` at all, and every other
+// member (`defend`, `requestCard`, `giveCard`, `discardForRelease`) has no such
+// field for TypeScript to narrow onto.
+const homewardOf = (before: BoardState): { homeward?: string } => {
+  const pending = before.pending
+  return pending && 'source' in pending && pending.source ? { homeward: pending.source } : {}
+}
+
+// Whether a hand-limit run is Bad Vibe-Coding's rather than a turn's end —
+// the same question, off the same pre-batch pending (I1), that
+// `_useHandLimit.tsx`'s own `aiPicked` asks of the live one. Derived here and
+// carried on the plan because the ANSWER has to reach peers who never render
+// that hook at all: the discarder adopts a grid the page already stood, and
+// everyone else builds one from boxes this fact chooses.
+//
+// The kind check is what `homewardOf` above deliberately does without: that
+// one asks "is an AI card standing behind whatever this batch answers", which
+// is true of four pendings; this one asks "is THIS run the AI's", and only a
+// `handLimit` pending can be.
+const pickedPlace = (before: BoardState): { picked?: true } => {
+  const pending = before.pending
+  return pending?.kind === 'handLimit' && pending.source ? { picked: true as const } : {}
+}
+
+// What the AI card DID, read from the events behind it rather than from its own
+// id. That is this file's standing rule (see the DDoS note on `attacked`), and
+// here it earns its keep twice: `released`/`placed` following is what says the
+// event card stayed on the table instead of going home, and `revealed` followed
+// by `eliminated` is what separates a defenceless 503 from one that will be
+// answered.
+//
+// `owed` is the one thing no batch can report about itself: raising a pending
+// emits no event, so a crush over an empty slot and a crush that will be
+// answered are the same empty batch and opposite scenes.
+function aiTailAfter(
+  events: Event[],
+  i: number,
+  before: BoardState,
+  eventCard: string,
+  owed: TablePending | null | undefined,
+  discardAfter: number | undefined,
+): AiTail {
+  const next = events[i + 3]
+  if (next?.type === 'released') {
+    return { kind: 'zone', slot: next.slot, card: next.card }
+  }
+  if (next?.type === 'placed') {
+    return { kind: 'zone', slot: 'monitoring', card: next.card }
+  }
+  if (next?.type === 'releaseDestroyed') {
+    const home =
+      releaseEventsOf(before, next.player)?.[next.slot as keyof ReleaseSlots] !== undefined
+    const aux = releaseSupportOf(before, next.player)?.[next.slot as keyof ReleaseSupport]
+    // Only the card that ends up on TOP of the discard has a pose the heap
+    // will actually rest it on — see `rest`'s own comment on `AiTail`.
+    const rest =
+      !home && !aux && discardAfter !== undefined ? standInScatter(discardAfter) : undefined
+    return {
+      kind: 'crush',
+      slot: next.slot,
+      card: next.card,
+      destination: home ? 'events' : 'discard',
+      ...(rest ? { rest } : {}),
+      ...(aux ? { codeReview: aux.id } : {}),
+    }
+  }
+  if (next?.type === 'turnEnded') return { kind: 'turnEnded' }
+  const mimic = next?.type === 'revealed' && next.card === eventCard
+  // A prompt is owed for THIS card — not merely "some pending exists", which a
+  // relayed batch could have carried in from anywhere. Only the four pendings
+  // an AI effect can raise carry `source` at all, so the equality is the whole
+  // test; no kind check is needed in front of it. `'source' in owed` is what
+  // makes the check compile against the union: some of its members (`defend`,
+  // `requestCard`, …) carry no `source` field at all.
+  const standing = owed != null && 'source' in owed && owed.source === eventCard
+  if (standing) return { kind: 'standing', ...(mimic ? { alarm: true as const } : {}) }
+  if (mimic) return { kind: 'alarm' }
+  return { kind: 'none' }
 }
 
 // The engine pays the cost and places the release in one reduction, emitting
@@ -373,10 +604,29 @@ interface OpenAttack {
   sudo: boolean
 }
 
-export function planBeats(events: Event[], before: BoardState): BeatPlan[] {
+export function planBeats(
+  events: Event[],
+  before: BoardState,
+  // The pending this batch LEFT standing — `useBeats`'s `live.pending`. The one
+  // fact a batch cannot report about itself, because raising a pending emits no
+  // event. Optional so every existing caller and test keeps compiling.
+  owed?: TablePending | null,
+  // The discard's card count AFTER this batch — `useBeats`'s
+  // `live.decks.discardCount`. Passed for the same reason `owed` is: it is a
+  // fact about the batch that the batch cannot report about itself, because
+  // the engine banks some cards with no event at all. READ off the projection
+  // that will render the heap, never reconstructed from `before` plus what
+  // this batch appears to have banked — that arithmetic would make this file a
+  // second source for the engine's own banking order. Optional so every
+  // existing caller and test keeps compiling; absent, the crush ending simply
+  // carries no resting pose.
+  discardAfter?: number,
+): BeatPlan[] {
   const claimed = new Set<number>()
-  // discards the draw beat has taken over — a revealed trigger leaves from the
-  // centre, so the discard planner must not claim it a second time
+  // Events another plan has already taken over, keyed by id rather than type —
+  // a revealed trigger's own discard leaves from the centre, so the discard
+  // planner must not claim it a second time, and an AI event's own `released`
+  // tail must not be re-planned by the ordinary release branch either.
   const owned = new Set<number>()
   const plans: BeatPlan[] = []
   let piles = before.decks.main
@@ -440,6 +690,40 @@ export function planBeats(events: Event[], before: BoardState): BeatPlan[] {
   for (let i = 0; i < events.length; i++) {
     const e = events[i]
     if (e.type === 'drawn') {
+      // AN AI TRIGGER IS NOT A DRAW. It is its own scene from the pile onward,
+      // so it is claimed whole here and the draw plan never sees it — the
+      // trigger's WHOLE life then lives inside one beat, which is the invariant
+      // `drawBeat`'s own header defends.
+      const ai = events[i + 1]
+      if (e.card === undefined && ai?.type === 'aiRevealed') {
+        flush()
+        const filed = events[i + 2]
+        // The trigger's own exit, claimed so the discard planner cannot take it
+        // a second time — the same `owned` set `revealAfter` writes to.
+        if (filed?.type === 'discarded' && filed.card === ai.aiCard) owned.add(filed.id)
+        // The tail's own `released`, when the effect keeps the event card on
+        // the table (`zone`): `aiTailAfter` only PEEKS at it to read the slot
+        // and card, so without this the `released` branch below would reach
+        // the same event on the next iteration and plan it a second time — one
+        // event, two independent beats. Claimed by id, never by type: only
+        // `released` collides with a top-level branch (`placed`,
+        // `releaseDestroyed`, `revealed`, `turnEnded` have none, and
+        // `eliminated` firing for the defenceless-503 sweep is intended).
+        const tail = events[i + 3]
+        if (tail?.type === 'released') owned.add(tail.id)
+        plans.push({
+          kind: 'aiEvent',
+          key: `ai:${e.id}`,
+          eventId: e.id,
+          player: e.player,
+          pile: e.pile,
+          trigger: ai.aiCard,
+          triggerDiscardId: filed?.type === 'discarded' ? filed.id : -1,
+          eventCard: ai.eventCard,
+          tail: aiTailAfter(events, i, before, ai.eventCard, owed, discardAfter),
+        })
+        continue
+      }
       if (!draw) flush()
       const reveal = e.card === undefined ? revealAfter(events, i) : null
       if (reveal?.discardId !== undefined) owned.add(reveal.discardId)
@@ -484,6 +768,10 @@ export function planBeats(events: Event[], before: BoardState): BeatPlan[] {
       continue
     }
     if (e.type === 'released') {
+      // Already claimed as an AI event's own tail (`kind: 'zone'`) — the AI
+      // event owns this whole scene, and a second, independent `releasePlaced`
+      // for the same id would be two beats flying one card.
+      if (owned.has(e.id)) continue
       flush()
       const cost = costBefore(events, i)
       plans.push({
@@ -627,6 +915,26 @@ export function planBeats(events: Event[], before: BoardState): BeatPlan[] {
       })
       continue
     }
+    if (e.type === 'takenFromDiscard') {
+      flush()
+      // Cherry-pick's second pick (`to: 'deck'`) is a private placement, not
+      // a beat — its card is redacted for everyone but the placer, and there
+      // is no board surface for it yet (#61). Only the public half plans
+      // anything; the other is flushed and passed straight through, the
+      // default this whole file already keeps for an event with no
+      // choreography.
+      if (e.to !== 'hand') continue
+      plans.push({
+        kind: 'takenFromDiscard',
+        key: `taken:${e.id}`,
+        eventId: e.id,
+        player: e.player,
+        card: e.card,
+        mine: e.player === before.selfId,
+        ...homewardOf(before),
+      })
+      continue
+    }
     if (e.type === 'neutralized') {
       // One event, one beat — the exchange is its own gesture, never coalesced
       // with what came before or after.
@@ -640,11 +948,21 @@ export function planBeats(events: Event[], before: BoardState): BeatPlan[] {
       let alarm: { eventId: number; card: string } | undefined
       const spent: { eventId: number; card: string }[] = []
       let slot: string | undefined
+      // Read the same way `AiTail`'s crush reads it: `bankToDiscard` already
+      // sent an events-deck release home the instant it left the zone,
+      // regardless of what this resolution's own `discarded(reason:
+      // 'neutralized')` says — so the board has to ask the same question the
+      // crush ending asks, not trust the discard event's word for where the
+      // card went (docs/animations/backlog.md:1062).
+      let destination: 'events' | 'discard' | undefined
       let j = i + 1
       while (j < events.length) {
         const d = events[j]
         if (d.type === 'releaseDestroyed' && d.player === e.player) {
           slot = d.slot
+          const home =
+            releaseEventsOf(before, e.player)?.[d.slot as keyof ReleaseSlots] !== undefined
+          destination = home ? 'events' : 'discard'
           j++
           continue
         }
@@ -666,11 +984,25 @@ export function planBeats(events: Event[], before: BoardState): BeatPlan[] {
         owned.add(d.id)
         j++
       }
-      // An exchange with nothing in it is not a beat. Reachable exactly once:
-      // a 503 a standing Monitoring answered by itself, whose only moving card
-      // is the alarm — and the DRAW that turned it up already owns that flight.
-      // A beat here would hold the table for its own hold with nothing to show.
-      if (!alarm && spent.length === 0) {
+      // The AI card's road home, read before the guard below and not after it
+      // — because it is the second job this batch can be carrying, and the
+      // guard used to know only about the first.
+      const homeward = homewardOf(before)
+      // An exchange with nothing in it is not a beat: a 503 a standing
+      // Monitoring answered by itself, whose only moving card is the alarm —
+      // and the DRAW that turned it up already owns that flight. A beat here
+      // would hold the table for its own hold with nothing to show.
+      //
+      // …UNLESS a card is still owed its road home (#106). Answering a `crush`
+      // or the `ai-error-503` mimic with MONITORING produces neither half of
+      // the test above — `pending.card` is null for both, so `bankAlarm` logs
+      // no discard, and Monitoring costs no card, so nothing is `spent` — and
+      // yet an AI card is standing at the `effect` place waiting for exactly
+      // this batch to take it home. Dropped here, it never flies at all: it
+      // simply vanishes when the queue drains to `live`. So the emptiness that
+      // makes this "not a beat" is emptiness of BOTH jobs, not just the
+      // exchange's.
+      if (!alarm && spent.length === 0 && !homeward.homeward) {
         i = j - 1
         continue
       }
@@ -681,8 +1013,10 @@ export function planBeats(events: Event[], before: BoardState): BeatPlan[] {
         player: e.player,
         method: e.method,
         ...(slot ? { slot } : {}),
+        ...(destination ? { destination } : {}),
         ...(alarm ? { alarm } : {}),
         spent,
+        ...homeward,
       })
       i = j - 1 // the discards this plan claimed are consumed
       continue
@@ -703,7 +1037,14 @@ export function planBeats(events: Event[], before: BoardState): BeatPlan[] {
         if (!source) continue
         if (handLimit && handLimit.player !== e.player) flush()
         if (!handLimit) flush()
-        handLimit ??= { kind: 'handLimit', key: `handLimit:${e.id}`, player: e.player, cards: [] }
+        handLimit ??= {
+          kind: 'handLimit',
+          key: `handLimit:${e.id}`,
+          player: e.player,
+          cards: [],
+          ...pickedPlace(before),
+          ...homewardOf(before),
+        }
         handLimit.cards.push({ key: `d${e.id}`, eventId: e.id, card: e.card, source })
         continue
       }

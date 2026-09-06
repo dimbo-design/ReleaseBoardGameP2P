@@ -50,6 +50,24 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
   }
 })
 
+// The arguments every `planBeats` call was made with, delegating to the real
+// implementation — so this records the wire without changing what any other
+// test in this file exercises. What it is here for: the two facts a batch
+// cannot report about itself (`owed`, and the post-batch discard count) reach
+// the planner only because this call site passes them, and dropping either is
+// a silent loss no assertion on a beat's OUTPUT can see.
+const planned = vi.hoisted(() => ({ calls: [] as unknown[][] }))
+vi.mock('./planBeats', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./planBeats')>()
+  return {
+    ...real,
+    planBeats: (...args: Parameters<typeof real.planBeats>) => {
+      planned.calls.push(args)
+      return real.planBeats(...args)
+    },
+  }
+})
+
 const card = (id: string) => cardById(id) as CardData
 
 // The board BEFORE the batch: the card is still in the fan. This is what the
@@ -513,6 +531,24 @@ it('keeps the rematch’s opening when it lands while a beat is in flight', asyn
     await new Promise((r) => setTimeout(r, 80))
   })
   expect(log).toEqual(['intro', 'intro2'])
+})
+
+// The heap's own stand-in pose is keyed by the discard count AFTER the batch
+// (`toBoardState`'s `standInScatter`), and a plan reads it to land a silently
+// banked card exactly where the heap will rest it (#106, the crush ending).
+// That count exists nowhere in the events — the engine banks some cards with no
+// event at all — so it reaches the planner only through this argument.
+it('hands the planner the discard count the batch left behind', async () => {
+  motion.reduced = false
+  planned.calls = []
+  sent.hang = false
+  const { rerender } = render(<Probe live={preDiscard} events={[]} anchors={stub} />)
+  rerender(<Probe live={afterDiscard} events={[discardEvent]} anchors={stub} />)
+  await flush()
+  const args = planned.calls.at(-1)
+  // …the POST-batch count, not the projection the beat animates away from
+  expect(args?.[3]).toBe(afterDiscard.decks.discardCount)
+  expect(args?.[3]).not.toBe(preDiscard.decks.discardCount)
 })
 
 // ===== the sweep's alarm (#102) — the wire between planBeats' `gather` flag

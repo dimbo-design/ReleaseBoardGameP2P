@@ -25,8 +25,7 @@ export interface PendingPromptCopy {
   requestCard: { prompt: string; action: string }
   giveCard: { prompt: string; action: string }
   handLimit: { prompt: string; action: string }
-  // Git Cherry-pick's discard pick. No case in the switch below yet renders
-  // it — that is a later task — but the copy contract must stay total over
+  // Git Cherry-pick's discard pick. The copy contract must stay total over
   // every TablePending kind, since `copy[pending.kind]` indexes it.
   pickFromDiscard: { prompt: string; action: string }
 }

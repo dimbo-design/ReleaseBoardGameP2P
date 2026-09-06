@@ -12,7 +12,13 @@ import type { BeatPlan } from './planBeats'
 // and `useDiscardExit` is replaced at the leaf — its own `send` reaches `play`
 // through a sibling import the barrel mock never sees.
 const raises = vi.hoisted(() => ({ keys: [] as string[], at: [] as Rect[] }))
-const played = vi.hoisted(() => ({ moves: [] as { from: Rect; to: Rect }[] }))
+const played = vi.hoisted(() => ({
+  moves: [] as { from: Rect; to: Rect }[],
+  // every preset name `play()` was called with, in order — the road home's
+  // own test tells `returnToDeck` apart from the grid's `playToCenter` legs.
+  names: [] as string[],
+  calls: [] as { name: string; params: Record<string, unknown> }[],
+}))
 const exits = vi.hoisted(() => ({ items: [] as Leaving[] }))
 const order = vi.hoisted(() => ({ calls: [] as string[] }))
 const resets = vi.hoisted(() => ({ flyer: 0, exit: 0 }))
@@ -38,6 +44,8 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
     },
     play: (...args: Parameters<typeof real.play>) => {
       const [name, , params = {}] = args
+      played.names.push(name)
+      played.calls.push({ name, params })
       if (name === 'playToCenter') {
         order.calls.push('move')
         played.moves.push({ from: params.from as Rect, to: params.to as Rect })
@@ -58,6 +66,8 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
     }),
   }
 })
+
+const PICKED_BOX: Rect = { left: 877, top: 300, width: 150, height: 210 }
 
 const node = () => document.createElement('div')
 
@@ -145,6 +155,14 @@ function harness(handoff?: HandLimitHandoff | null, overrides: Partial<BoardAnch
     centre: { current: node() },
     hand: { current: node() },
     discardBox: { current: node() },
+    // Distinctive rects — the road home's own test tells `effect`'s box
+    // apart from `eventsBox`'s by these.
+    effect: { current: nodeAt({ left: 450, top: 300, width: 150, height: 210 }) },
+    // The board's own `picked` place (`centrePlaceStyle('aiPick', 'picked')`),
+    // nowhere near the grid's own centred cell — Decision 6's test tells the
+    // two apart by these.
+    picked: { current: nodeAt(PICKED_BOX) },
+    eventsBox: { current: nodeAt({ left: 20, top: 20, width: 150, height: 210 }) },
     handSlotAt: () => node(),
     releaseSlot: () => node(),
     seatBox: () => ({ left: 0, top: 0, width: 150, height: 210 }) as Rect,
@@ -156,7 +174,7 @@ function harness(handoff?: HandLimitHandoff | null, overrides: Partial<BoardAnch
     api.beat = useHandLimitBeat(anchors, ref)
     return <>{api.beat.overlay}</>
   }
-  return { api, Probe, ref }
+  return { api, Probe, ref, anchors }
 }
 
 // The grid the local player built is standing: the beat must fly THOSE cells
@@ -359,6 +377,42 @@ it('publishes the cards out of the hand and leaves the heap alone', async () => 
   expect(published[0].decks.discardCount).toBe(base.decks.discardCount)
 })
 
+// The road home (#106): the AI card standing behind this prompt
+// (`_Board.tsx`'s `aiStanding`, off `pending.source`) leaves for the events
+// deck on the very batch that answers the prompt it explains — Bad
+// Vibe-Coding's own `handLimit` pending (fake/triggers.ts:419).
+it('sends the AI card standing behind the prompt home once this batch answers it', async () => {
+  raises.keys.length = 0
+  raises.at.length = 0
+  played.names.length = 0
+  played.calls.length = 0
+  exits.items.length = 0
+  const { api, Probe, anchors } = harness(null)
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.run({ ...plan(), homeward: 'ai-bad-vibe-coding' }, { base, publish: () => {} }),
+  )
+  expect(played.names).toContain('returnToDeck')
+  const home = played.calls.find((c) => c.name === 'returnToDeck')
+  const effectBox = anchors.effect.current?.getBoundingClientRect()
+  const eventsBox = anchors.eventsBox.current?.getBoundingClientRect()
+  expect(home?.params).toMatchObject({
+    from: { left: effectBox?.left, top: effectBox?.top },
+    to: { left: eventsBox?.left, top: eventsBox?.top },
+  })
+})
+
+it('adds no road home when the batch answered nobody’s AI card', async () => {
+  raises.keys.length = 0
+  played.names.length = 0
+  played.calls.length = 0
+  exits.items.length = 0
+  const { api, Probe } = harness(null)
+  render(<Probe />)
+  await drive(() => api.beat?.run(plan(), { base, publish: () => {} }))
+  expect(played.names).not.toContain('returnToDeck')
+})
+
 it('drops a card whose source rect is missing and leaves state to the projection', async () => {
   raises.keys.length = 0
   exits.items.length = 0
@@ -424,4 +478,101 @@ it('resets both the grid carriers and the discard-exit carriers', () => {
   act(() => api.beat?.reset())
   expect(resets.flyer).toBe(1)
   expect(resets.exit).toBe(1)
+})
+
+// DECISION 6, ON EVERY BOARD (#106). Bad Vibe-Coding's one given-up card does
+// not belong in the grid's own shape: `gridCells(1)` centres its cell at
+// `dx 0`, underneath the AI card standing at the `effect` place. The page's
+// own render already knew that (`_useHandLimit`'s `aiPicked`), but the page
+// only exists on the DISCARDER's board — every other peer reaches this beat
+// with no handoff to adopt, so the fact has to travel on the plan.
+it('stands Bad Vibe’s given-up card at the picked place, not in the grid', async () => {
+  raises.keys.length = 0
+  raises.at.length = 0
+  played.moves.length = 0
+  exits.items.length = 0
+  const seat: Rect = { left: 25, top: 35, width: 145, height: 203 }
+  const { api, Probe } = harness(null, {
+    bg: { current: nodeAt({ left: 100, top: 200, width: 1000, height: 600 }) },
+    seatBox: vi.fn(() => seat),
+  })
+  const badVibe: Extract<BeatPlan, { kind: 'handLimit' }> = {
+    kind: 'handLimit',
+    key: 'handLimit:4',
+    player: 'p2',
+    picked: true,
+    cards: [{ key: 'd4', eventId: 4, card: 'attack-bug', source: { kind: 'seat', player: 'p2' } }],
+  }
+  render(<Probe />)
+  await drive(() => api.beat?.run(badVibe, { base, publish: () => {} }))
+
+  // it flew to the `picked` anchor's own box — the board positions that node
+  // from `centrePlaceStyle('aiPick', 'picked')`, so this IS `centre.ts`'s
+  // geometry and not a number this test invented
+  expect(played.moves).toEqual([{ from: seat, to: PICKED_BOX }])
+  expect(exits.items.map((i) => i.from)).toEqual([PICKED_BOX])
+})
+
+it('still builds the ordinary centred grid when the run is a turn’s end', async () => {
+  // The contrast that makes the assertion above mean something: the same one
+  // card, the same table, no `picked` — and it goes to the grid's own cell,
+  // which is centred on the table and nowhere near the picked place.
+  raises.keys.length = 0
+  played.moves.length = 0
+  exits.items.length = 0
+  const seat: Rect = { left: 25, top: 35, width: 145, height: 203 }
+  const { api, Probe } = harness(null, {
+    bg: { current: nodeAt({ left: 100, top: 200, width: 1000, height: 600 }) },
+    seatBox: vi.fn(() => seat),
+  })
+  const turnEnd: Extract<BeatPlan, { kind: 'handLimit' }> = {
+    kind: 'handLimit',
+    key: 'handLimit:4',
+    player: 'p2',
+    cards: [{ key: 'd4', eventId: 4, card: 'attack-bug', source: { kind: 'seat', player: 'p2' } }],
+  }
+  render(<Probe />)
+  await drive(() => api.beat?.run(turnEnd, { base, publish: () => {} }))
+
+  expect(played.moves).toHaveLength(1)
+  expect(played.moves[0].to).not.toEqual(PICKED_BOX)
+  // centred on the table (left 100 + width 1000) — `gridCells(1)`'s own `dx 0`
+  expect(played.moves[0].to.left + played.moves[0].to.width / 2).toBe(600)
+})
+
+// The duplicate this closes: the shadow still carried the prompt, so
+// `_Board.tsx`'s `aiStanding` kept rendering the AI card in the `effect` slot
+// while `sendHomeward` raised its carrier at that same rect and flew it away.
+it('lets the pending go before the AI card flies home', async () => {
+  played.names.length = 0
+  const withPending = {
+    ...base,
+    pending: {
+      kind: 'handLimit',
+      player: 'p1',
+      excess: 1,
+      options: [],
+      source: 'ai-bad-vibe-coding',
+    },
+  } as unknown as BoardState
+  // each publish is stamped with the flights that had already played when it
+  // happened — presence alone would survive a publish made AFTER the flight
+  const stamps: { pending: unknown; plays: string[] }[] = []
+  const { api, Probe } = harness(null)
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.run(
+      { ...plan(), homeward: 'ai-bad-vibe-coding' },
+      {
+        base: withPending,
+        publish: (s) => stamps.push({ pending: s.pending, plays: [...played.names] }),
+      },
+    ),
+  )
+  expect(played.names).toContain('returnToDeck')
+  const cleared = stamps.find((st) => st.pending === null)
+  expect(cleared).toBeDefined()
+  expect(cleared?.plays).not.toContain('returnToDeck')
+  // and the takeoff publish that came before it did NOT put the flown cards back
+  expect(stamps.at(-1)?.pending).toBeNull()
 })

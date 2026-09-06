@@ -1,7 +1,7 @@
 import type { Event, PlayerView } from '@release/engine'
 import { HEAP_SHOW, scatterAt } from '@release/ui/animations'
 import { describe, expect, it } from 'vitest'
-import { type HistoryLabels, toBoardState } from './toBoardState'
+import { type HistoryLabels, standInScatter, toBoardState } from './toBoardState'
 
 // A minimal but real PlayerView — every field is the engine's actual shape,
 // not a mock. `hand[0].id` is a catalogue id ('attack-bug'); `hand[0].uid` is
@@ -204,6 +204,32 @@ describe('toBoardState', () => {
     })
   })
 
+  it('carries the events-deck identity of a standing AI release, for you and for an opponent', () => {
+    const withEvents: PlayerView = {
+      ...view,
+      self: {
+        ...view.self,
+        release: {
+          frontend: { uid: 'ai#1', card: 'release-frontend', event: 'ai-release-frontend' },
+          backend: { uid: 'base#1', card: 'release-backend' },
+        },
+      },
+      opponents: [
+        {
+          ...view.opponents[0],
+          release: {
+            monitoring: { uid: 'ai#2', card: 'protection-monitoring', event: 'ai-monitoring' },
+          },
+        },
+      ],
+    }
+    const state = toBoardState(withEvents, [], labels)
+    expect(state.you.releaseEvent).toEqual({ frontend: 'ai-release-frontend' })
+    expect(state.opponents[0].releaseEvent).toEqual({ monitoring: 'ai-monitoring' })
+    // the slots themselves are unchanged — the card still reads as an ordinary one
+    expect(state.you.release.frontend?.id).toBe('release-frontend')
+  })
+
   it('carries a defend pending openedAt through unchanged, alongside deadline', () => {
     const withPending: PlayerView = {
       ...view,
@@ -289,6 +315,12 @@ describe('the discard heap', () => {
     // Keyed out of the event ids' range, so the stand-in can never take a real
     // card's pose (see the implementation note on negative keys).
     expect(heap.at(-1)).toMatchObject(scatterAt(-5))
+    // …and it is the SHARED value, not a formula written twice. `planBeats`
+    // reads `standInScatter` to fly a silently banked card onto exactly this
+    // pose (#106, the crush ending), so the flight and the rest are one value
+    // (I7); a key spelled out separately here would let the two drift apart
+    // with nothing failing.
+    expect(heap.at(-1)).toMatchObject(standInScatter(4))
   })
 
   // The pile can EMPTY without the feed saying so card by card: refillFromDiscard

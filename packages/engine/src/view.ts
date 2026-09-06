@@ -16,6 +16,13 @@ export interface ReleasedView {
   uid: CardUid
   card: CardId
   codeReview?: CardId
+  // The events-deck id this instance goes home as when it leaves the table
+  // (general.md §6.4). A standing AI release wears the plain `release-<slot>`
+  // id on purpose, so it reads and plays as an ordinary one — which leaves the
+  // board no other way to tell where a destroyed card actually goes, because
+  // `bankToDiscard` routes it silently and `discarded` names the discard either
+  // way (docs/animations/backlog.md, closed by this field).
+  event?: CardId
 }
 
 export interface ReleaseView {
@@ -63,11 +70,38 @@ export type PendingView =
     }
   // null for the ai-error-503 mimic, which has no card standing anywhere to
   // show (state.ts's Pending carries the same reasoning).
-  | { kind: 'neutralize503'; player: PlayerId; card: CardId | null; methods: NeutralizeMethod[] }
-  | { kind: 'crush'; player: PlayerId; slot: ReleaseSlot; methods: NeutralizeMethod[] }
+  | {
+      kind: 'neutralize503'
+      player: PlayerId
+      card: CardId | null
+      methods: NeutralizeMethod[]
+      // The AI event card this prompt belongs to, so the table can keep it
+      // standing while the answer is chosen. Public, like `pickFromDiscard`'s:
+      // the whole table watched it be revealed.
+      source?: CardId
+    }
+  | {
+      kind: 'crush'
+      player: PlayerId
+      slot: ReleaseSlot
+      methods: NeutralizeMethod[]
+      // The AI event card this prompt belongs to, so the table can keep it
+      // standing while the answer is chosen. Public, like `pickFromDiscard`'s:
+      // the whole table watched it be revealed.
+      source?: CardId
+    }
   | { kind: 'requestCard'; player: PlayerId; target: PlayerId }
   | { kind: 'giveCard'; player: PlayerId; requested: CardId }
-  | { kind: 'handLimit'; player: PlayerId; excess: number; options: CardUid[] }
+  | {
+      kind: 'handLimit'
+      player: PlayerId
+      excess: number
+      options: CardUid[]
+      // The AI event card this prompt belongs to, so the table can keep it
+      // standing while the answer is chosen. Public, like `pickFromDiscard`'s:
+      // the whole table watched it be revealed.
+      source?: CardId
+    }
   // Full card identity, but gated behind `mine` in pendingView (attacks.ts)
   // like the other owner-only variants: only discardTop/discardCount are
   // ever public (project.ts), so the discard's full contents are not.

@@ -317,7 +317,11 @@ export function resolveAiEvent(
       if (!state.players[player].release[slot]) return { ...state, eventSeq: log.seq }
       const methods = neutralizeOptions(state, player)
       if (methods.length === 0) return destroySlot(state, log, player, slot)
-      return { ...state, pending: { kind: 'crush', player, slot, methods }, eventSeq: log.seq }
+      return {
+        ...state,
+        pending: { kind: 'crush', player, slot, methods, source: event.id },
+        eventSeq: log.seq,
+      }
     }
 
     case 'ai-release-frontend':
@@ -412,7 +416,7 @@ export function resolveAiEvent(
       // consequence: `endsTurn` false keeps the seat with its owner.
       return {
         ...state,
-        pending: { kind: 'handLimit', player, excess: 1, endsTurn: false },
+        pending: { kind: 'handLimit', player, excess: 1, endsTurn: false, source: event.id },
         eventSeq: log.seq,
       }
 
@@ -429,7 +433,7 @@ export function resolveAiEvent(
       // neutralize answer to bank alongside it (general.md §6.4).
       return {
         ...state,
-        pending: { kind: 'neutralize503', player, card: null, methods },
+        pending: { kind: 'neutralize503', player, card: null, methods, source: event.id },
         eventSeq: log.seq,
       }
     }

@@ -3,6 +3,13 @@ import { useCallback, useRef, useState } from 'react'
 import type { Card as CardType } from '@/cards/types'
 import Card from '@/primitives/Card'
 import type { Rect } from './scatter'
+// Relative, and deliberately so: the frontend's beat tests mock the
+// `@release/ui/animations` barrel to trace `nextFrames()`, and reaching for
+// `./timing` directly keeps this hook's own internal awaits OUT of that trace.
+// Routed through the barrel instead, `raise()`'s frame wait would show up
+// alongside a runner's, and `aiBeat.test.tsx`'s call-order assertion — which
+// reads "the FIRST `nextFrames` entry IS the standing branch's own" — would
+// silently stop proving anything.
 import { nextFrames, wait } from './timing'
 import styles from './useFlyer.module.css'
 

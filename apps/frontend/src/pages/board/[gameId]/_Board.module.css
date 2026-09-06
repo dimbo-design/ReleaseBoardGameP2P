@@ -101,6 +101,19 @@
   transform: translate(-50%, -50%);
 }
 
+/* The AI pair's slots (#106). Position, width and layer all arrive inline from
+   `centrePlaceStyle` — the single source in `TableCentre/centre.ts`. What stays
+   here is only what every centre place shares, plus the rule that an empty one
+   is not a target. */
+.aiSlot {
+  position: absolute;
+  aspect-ratio: var(--card-aspect);
+}
+
+.aiCard {
+  inline-size: 100%;
+}
+
 /* The hand limit's grid (#104). Only the things every cell shares live here —
    the position of each one is inline, from `gridCells`, because the layout is a
    function of the count and a stylesheet cannot be asked about it (the same
@@ -168,7 +181,8 @@
 .stageSlot:empty,
 .costSlot:empty,
 .sudoSlot:empty,
-.coverSlot:empty {
+.coverSlot:empty,
+.aiSlot:empty {
   pointer-events: none;
 }
 

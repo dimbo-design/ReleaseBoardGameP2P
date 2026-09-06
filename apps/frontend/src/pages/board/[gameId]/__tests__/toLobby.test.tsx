@@ -33,12 +33,14 @@ Object.defineProperty(navigator, 'clipboard', {
 })
 
 const PEERS: Record<string, PeerInfo> = {
-  h: { id: 'h', name: 'Ann', role: 'host', ready: true, where: 'stats' },
-  g: { id: 'g', name: 'Bo', role: 'player', ready: true, where: 'game' },
+  h: { id: 'h', clientId: 'client-h', name: 'Ann', role: 'host', ready: true, where: 'stats' },
+  g: { id: 'g', clientId: 'client-g', name: 'Bo', role: 'player', ready: true, where: 'game' },
 }
+// `clientId` is the seat's durable owner, so each seat carries the client of the
+// peer holding it — `peerId` is rewritten by a rebind, this is not (#110).
 const SEATS: Seat[] = [
-  { playerId: 'p1', peerId: 'g', name: 'Bo' },
-  { playerId: 'p2', peerId: 'h', name: 'Ann' },
+  { playerId: 'p1', peerId: 'g', clientId: 'client-g', name: 'Bo' },
+  { playerId: 'p2', peerId: 'h', clientId: 'client-h', name: 'Ann' },
 ]
 const zero = { attack: 0, defense: 0, ddos: 0, ai: 0, err503: 0, cherryPick: 0, attackedInto: 0 }
 

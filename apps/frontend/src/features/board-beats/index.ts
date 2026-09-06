@@ -1,3 +1,4 @@
+export { useAiBeat } from './aiBeat'
 export { useDeckBeat } from './deckBeat'
 export { useDiscardBeat } from './discardBeat'
 export { useDrawBeat } from './drawBeat'
@@ -14,6 +15,7 @@ export {
 } from './eliminateBeat'
 export { useHandLimitBeat } from './handLimitBeat'
 export type {
+  AiTail,
   BeatPlan,
   DiscardCard,
   DiscardSource,

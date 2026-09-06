@@ -191,7 +191,14 @@ it('sends the ai-error-503 mimic home to the events deck, never to the discard',
   const drawn = reduce(withAiEvent(event, [DBG]), { type: 'DRAW', player: 'p1', at: 1000 })
   // A Debugger in hand means a `neutralize503` pending is actually raised,
   // not an immediate elimination — and its card is null from the start.
-  expect(drawn.state.pending).toMatchObject({ kind: 'neutralize503', card: null })
+  // `source` names the AI card this prompt belongs to (resolveAiEvent's
+  // ai-error-503 branch) — driven through the real trigger resolution, not a
+  // state literal, so a regression that drops the field here is caught.
+  expect(drawn.state.pending).toMatchObject({
+    kind: 'neutralize503',
+    card: null,
+    source: 'ai-error-503',
+  })
 
   const r = reduce(drawn.state, {
     type: 'RESOLVE',

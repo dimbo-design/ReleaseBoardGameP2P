@@ -60,6 +60,8 @@ export interface HandLimitStaging {
   carrying: boolean
   /** how many cards are still owed; 0 outside the decision */
   owed: number
+  /** the open decision is an AI effect's, not the ordinary end-of-turn limit */
+  aiPicked: boolean
   overlay: ReactNode[]
   gapAt: number | null
   gapSize: number
@@ -150,6 +152,13 @@ export function useHandLimit({
     state.pending?.kind === 'handLimit' && state.pending.player === state.selfId
       ? state.pending
       : null
+
+  // Bad Vibe-Coding borrows this prompt (`source` names the AI card that raised
+  // it), and its one card does NOT go to the grid: `gridCells(1)` centres its
+  // cell at dx 0, underneath the AI card standing at the `effect` place. The
+  // scene stands it to the RIGHT of that card instead — `centre.ts`'s `aiPick`
+  // set — and this is what tells the render which of the two shapes to build.
+  const aiPicked = pending?.source != null
 
   // A flight spans several awaits and must never read a stale render (I8), so
   // everything it needs is mirrored in a ref.
@@ -595,6 +604,7 @@ export function useHandLimit({
     dispatched,
     carrying: back != null || placementReturning,
     owed: pending ? Math.max(0, pending.excess - picked.length) : 0,
+    aiPicked,
     overlay: [...flyer.overlay, ...arrival.overlay, ...(backOverlay ? [backOverlay] : [])],
     gapAt: back ? dropSlot : arrival.gapAt,
     gapSize: back ? 1 : arrival.gapSize,

@@ -1,7 +1,9 @@
 import type { Event } from '@release/engine'
 import { cardById } from '@release/ui'
+import { scatterAt } from '@release/ui/animations'
 import { describe, expect, it } from 'vitest'
 import type { BoardState } from '~/entities/game/board'
+import { standInScatter } from '~/entities/game/board'
 import type { BeatPlan } from './planBeats'
 import { classifyPiles, planBeats } from './planBeats'
 
@@ -152,6 +154,54 @@ describe('planBeats', () => {
     expect(beats[0].kind === 'handLimit' && beats[0].cards).toHaveLength(1)
   })
 
+  // The road home (#106): Bad Vibe-Coding raises its prompt as a `handLimit`
+  // pending with its own `source` (fake/triggers.ts:419) — the discard that
+  // answers it is where the card goes.
+  it('sends a Bad Vibe-Coding card home on the discard that pays its price', () => {
+    const beats = planBeats(
+      [discarded(9, { reason: 'handLimit' })],
+      boardBefore({
+        pending: {
+          kind: 'handLimit',
+          player: 'p1',
+          excess: 1,
+          options: [],
+          source: 'ai-bad-vibe-coding',
+        },
+      } as Partial<BoardState>),
+    )
+    expect(beats[0]).toMatchObject({ homeward: 'ai-bad-vibe-coding' })
+  })
+
+  // DECISION 6 HAS TO REACH THE BEAT (#106). `_useHandLimit`'s own `aiPicked`
+  // render exists only on the DISCARDER's board; every other peer builds the
+  // grid from computed boxes, so unless the plan says which shape this run is,
+  // Bad Vibe's one card gathers at `gridCells(1)`'s `dx 0` — underneath the AI
+  // card standing at `effect`.
+  it('marks a Bad Vibe-Coding run as the picked place, not the grid', () => {
+    const beats = planBeats(
+      [discarded(9, { reason: 'handLimit' })],
+      boardBefore({
+        pending: {
+          kind: 'handLimit',
+          player: 'p1',
+          excess: 1,
+          options: [],
+          source: 'ai-bad-vibe-coding',
+        },
+      } as Partial<BoardState>),
+    )
+    expect(beats[0]).toMatchObject({ kind: 'handLimit', picked: true })
+  })
+
+  it('leaves an ordinary turn’s-end run to the grid', () => {
+    // No pending is open when a turn ends, so nothing marks the shape — the
+    // contrast that makes the assertion above mean something.
+    const beats = planBeats([discarded(9, { reason: 'handLimit' })], boardBefore())
+    expect(beats[0].kind).toBe('handLimit')
+    expect(beats[0]).not.toHaveProperty('picked')
+  })
+
   it('claims each hand slot once when two copies of a card go out together', () => {
     const state = boardBefore({
       you: {
@@ -272,17 +322,17 @@ describe('planBeats — the draw', () => {
     })
   })
 
-  // The trigger's card is at the CENTRE when it is filed, not in a hand or a
-  // zone. The draw beat flies it out from where it stands, so the discard
-  // planner must not also claim it — that would be two flights for one card.
-  it('leaves the trigger’s own discard to the draw that revealed it', () => {
+  // AN AI TRIGGER IS NOT A DRAW (#106). Its card-less `drawn` is claimed whole
+  // by the `aiEvent` plan, from the pile onward, so the draw plan never sees
+  // it at all — see the `aiEvent` describe block below for the full shape.
+  it('claims an AI trigger whole rather than leaving it to the draw', () => {
     const events: Event[] = [
       drawn(4, { card: undefined }),
       { id: 5, type: 'aiRevealed', player: 'p1', aiCard: 'trigger-ai', eventCard: 'ai-x' } as Event,
       discarded(6, { card: 'trigger-ai', reason: 'trigger' }),
     ]
     const beats = planBeats(events, boardBefore())
-    expect(beats.map((b) => b.kind)).toEqual(['draw'])
+    expect(beats.map((b) => b.kind)).toEqual(['aiEvent'])
   })
 
   // Task 1 stopped banking a 503 at reveal — it is held on the pending until
@@ -902,6 +952,9 @@ describe('planBeats — the answer to an Error 503 (#102)', () => {
         player: 'p1',
         method: 'sacrifice',
         slot: 'frontend',
+        // no `releaseEvent` on this fixture's release — an ordinary release,
+        // so `bankToDiscard` really does put it in the heap
+        destination: 'discard',
         alarm: { eventId: 11, card: 'trigger-error-503' },
         spent: [
           { eventId: 13, card: 'release-frontend' },
@@ -909,6 +962,39 @@ describe('planBeats — the answer to an Error 503 (#102)', () => {
         ],
       },
     ])
+  })
+
+  // docs/animations/backlog.md:1062 — a sacrificed release that IS an
+  // events-deck card has already been sent home by `bankToDiscard`, no matter
+  // what this resolution's own `discarded(reason: 'neutralized')` says. Read
+  // the same way `AiTail`'s crush reads it (`planBeats — aiEvent`'s "THE PAIR
+  // THAT MATTERS #1"), off the pre-batch `releaseEvent` map.
+  it('names an events-deck release’s real destination, not the heap its own discard implies', () => {
+    const before = boardBefore({
+      pending: alarmPending(),
+      you: {
+        name: 'You',
+        hand: [],
+        release: { frontend: card('release-frontend') },
+        releaseEvent: { frontend: 'ai-release-frontend' },
+      },
+    } as Partial<BoardState>)
+    const plans = planBeats(
+      [
+        neutralized({ id: 10, method: 'sacrifice' }),
+        discarded(11, { card: 'trigger-error-503', reason: 'trigger' }),
+        {
+          id: 12,
+          type: 'releaseDestroyed',
+          player: 'p1',
+          slot: 'frontend',
+          card: 'release-frontend',
+        } as Event,
+        discarded(13, { card: 'release-frontend', reason: 'neutralized' }),
+      ],
+      before,
+    )
+    expect(plans.find((p) => p.kind === 'neutralized')).toMatchObject({ destination: 'events' })
   })
 
   // The shared gap (Task 7 fix round 1): a `neutralize503` pending can bank no
@@ -952,6 +1038,85 @@ describe('planBeats — the answer to an Error 503 (#102)', () => {
       boardBefore({ pending: alarmPending() }),
     )
     expect(plans.filter((p) => p.kind === 'discard')).toEqual([])
+  })
+
+  // The road home (#106): the AI card standing behind the prompt this batch
+  // answers has to leave eventually, and this is when. Selected off the
+  // PRE-BATCH pending with a plain equality — `before.pending` is still the
+  // projection with the prompt open (I1).
+  it('sends the standing AI card home on the batch that answers its prompt', () => {
+    const before = boardBefore({
+      pending: {
+        kind: 'crush',
+        player: 'p1',
+        slot: 'frontend',
+        methods: ['debugger'],
+        source: 'ai-crush-frontend',
+      },
+    } as Partial<BoardState>)
+    const plans = planBeats(
+      [
+        neutralized({ id: 10 }),
+        discarded(11, { card: 'protection-debugger', reason: 'neutralized' }),
+      ],
+      before,
+    )
+    expect(plans.find((p) => p.kind === 'neutralized')).toMatchObject({
+      homeward: 'ai-crush-frontend',
+    })
+  })
+
+  it('adds no road home when the prompt was nobody’s AI card', () => {
+    const plans = planBeats(
+      [
+        neutralized({ id: 10 }),
+        discarded(11, { card: 'trigger-error-503', reason: 'trigger' }),
+        discarded(12, { card: 'protection-debugger', reason: 'neutralized' }),
+      ],
+      boardBefore({ pending: alarmPending() }),
+    )
+    expect(plans.find((p) => p.kind === 'neutralized')).not.toHaveProperty('homeward')
+  })
+
+  // THE BATCH THAT LOOKS EMPTY AND IS NOT (#106). Answer a `crush` — or the
+  // `ai-error-503` mimic — with MONITORING and the resolution banks nothing at
+  // all: both pendings carry a null `card`, so `bankAlarm` logs no discard, and
+  // Monitoring costs nothing, so there is no `discarded(neutralized)` either.
+  // The "an exchange with nothing in it is not a beat" guard used to drop the
+  // whole plan on that shape — and with it the road home, leaving the AI card
+  // standing at `effect` to vanish the moment the queue drained.
+  it('keeps a Monitoring answer that owes an AI card its road home', () => {
+    const plans = planBeats(
+      [neutralized({ id: 10, method: 'monitoring' })],
+      boardBefore({
+        pending: {
+          kind: 'crush',
+          player: 'p1',
+          slot: 'frontend',
+          methods: ['monitoring'],
+          source: 'ai-crush-frontend',
+        },
+      } as Partial<BoardState>),
+    )
+    expect(plans.map((p) => p.kind)).toEqual(['neutralized'])
+    expect(plans[0]).toMatchObject({
+      method: 'monitoring',
+      spent: [],
+      homeward: 'ai-crush-frontend',
+    })
+    expect(plans[0]).not.toHaveProperty('alarm')
+  })
+
+  it('still drops a Monitoring answer that owes nothing at all', () => {
+    // The contrast that keeps the guard a guard: a 503 the standing Monitoring
+    // answered by itself banks its alarm inside the DRAW that turned it up, so
+    // this resolution really does have nothing to show — and no AI card is
+    // standing behind it either.
+    const plans = planBeats(
+      [neutralized({ id: 10, method: 'monitoring' })],
+      boardBefore({ pending: alarmPending() }),
+    )
+    expect(plans).toEqual([])
   })
 })
 
@@ -1318,5 +1483,350 @@ describe('card transfers', () => {
     const plan = planBeats([transfer({ from: 'p2', to: 'p3', card: undefined })], boardBefore())[0]
     expect(plan).toMatchObject({ kind: 'handTransfer', role: 'watcher' })
     expect((plan as Extract<BeatPlan, { kind: 'handTransfer' }>).card).toBeUndefined()
+  })
+})
+
+describe('planBeats — aiEvent (#106)', () => {
+  // drawn(card-less) → aiRevealed → discarded(trigger) → the effect's own events
+  const aiBatch = (...tail: Event[]): Event[] => [
+    { id: 1, type: 'drawn', player: 'p1', pile: 0, deckSize: 30 },
+    {
+      id: 2,
+      type: 'aiRevealed',
+      player: 'p1',
+      aiCard: 'trigger-ai',
+      eventCard: 'ai-crush-frontend',
+    },
+    { id: 3, type: 'discarded', player: 'p1', card: 'trigger-ai', reason: 'trigger' },
+    ...tail,
+  ]
+
+  it('claims the draw and its reveal, and emits no draw plan', () => {
+    const plans = planBeats(aiBatch(), boardBefore())
+    expect(plans.map((p) => p.kind)).toEqual(['aiEvent'])
+    expect(plans[0]).toMatchObject({
+      player: 'p1',
+      pile: 0,
+      trigger: 'trigger-ai',
+      triggerDiscardId: 3,
+      eventCard: 'ai-crush-frontend',
+    })
+  })
+
+  it('reads the ending off the events that follow, never off the card id', () => {
+    const zone = planBeats(
+      [
+        { id: 1, type: 'drawn', player: 'p1', pile: 0, deckSize: 30 },
+        {
+          id: 2,
+          type: 'aiRevealed',
+          player: 'p1',
+          aiCard: 'trigger-ai',
+          eventCard: 'ai-release-frontend',
+        },
+        { id: 3, type: 'discarded', player: 'p1', card: 'trigger-ai', reason: 'trigger' },
+        { id: 4, type: 'released', player: 'p1', slot: 'frontend', card: 'release-frontend' },
+      ],
+      boardBefore(),
+    )
+    // The full array, not just `zone[0]` — the tail's own `released` must be
+    // CLAIMED, not merely read, or the ordinary release branch plans it too.
+    expect(zone.map((p) => p.kind)).toEqual(['aiEvent'])
+    expect(zone[0]).toMatchObject({
+      tail: { kind: 'zone', slot: 'frontend', card: 'release-frontend' },
+    })
+
+    const halluc = planBeats(
+      [
+        { id: 1, type: 'drawn', player: 'p1', pile: 0, deckSize: 30 },
+        {
+          id: 2,
+          type: 'aiRevealed',
+          player: 'p1',
+          aiCard: 'trigger-ai',
+          eventCard: 'ai-hallucination',
+        },
+        { id: 3, type: 'discarded', player: 'p1', card: 'trigger-ai', reason: 'trigger' },
+        { id: 4, type: 'turnEnded', player: 'p1' },
+      ],
+      boardBefore(),
+    )
+    expect(halluc.map((p) => p.kind)).toEqual(['aiEvent'])
+    expect(halluc[0]).toMatchObject({ tail: { kind: 'turnEnded' } })
+  })
+
+  // THE PAIR THAT MATTERS #1 — two batches identical apart from the projection
+  it('sends a destroyed AI release home and an ordinary one to the heap', () => {
+    const batch = aiBatch({
+      id: 4,
+      type: 'releaseDestroyed',
+      player: 'p1',
+      slot: 'frontend',
+      card: 'release-frontend',
+    })
+    const ai = boardBefore({
+      you: {
+        name: 'You',
+        hand: [],
+        release: { frontend: card('release-frontend') },
+        releaseEvent: { frontend: 'ai-release-frontend' },
+      },
+    } as Partial<BoardState>)
+    const plain = boardBefore({
+      you: {
+        name: 'You',
+        hand: [],
+        release: { frontend: card('release-frontend') },
+        releaseEvent: {},
+      },
+    } as Partial<BoardState>)
+    const aiPlans = planBeats(batch, ai)
+    const plainPlans = planBeats(batch, plain)
+    expect(aiPlans.map((p) => p.kind)).toEqual(['aiEvent'])
+    expect(plainPlans.map((p) => p.kind)).toEqual(['aiEvent'])
+    expect(aiPlans[0]).toMatchObject({ tail: { destination: 'events' } })
+    expect(plainPlans[0]).toMatchObject({ tail: { destination: 'discard' } })
+  })
+
+  // A crush takes the release AND the Code Review tucked under it —
+  // `destroySlot`'s own spoils (fake/triggers.ts:87). The event names only the
+  // release, so the pair has to be read off the pre-batch projection's
+  // `support`; without it the Code Review blinks out of the zone unflown.
+  it('carries the Code Review the destroyed release was wearing', () => {
+    const batch = aiBatch({
+      id: 4,
+      type: 'releaseDestroyed',
+      player: 'p1',
+      slot: 'frontend',
+      card: 'release-frontend',
+    })
+    const protectedRelease = boardBefore({
+      you: {
+        name: 'You',
+        hand: [],
+        release: { frontend: card('release-frontend') },
+        support: { frontend: card('support-code-review') },
+        releaseEvent: {},
+      },
+    } as Partial<BoardState>)
+    const bare = boardBefore({
+      you: {
+        name: 'You',
+        hand: [],
+        release: { frontend: card('release-frontend') },
+        support: {},
+        releaseEvent: {},
+      },
+    } as Partial<BoardState>)
+    expect(planBeats(batch, protectedRelease)[0]).toMatchObject({
+      tail: { kind: 'crush', card: 'release-frontend', codeReview: 'support-code-review' },
+    })
+    // and an unprotected release carries none — the field says "there was one",
+    // never "there might have been"
+    const plan = planBeats(batch, bare)[0] as Extract<BeatPlan, { kind: 'aiEvent' }>
+    expect(plan.tail).not.toHaveProperty('codeReview')
+  })
+
+  it('reads a destroyed opponent’s Code Review off their own zone', () => {
+    const batch = aiBatch({
+      id: 4,
+      type: 'releaseDestroyed',
+      player: 'p2',
+      slot: 'backend',
+      card: 'release-backend',
+    })
+    const before = boardBefore({
+      opponents: [
+        {
+          id: 'p2',
+          name: 'Two',
+          handCount: 3,
+          release: { backend: card('release-backend') },
+          support: { backend: card('support-code-review') },
+        },
+      ],
+    } as Partial<BoardState>)
+    expect(planBeats(batch, before)[0]).toMatchObject({
+      tail: { kind: 'crush', codeReview: 'support-code-review' },
+    })
+  })
+
+  // WHERE THE HEAP WILL ACTUALLY REST IT. An automatic `destroySlot` emits no
+  // `discarded`, so there is no event id to key a scatter off — but the heap
+  // still shows the card, as its stand-in for the discard's top, and that
+  // stand-in has a pose. The plan reads it through the very function
+  // `toDiscardHeap` rests it with (I7), off the post-batch count `useBeats`
+  // hands in — never recomputed from `before` plus what the batch looks like
+  // it banked.
+  it('rests a crushed release on the pose the heap will actually give it', () => {
+    const batch = aiBatch({
+      id: 4,
+      type: 'releaseDestroyed',
+      player: 'p1',
+      slot: 'frontend',
+      card: 'release-frontend',
+    })
+    const before = boardBefore({
+      you: {
+        name: 'You',
+        hand: [],
+        release: { frontend: card('release-frontend') },
+        support: {},
+        releaseEvent: {},
+      },
+    } as Partial<BoardState>)
+    const plan = planBeats(batch, before, null, 7)[0] as Extract<BeatPlan, { kind: 'aiEvent' }>
+    expect(plan.tail).toMatchObject({ kind: 'crush', rest: standInScatter(7) })
+    // and it is the STAND-IN's pose, never a real discard event's — those are
+    // keyed positive and this one is deliberately out of their range
+    expect(plan.tail).not.toMatchObject({ rest: scatterAt(4) })
+  })
+
+  it('rests nothing when the heap has nothing to rest it as', () => {
+    const batch = aiBatch({
+      id: 4,
+      type: 'releaseDestroyed',
+      player: 'p1',
+      slot: 'frontend',
+      card: 'release-frontend',
+    })
+    const withReview = boardBefore({
+      you: {
+        name: 'You',
+        hand: [],
+        release: { frontend: card('release-frontend') },
+        support: { frontend: card('support-code-review') },
+        releaseEvent: {},
+      },
+    } as Partial<BoardState>)
+    const goesHome = boardBefore({
+      you: {
+        name: 'You',
+        hand: [],
+        release: { frontend: card('release-frontend') },
+        support: {},
+        releaseEvent: { frontend: 'ai-release-frontend' },
+      },
+    } as Partial<BoardState>)
+    // buried under its own Code Review — `bankToDiscard` banks the spoils as
+    // [release, codeReview], so the Code Review is the top and this one is
+    // under it, with no entry of its own (docs/animations/backlog.md)
+    expect(planBeats(batch, withReview, null, 7)[0]).not.toMatchObject({ tail: { rest: {} } })
+    // never reaches the heap at all — it is claimed back by the events deck
+    expect(planBeats(batch, goesHome, null, 7)[0]).not.toMatchObject({ tail: { rest: {} } })
+    // and with no count handed in there is nothing to read
+    expect(planBeats(batch, boardBefore(), null)[0]).not.toMatchObject({ tail: { rest: {} } })
+  })
+
+  // THE PAIR THAT MATTERS #2 — two batches identical AND empty
+  it('separates a prompt that is owed from nothing having happened, using `owed`', () => {
+    const batch = aiBatch()
+    const before = boardBefore()
+    const nothing = planBeats(batch, before, null)
+    const owed = planBeats(batch, before, {
+      kind: 'crush',
+      player: 'p1',
+      slot: 'frontend',
+      methods: ['debugger'],
+      source: 'ai-crush-frontend',
+    })
+    expect(nothing.map((p) => p.kind)).toEqual(['aiEvent'])
+    expect(owed.map((p) => p.kind)).toEqual(['aiEvent'])
+    expect(nothing[0]).toMatchObject({ tail: { kind: 'none' } })
+    expect(owed[0]).toMatchObject({ tail: { kind: 'standing' } })
+  })
+
+  it('lights the alarm for the 503 mimic, standing or not', () => {
+    const revealed: Event = { id: 4, type: 'revealed', player: 'p1', card: 'ai-error-503' }
+    const mimic = (...rest: Event[]): Event[] => [
+      { id: 1, type: 'drawn', player: 'p1', pile: 0, deckSize: 30 },
+      { id: 2, type: 'aiRevealed', player: 'p1', aiCard: 'trigger-ai', eventCard: 'ai-error-503' },
+      { id: 3, type: 'discarded', player: 'p1', card: 'trigger-ai', reason: 'trigger' },
+      revealed,
+      ...rest,
+    ]
+    // answerable: the prompt is owed, the card stands, and the glow is owed with it
+    const answerable = planBeats(mimic(), boardBefore(), {
+      kind: 'neutralize503',
+      player: 'p1',
+      card: null,
+      methods: ['debugger'],
+      source: 'ai-error-503',
+    })
+    expect(answerable.map((p) => p.kind)).toEqual(['aiEvent'])
+    expect(answerable[0]).toMatchObject({ tail: { kind: 'standing', alarm: true } })
+    // defenceless: `eliminated` follows in the same batch and the sweep takes
+    // over — the mimic's own scene AND the sweep it triggers, one beat apiece
+    const doomed = planBeats(
+      mimic({ id: 5, type: 'eliminated', player: 'p1' }),
+      boardBefore(),
+      null,
+    )
+    expect(doomed.map((p) => p.kind)).toEqual(['aiEvent', 'eliminated'])
+    expect(doomed[0]).toMatchObject({ tail: { kind: 'alarm' } })
+  })
+
+  it('does not let the discard planner claim the trigger a second time', () => {
+    const plans = planBeats(aiBatch(), boardBefore(), null)
+    expect(plans.some((p) => p.kind === 'discard')).toBe(false)
+  })
+})
+
+describe('planBeats — a Release comes back out of the discard (#106, Task 11)', () => {
+  it("plans the card coming out of the discard, and sends Inside's own card home with it", () => {
+    const before = boardBefore({
+      pending: {
+        kind: 'pickFromDiscard',
+        player: 'p1',
+        options: [],
+        picks: 1,
+        source: 'ai-inside',
+      },
+    } as Partial<BoardState>)
+    const plans = planBeats(
+      [{ id: 20, type: 'takenFromDiscard', player: 'p1', card: 'release-frontend', to: 'hand' }],
+      before,
+    )
+    expect(plans).toHaveLength(1)
+    expect(plans[0]).toMatchObject({
+      kind: 'takenFromDiscard',
+      eventId: 20,
+      player: 'p1',
+      card: 'release-frontend',
+      mine: true,
+      homeward: 'ai-inside',
+    })
+  })
+
+  it('reads `mine` off the projection, not off the player who acted', () => {
+    // `before.selfId` is 'p1' (`boardBefore`'s own default) — a card taken by
+    // 'p2' is public (`takenFromDiscard` carries no `visibleTo`), and every
+    // peer plans the same beat off it, just with `mine` the other way.
+    const plans = planBeats(
+      [{ id: 20, type: 'takenFromDiscard', player: 'p2', card: 'release-backend', to: 'hand' }],
+      boardBefore(),
+    )
+    expect(plans).toHaveLength(1)
+    expect(plans[0]).toMatchObject({ kind: 'takenFromDiscard', mine: false })
+  })
+
+  it('plans nothing when no prompt was open — `homeward` stays absent', () => {
+    const plans = planBeats(
+      [{ id: 20, type: 'takenFromDiscard', player: 'p1', card: 'release-frontend', to: 'hand' }],
+      boardBefore(),
+    )
+    expect(plans[0]).not.toHaveProperty('homeward')
+  })
+
+  // Cherry-pick's second pick (#61, not yet implemented) puts a card back on
+  // top of a pile, unseen by anyone but the placer — a private placement,
+  // not a beat. Flushed and passed straight through, the default this file
+  // already keeps for an event with no choreography.
+  it("passes Cherry-pick's own placement through with no beat of its own", () => {
+    const plans = planBeats(
+      [{ id: 20, type: 'takenFromDiscard', player: 'p1', card: 'release-frontend', to: 'deck' }],
+      boardBefore(),
+    )
+    expect(plans).toHaveLength(0)
   })
 })

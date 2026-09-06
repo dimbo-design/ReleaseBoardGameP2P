@@ -711,3 +711,71 @@ describe('self.combos', () => {
     expect(project(pendingDefend, 'p2').self.combos).toEqual({})
   })
 })
+
+describe('the AI facts a board cannot otherwise see', () => {
+  it('projects `event` for an AI-granted release and omits it for an ordinary one', () => {
+    const base = createGame(config())
+    const state: GameState = {
+      ...base,
+      players: {
+        ...base.players,
+        p1: {
+          ...base.players.p1,
+          release: {
+            frontend: {
+              card: { uid: 'ai#1', id: 'release-frontend', event: 'ai-release-frontend' },
+            },
+            backend: { card: { uid: 'base#1', id: 'release-backend' } },
+          },
+        },
+      },
+    }
+    const view = project(state, 'p1')
+    expect(view.self.release.frontend?.event).toBe('ai-release-frontend')
+    expect(view.self.release.backend?.event).toBeUndefined()
+  })
+
+  it('projects the AI card behind a crush prompt, to a player who is not the one asked', () => {
+    const base = createGame(config())
+    const state: GameState = {
+      ...base,
+      pending: {
+        kind: 'crush',
+        player: 'p1',
+        slot: 'frontend',
+        methods: ['debugger'],
+        source: 'ai-crush-frontend',
+      },
+    }
+    // public, like `pickFromDiscard.source` — the whole table watched it revealed
+    expect(project(state, 'p2').pending).toMatchObject({ source: 'ai-crush-frontend' })
+  })
+
+  it('projects the AI card behind a Bad Vibe hand limit and behind the 503 mimic', () => {
+    const base = createGame(config())
+    const bad: GameState = {
+      ...base,
+      pending: {
+        kind: 'handLimit',
+        player: 'p1',
+        excess: 1,
+        endsTurn: false,
+        source: 'ai-bad-vibe-coding',
+      },
+    }
+    expect(project(bad, 'p2').pending).toMatchObject({ source: 'ai-bad-vibe-coding' })
+    const mimic: GameState = {
+      ...base,
+      pending: {
+        kind: 'neutralize503',
+        player: 'p1',
+        card: null,
+        methods: ['debugger'],
+        source: 'ai-error-503',
+      },
+    }
+    // `card` stays null — `bankAlarm` reads it to decide what to bank, and the
+    // mimic's own card is already home in the events deck
+    expect(project(mimic, 'p2').pending).toMatchObject({ card: null, source: 'ai-error-503' })
+  })
+})

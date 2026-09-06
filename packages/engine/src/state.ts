@@ -117,14 +117,33 @@ export type Pending =
       player: PlayerId
       card: CardInstance | null
       methods: NeutralizeMethod[]
+      // The AI event card this prompt belongs to. Absent for a pending raised
+      // by anything other than an AI card.
+      source?: CardId
     }
-  | { kind: 'crush'; player: PlayerId; slot: ReleaseSlot; methods: NeutralizeMethod[] }
+  | {
+      kind: 'crush'
+      player: PlayerId
+      slot: ReleaseSlot
+      methods: NeutralizeMethod[]
+      // The AI event card this prompt belongs to. Absent for a pending raised
+      // by anything other than an AI card.
+      source?: CardId
+    }
   | { kind: 'requestCard'; player: PlayerId; target: PlayerId }
   | { kind: 'giveCard'; player: PlayerId; requested: CardId; attacker: PlayerId }
   // `endsTurn` false is Bad Vibe-Coding borrowing the prompt without the
   // consequence: the same "discard N" question, but the seat stays put.
   // Absent means the ordinary end-of-turn hand limit, which does end the turn.
-  | { kind: 'handLimit'; player: PlayerId; excess: number; endsTurn?: boolean }
+  | {
+      kind: 'handLimit'
+      player: PlayerId
+      excess: number
+      endsTurn?: boolean
+      // The AI event card this prompt belongs to. Absent for a pending raised
+      // by anything other than an AI card.
+      source?: CardId
+    }
   // The options travel on the pending rather than opening the discard globally:
   // only discardTop/discardCount are ever public (project.ts) — the pile's
   // full contents are not — so an effect that reaches into it brings its own

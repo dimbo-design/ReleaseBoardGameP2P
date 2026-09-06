@@ -1,5 +1,5 @@
 import type { CardData } from '@release/ui'
-import { Card, CardPair, cardById } from '@release/ui'
+import { Card, CardPair, cardAreaOf, cardBoxIn, cardById, PAIR_AUX } from '@release/ui'
 import type { Leaving, Rect } from '@release/ui/animations'
 import {
   nextFrames,
@@ -75,6 +75,36 @@ export function useDefenseBeat(anchors: BoardAnchors, staging?: RefObject<Staged
   const arrival = useHandArrival(anchors.hand, () => {})
   const latest = useRef({ anchors, staging, send, arrival })
   latest.current = { anchors, staging, send, arrival }
+
+  // The AI card standing behind this prompt goes home now that the batch has
+  // answered it. It has been standing on the projection's own render
+  // (`_Board.tsx`'s `aiStanding`, off `pending.source`) since the batch that
+  // revealed it — that beat could not fly it home, because it still had to
+  // stand and explain the prompt this beat is what answers.
+  //
+  // Written out here rather than imported from `aiBeat.tsx`'s own `goHome`:
+  // that hook's carrier is `useToCentre`, this one's is `useFlyer`, and a
+  // carrier passed between two beats' hooks is how this codebase has already
+  // grown two latch bugs of that family (`useBeats.ts`'s own comments).
+  const sendHomeward = useCallback(
+    async (id: string) => {
+      const a = latest.current.anchors
+      const card = cardById(id)
+      const from = rectOf(a.effect.current)
+      const deck = rectOf(a.eventsBox.current)
+      if (!card || !from || !deck) return
+      // a no-travel raise at the card's own standing spot — the honest answer
+      // to "it is here already", the same idiom `runCovered`'s cover leg uses
+      const [el] = await flyer.raise([{ key: 'homeward', at: from, card }])
+      if (!el) return
+      flyer.patch('homeward', { faceDown: true })
+      await wait(420) // `flipCard`'s own duration — matches `aiBeat.tsx`'s `goHome`
+      const anim = play('returnToDeck', el, { from, to: cardAreaOf(deck) })
+      if (anim) await anim.finished
+      flyer.drop('homeward')
+    },
+    [flyer.raise, flyer.patch, flyer.drop],
+  )
 
   const runCovered = useCallback(
     async (plan: Extract<BeatPlan, { kind: 'covered' }>, ctx: BeatRun) => {
@@ -278,6 +308,13 @@ export function useDefenseBeat(anchors: BoardAnchors, staging?: RefObject<Staged
       const alarmCard = plan.alarm ? cardById(plan.alarm.card) : null
       const answer = plan.spent[0] ? cardById(plan.spent[0].card) : null
       const aux = plan.spent[1] ? cardById(plan.spent[1].card) : null
+      // A sacrificed release that IS an events-deck card has already been
+      // claimed home by `bankToDiscard`, whatever this resolution's own
+      // `discarded(reason: 'neutralized')` says — so it takes the
+      // `returnToDeck` road instead of the heap it would never really reach
+      // (docs/animations/backlog.md:1062). The plan read the answer off the
+      // pre-batch projection (`releaseEvent`); nothing here re-derives it.
+      const toEvents = plan.method === 'sacrifice' && plan.destination === 'events'
 
       // THE COVER. Skipped for Monitoring, which has no card to move, and for
       // our OWN answer, which the gesture has already delivered to this exact
@@ -328,6 +365,24 @@ export function useDefenseBeat(anchors: BoardAnchors, staging?: RefObject<Staged
       // that slot. Same ordering runCovered had to be fixed into.
       if (mine && handoff) handoff.release()
 
+      // The Code Review's own true rest position, for the split below that
+      // sends it alone — measured the same way `useDiscardExit`'s own
+      // `expand()` measures a pair's aux (I6): its bounding rect is the box
+      // AROUND the tilt, trimmed back to a card box. Read HERE, synchronously
+      // and before any `await` — the same timing `handoff.release()` just
+      // above relies on — because `a.cover.current` still holds the STATIC
+      // `CardPair` DOM this frame (`_Board.tsx`'s `stagedNeutralize`); the
+      // `handed: true` re-render that would clear it has not flushed yet.
+      // Only OUR OWN staged sacrifice ever renders a pair there — an
+      // opponent's cover never does — so `auxEl` is null for every other
+      // case, and the fallback (`coverBox`) is exactly what this leg would
+      // read without ever having made this measurement.
+      const auxFrom = (() => {
+        if (!toEvents || !plan.spent[1] || !coverBox) return null
+        const el = a.cover.current?.querySelector<HTMLElement>('[data-aux]')
+        return el ? cardBoxIn(el.getBoundingClientRect(), coverBox.width) : null
+      })()
+
       const items = exchange([
         plan.alarm && alarmBox && alarmCard
           ? {
@@ -338,18 +393,54 @@ export function useDefenseBeat(anchors: BoardAnchors, staging?: RefObject<Staged
               pose: ATTACK_POSE,
             }
           : null,
-        plan.spent[0] && coverBox && answer
-          ? {
-              eventId: plan.spent[0].eventId,
-              card: answer,
-              aux,
-              auxEventId: plan.spent[1]?.eventId,
-              el: a.cover.current,
-              from: coverBox,
-              pose: COVER_POSE,
-            }
-          : null,
+        // The release's own Code Review is never an events-deck card, so it
+        // always takes the ordinary road even when the release it protected
+        // does not: the pair splits here into two singles rather than
+        // leaving as one `aux`, the same split `useDiscardExit` itself makes
+        // for an ordinary pair, just taken earlier because the two are no
+        // longer bound for the same place. `from`/`pose` mirror exactly what
+        // `expand()` would have given the aux half of that pair — the split
+        // changes WHERE the card goes, not the rest state it leaves from.
+        toEvents
+          ? plan.spent[1] && coverBox && aux
+            ? {
+                eventId: plan.spent[1].eventId,
+                card: aux,
+                el: a.cover.current,
+                from: auxFrom ?? coverBox,
+                pose: { rot: COVER_POSE.rot + PAIR_AUX.rot, dx: 0, dy: 0 },
+              }
+            : null
+          : plan.spent[0] && coverBox && answer
+            ? {
+                eventId: plan.spent[0].eventId,
+                card: answer,
+                aux,
+                auxEventId: plan.spent[1]?.eventId,
+                el: a.cover.current,
+                from: coverBox,
+                pose: COVER_POSE,
+              }
+            : null,
       ])
+      // The sacrificed release's own road home — the leg written out rather
+      // than pointed at, because it is not `useDiscardExit`'s to carry: that
+      // step only ever ends at the heap. Taken alongside the exchange above,
+      // not after it: the whole resolution leaves as one moment.
+      const sacrificedHome = (async () => {
+        if (!toEvents || !plan.spent[0] || !coverBox || !answer) return
+        const deck = rectOf(a.eventsBox.current)
+        if (!deck) return
+        // a no-travel raise at the cover slot — it stands exactly where the
+        // pair above was shown, the same idiom the cover leg itself uses
+        const [el] = await flyer.raise([{ key: 'sacrificed', at: coverBox, card: answer }])
+        if (!el) return
+        flyer.patch('sacrificed', { faceDown: true })
+        await wait(420) // `flipCard`'s own duration — matches `aiBeat.tsx`'s `goHome`
+        const anim = play('returnToDeck', el, { from: coverBox, to: cardAreaOf(deck) })
+        if (anim) await anim.finished
+        flyer.drop('sacrificed')
+      })()
       // TAKEOFF: the answer has been given and both cards are in the air, so the
       // board lets go of the pending HERE — the same moment, and for the same
       // reason, `discardBeat` publishes `withoutFlown`. It is what takes the red
@@ -361,10 +452,14 @@ export function useDefenseBeat(anchors: BoardAnchors, staging?: RefObject<Staged
       // sequence puts in the same batch used to animate against a board that
       // still had the alarm standing on it (#103 testing, problem 1).
       ctx.publish({ ...ctx.base, pending: null })
-      if (items.length > 0) await latest.current.send(items)
+      await Promise.all([items.length > 0 ? latest.current.send(items) : undefined, sacrificedHome])
       flyer.drop('cover')
+
+      // The AI card that raised this prompt goes home now that the batch has
+      // answered it — its own road, not this exchange's (#106).
+      if (plan.homeward) await sendHomeward(plan.homeward)
     },
-    [flyer.raise, flyer.drop],
+    [flyer.raise, flyer.patch, flyer.drop, sendHomeward],
   )
 
   // Security Bug (#101, Task 15): the release the attack beat is not burned —
