@@ -1,3 +1,4 @@
+import type { GameState } from '@release/engine'
 import { createFakeEngine, FAKE_DECK, FAKE_EVENTS, TURN_ACTION_MS } from '@release/engine/fake'
 import {
   ABSENT_GRACE_MS,
@@ -799,4 +800,57 @@ it('logs what an absent seat`s own accepted bot suggestion commits', () => {
   expect(result.session.state.pending).toBeNull()
   expect(grown).toContain('discarded')
   expect(grown).toContain('released')
+})
+
+// A System Upgrade is the only pending owed to several seats at once, so it is
+// the only one where a seat that walks away can hold everybody else's match
+// hostage — `driveAbsent` has to answer for it seat by seat, not once.
+it('drains a System Upgrade roster past a seat that walked away', () => {
+  const { session } = createSession({
+    gameId: 'g1',
+    keeperId: 'a',
+    engine: createFakeEngine(),
+    seed: 1,
+    players: [
+      { playerId: 'a', peerId: 'peer-a', name: 'Ann' },
+      { playerId: 'b', peerId: 'peer-b', name: 'Bo' },
+      { playerId: 'c', peerId: 'peer-c', name: 'Cy' },
+    ],
+    setup: {},
+    deck: FAKE_DECK,
+    events: FAKE_EVENTS,
+  })
+
+  // Built here rather than played out: reaching a System Upgrade through the
+  // deck would pin this test to a shuffle seed, and what is under test is the
+  // keeper's answer to the roster, not how the roster came to exist.
+  const state: GameState = {
+    ...session.state,
+    pending: {
+      kind: 'systemUpgrade',
+      actor: 'a',
+      owed: ['b', 'c'],
+      thrown: [],
+      sudo: false,
+      phase: 'discarding',
+      source: 'operation-system-upgrade',
+    },
+  }
+  const bWalkedAway: Session = {
+    ...session,
+    state,
+    seats: session.seats.map((s) =>
+      s.playerId === 'b' ? { ...s, peerId: null, absentSince: 0 } : s,
+    ),
+  }
+
+  const result = driveAbsent(bWalkedAway, ABSENT_GRACE_MS + 1)
+  const pending = result.session.state.pending
+  expect(pending?.kind).toBe('systemUpgrade')
+  if (pending?.kind !== 'systemUpgrade') throw new Error('the upgrade must still stand')
+  // The empty seat answered for itself and left the roster.
+  expect(pending.owed).not.toContain('b')
+  // The seat that is still there is still owed: the keeper answers for absence,
+  // never for a player who is present and simply thinking.
+  expect(pending.owed).toContain('c')
 })

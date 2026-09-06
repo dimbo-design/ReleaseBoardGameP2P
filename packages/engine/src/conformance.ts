@@ -4,7 +4,14 @@ import type { DeckEntry, Engine, GameConfig } from './engine'
 import type { Event } from './events'
 import { botAction } from './fake/bots'
 import { randomAt } from './rng'
-import { type GameState, type PlayerId, type ReleaseSlot, type Setup, seatOwing } from './state'
+import {
+  type CardInstance,
+  type GameState,
+  type PlayerId,
+  type ReleaseSlot,
+  type Setup,
+  seatOwing,
+} from './state'
 
 export interface ConformanceOptions {
   deck: DeckEntry[]
@@ -182,6 +189,26 @@ function resolvePendingAction(state: GameState, n: number): Action | null {
         cards: e.cards.map((c) => c.uid),
       }))
       return { type: 'RESOLVE', player: pending.player, choice: { kind: 'reorderTop', order }, at }
+    }
+    case 'systemUpgrade': {
+      if (pending.phase === 'picking') {
+        // Only the actor picks, and only sudo ever reaches this phase.
+        const card = pending.thrown[0]?.card.uid
+        if (!card) return null
+        return {
+          type: 'RESOLVE',
+          player: pending.actor,
+          choice: { kind: 'upgradeTake', card },
+          at,
+        }
+      }
+      // One seat per step: the property only requires that SOMETHING advances,
+      // and answering the whole roster in one action is not a move the game has.
+      const seat = pending.owed[0]
+      if (!seat) return null
+      const card = state.players[seat].hand[0]?.uid
+      if (!card) return null
+      return { type: 'RESOLVE', player: seat, choice: { kind: 'upgradeDiscard', card }, at }
     }
     default:
       return null
@@ -397,6 +424,15 @@ function realCardUids(state: GameState): string[] {
   // game, so a stream that simply ends while one is open must not read as a
   // loss — that is a snapshot artefact, not a leaked card.
   if (state.pending?.kind === 'defend') uids.push(state.pending.attack)
+  // The Sudo that rode that attack, held on the same pending for the same
+  // reason and in the same mid-air state — out of the attacker's hand and in no
+  // pile until the exchange resolves. Counted here, and nowhere else: the test
+  // "counts the Sudo riding an attack while its defence is open" below is what
+  // establishes that, because the fuzz stream never attaches a combo to an
+  // ATTACK and so cannot reach this state on its own.
+  if (state.pending?.kind === 'defend' && state.pending.combo) {
+    uids.push(state.pending.combo.uid)
+  }
   // The alarm while its answer is being chosen — same mid-air state as a thrown
   // attack above, and the same reason a stream ending here must not read as a
   // lost card. Null for the ai-error-503 mimic, which holds no card here.
@@ -632,6 +668,54 @@ export function describeEngine(
         const before = realCardUids(start)
         const { state } = drive(engine, start, 23, 300)
         expect(realCardUids(state)).toEqual(before)
+      })
+
+      it('counts the Sudo riding an attack while its defence is open', () => {
+        // The pair is held on the `defend` pending itself — the attack card and
+        // the Sudo that rode it both leave the attacker's hand and land in no
+        // pile until the exchange resolves. The attack was already counted; the
+        // Sudo was not, so a stream that simply ended here read as a lost card.
+        //
+        // Built by hand rather than driven: `fuzzAction` never attaches a combo
+        // to an ATTACK, so no seed reaches this state (checked by sweeping the
+        // stream for an open `defend` carrying a `combo` — none appears). That
+        // is also why the gap survived until #108 went looking for it.
+        const engine = make()
+        let state = engine.createGame(configFor(options, 3))
+        // An ATTACK is a reaction: it needs a window to be played into.
+        for (let n = 0; n < 4000 && !state.window; n += 1) {
+          state = engine.reduce(state, fuzzAction(state, 3, n)).state
+        }
+        expect(state.window, 'never reached an open window to attack into').not.toBeNull()
+        const owner = state.window?.target.player
+        const responder = state.seating.find((id) => id !== owner && !state.eliminated.includes(id))
+        if (!responder || !state.window) throw new Error('no responder')
+
+        const attack: CardInstance = { uid: 'conformance-attack', id: 'attack-bug' }
+        const sudo: CardInstance = { uid: 'conformance-sudo', id: 'support-sudo' }
+        const armed: GameState = {
+          ...state,
+          players: {
+            ...state.players,
+            [responder]: { ...state.players[responder], hand: [attack, sudo] },
+          },
+        }
+        const before = realCardUids(armed)
+
+        const r = engine.reduce(armed, {
+          type: 'ATTACK',
+          player: responder,
+          card: attack.uid,
+          combo: sudo.uid,
+          at: state.window.deadline - 1,
+        })
+        const pending = r.state.pending
+        expect(pending?.kind).toBe('defend')
+        if (pending?.kind !== 'defend') throw new Error('not a defend')
+        expect(pending.combo, 'the Sudo did not ride the attack').toBeDefined()
+        // Both halves of the pair are still in the game, so the census is
+        // unchanged across the move that put them mid-air.
+        expect(realCardUids(r.state)).toEqual(before)
       })
 
       it('never lets a card from the events deck reach the discard', () => {
@@ -902,20 +986,28 @@ export function describeEngine(
         // the seed swept a third time, which keeps the trajectory this test
         // has been reading and gives the `base` half 1800 more steps of the
         // cap actually holding.
+        //
+        // Seed 20, not 7: this is the first shift NOT caused by a longer deck.
+        // Task C5 taught `resolvePendingAction` to answer a `systemUpgrade`,
+        // and a fuzz stream that now resolves what it used to leave standing
+        // is a different stream from the same seed — so 7 stopped shipping two
+        // releases in one turn at all (20000 steps, not merely past budget).
+        // Swept again; 20 ships them at step 121 (measured), and its `base`
+        // half never exceeds the cap across the whole 2400.
         const engine = make()
         const fastSetup: Setup = { ...BASE_SETUP, releases: 'fast' }
 
-        let base = engine.createGame(configFor(options, 7))
+        let base = engine.createGame(configFor(options, 20))
         for (let n = 0; n < 2400; n += 1) {
           expect(base.turn.releasesPlayed).toBeLessThanOrEqual(1)
-          base = engine.reduce(base, fuzzAction(base, 7, n)).state
+          base = engine.reduce(base, fuzzAction(base, 20, n)).state
         }
 
-        let fast = engine.createGame(configFor(options, 7, fastSetup))
+        let fast = engine.createGame(configFor(options, 20, fastSetup))
         let sawMoreThanOne = false
         for (let n = 0; n < 2400; n += 1) {
           if (fast.turn.releasesPlayed > 1) sawMoreThanOne = true
-          fast = engine.reduce(fast, fuzzAction(fast, 7, n)).state
+          fast = engine.reduce(fast, fuzzAction(fast, 20, n)).state
         }
         // Without this, a cap that silently still applied under 'fast' would
         // pass the assertion above by never being tested against a run that
@@ -1029,8 +1121,17 @@ export function describeEngine(
         // deadline assertion inside the loop runs on every window the stream
         // opens, so a longer run of the same trajectory checks strictly more
         // than a shorter run of a new one.
+        //
+        // Seed 24, not 1: task C5 taught `resolvePendingAction` to answer a
+        // `systemUpgrade`, so the stream now resolves what it used to leave
+        // standing and no fixed seed keeps its old trajectory. Under 1 the game
+        // reaches `over` before any round-2+ window opens, so the raised budget
+        // above could not help. Swept again: 24 opens a round-1 window at step
+        // 38 and a round-2+ one at 44 (both measured), and runs to step 2759
+        // before the game ends — so the budget still bounds the loop rather
+        // than the witness.
         const engine = make()
-        let state = engine.createGame(configFor(options, 1))
+        let state = engine.createGame(configFor(options, 24))
         let sawRound1 = false
         let sawLaterRound = false
         for (let n = 0; n < 3600 && !state.over; n += 1) {
@@ -1120,8 +1221,16 @@ export function describeEngine(
         // `sawNonDdosZoneTarget`, the negative half and the actual property
         // here, was false for every seed 1-120 in the sweep, so the choice is
         // not what makes it pass.
+        // Seed 6, not 4: task C5's answer for `systemUpgrade` changed the fuzz
+        // stream itself (see the release-cap test above), and under 4 the
+        // forced DDoS reaches a protected release but never a Monitoring —
+        // 20000 steps left `sawDdosOnMonitoring` false, so more of the same run
+        // could not have helped. Swept again; 6 reaches both inside the
+        // existing 1500-step budget, and `sawNonDdosZoneTarget` — the negative
+        // half and the actual property here — was false for every seed 1-120
+        // in the sweep, so the choice is not what makes it pass.
         const engine = make()
-        const result = driveProtectedReleaseAndDdos(engine, options, 4, 1500)
+        const result = driveProtectedReleaseAndDdos(engine, options, 6, 1500)
         expect(
           result.sawNonDdosZoneTarget,
           'a non-DDoS attack was offered a release or Monitoring target',

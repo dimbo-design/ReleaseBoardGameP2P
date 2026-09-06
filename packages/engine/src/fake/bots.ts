@@ -109,6 +109,17 @@ export function botAction(
         }))
         return { type: 'RESOLVE', player: me, choice: { kind: 'reorderTop', order }, at }
       }
+      case 'systemUpgrade': {
+        // `pendingOwes` already decided this is our move: the picking phase
+        // belongs to the actor, the discarding one to a seat on the roster.
+        if (pending.phase === 'picking') {
+          const card = pending.thrown[0]?.card.uid ?? ''
+          return { type: 'RESOLVE', player: me, choice: { kind: 'upgradeTake', card }, at }
+        }
+        // The roster never carries an empty-handed seat, so this holds a card.
+        const card = view.self.hand[0]?.uid ?? ''
+        return { type: 'RESOLVE', player: me, choice: { kind: 'upgradeDiscard', card }, at }
+      }
       default:
         return null
     }

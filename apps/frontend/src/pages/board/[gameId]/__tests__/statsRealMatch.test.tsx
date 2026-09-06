@@ -74,7 +74,14 @@ function playedOut(): GameState {
     // stopped existing. Swept again for the same match shape the tests below
     // need, all four conditions together: a finished game, an err503 tie, a
     // sole attackedInto leader, and nobody scoring a DDoS.
-    seed: 2,
+    //
+    // Seed 86, not 2: this shift is not a deck-size one. Task C5 taught the bot
+    // to answer a `systemUpgrade`, and `runUntilIdle` drives through `botAction`
+    // — so a match that used to stall on that pending now plays on, and seed 2's
+    // err503 tie broke (p1 two, p2 one) exactly as 153's did before it. Swept
+    // again for the same four conditions; 86 finishes with err503 1-1 and
+    // attackedInto 4-2.
+    seed: 86,
     players: SEATS.map((s) => ({ id: s.playerId, name: s.name })),
     setup: {
       handLimit: 'base',
