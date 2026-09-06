@@ -211,6 +211,13 @@ export interface BoardChromeCopy {
   // no other pending asks it.
   rebasePrompt: string
   rebasePosition: string
+  // System Upgrade's centre (#108, `systemUpgrade`) — the one pending owed to
+  // several seats at once, so it needs three captions rather than one: the ask
+  // while this seat is owed, what the table is waiting for once it has
+  // answered, and the sudo actor's pick from what everyone threw.
+  upgradePrompt: string
+  upgradeWaiting: string
+  upgradeTakePrompt: string
   // поле паузы (опционально — рендерится только вместе с обработчиком паузы):
   // подпись поля, состояние тумблера (вкл / выкл) и строка-пояснение
   pauseGame?: string

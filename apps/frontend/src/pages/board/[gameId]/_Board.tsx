@@ -86,6 +86,7 @@ import { useInsideStaging } from './_useInsideStaging'
 import { useNeutralizeStaging } from './_useNeutralizeStaging'
 import { useRebaseStaging } from './_useRebaseStaging'
 import { useRequestStaging } from './_useRequestStaging'
+import { useUpgradeStaging } from './_useUpgradeStaging'
 
 // светофор для лимита зрителей (зеркало палитры из экрана Lobby):
 // 0–8 зелёный, 9–18 жёлтый, 19–28 красный
@@ -491,6 +492,21 @@ export default function Board({
     copy: {
       prompt: copy.table.rebasePrompt,
       position: copy.table.rebasePosition,
+      confirm: copy.pending.confirm,
+    },
+    enabled: !(deal.active || beats.exclusive),
+  })
+  // System Upgrade's centre (#108) — the one pending owed to several seats at
+  // once. Its standing cards are read off the projection rather than held by a
+  // beat: `thrown` is public and survives every batch boundary, exactly as
+  // `cardById(pending.requested)` persists for `requestCard`.
+  const upgrade = useUpgradeStaging({
+    state,
+    actions,
+    copy: {
+      prompt: copy.table.upgradePrompt,
+      waiting: copy.table.upgradeWaiting,
+      takePrompt: copy.table.upgradeTakePrompt,
       confirm: copy.pending.confirm,
     },
     enabled: !(deal.active || beats.exclusive),
@@ -1767,7 +1783,11 @@ export default function Board({
         // Rebase's row asks the same way (#108): the panel has no control for
         // an ORDER, and two confirm bars over one question is the occlusion
         // every suppression above exists to avoid.
-        state.pending.kind !== 'reorderTop' && (
+        state.pending.kind !== 'reorderTop' &&
+        // …and this one is owed to a ROSTER, not to one seat: the panel asks
+        // whoever it is rendered for, which is the wrong question for every
+        // seat but the one currently owed (#108).
+        state.pending.kind !== 'systemUpgrade' && (
           <PendingPrompt
             pending={state.pending}
             hand={you.hand}
@@ -1965,6 +1985,7 @@ export default function Board({
       {inside.row}
       {cherry.grid}
       {rebase.row}
+      {upgrade.surface}
       {previewOverlay}
 
       {/* the pair flyer — a persistent node (I10: position: fixed against the
