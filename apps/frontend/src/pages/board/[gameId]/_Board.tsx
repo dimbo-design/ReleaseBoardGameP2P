@@ -486,6 +486,7 @@ export default function Board({
   // table. Its content is private by projection, not by anything done here.
   const rebase = useRebaseStaging({
     state,
+    anchors,
     actions,
     copy: {
       prompt: copy.table.rebasePrompt,

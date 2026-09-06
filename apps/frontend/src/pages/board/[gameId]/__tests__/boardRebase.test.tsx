@@ -5,6 +5,7 @@
 // discard, which the ordinary discard run plays.
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { mockReducedMotion } from '~/test/reducedMotion'
 import Board from '../_Board'
 import { makeBoardProps } from './fixture'
 
@@ -33,7 +34,7 @@ function renderBoard(over: { pending: ReturnType<typeof rebasePending>; actions?
 }
 
 describe('the row that answers Git Rebase', () => {
-  it('shows the offered cards in a numbered row and commits the order', () => {
+  it('shows the offered cards in a numbered row and commits the order', async () => {
     const onResolve = vi.fn()
     renderBoard({
       pending: rebasePending([
@@ -49,10 +50,19 @@ describe('the row that answers Git Rebase', () => {
     fireEvent.click(screen.getByTestId('rebase-up-r2'))
     fireEvent.click(screen.getByTestId('rebase-up-r2'))
     fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
-    expect(onResolve).toHaveBeenCalledWith({
-      kind: 'reorderTop',
-      order: [{ pile: 0, cards: ['r2', 'r0', 'r1'] }],
-    })
+    // The answer waits for the last card to land (task D2's own divergence from
+    // Cherry-pick, reasoned in `_useRebaseStaging.tsx`'s header), so this is a
+    // `waitFor` rather than a bare assertion. The wait has to outlast the whole
+    // sequence — flip 420 + hold 260 + a two-card stagger 90 + flight 600 —
+    // which is past `waitFor`'s own 1s default.
+    await vi.waitFor(
+      () =>
+        expect(onResolve).toHaveBeenCalledWith({
+          kind: 'reorderTop',
+          order: [{ pile: 0, cards: ['r2', 'r0', 'r1'] }],
+        }),
+      { timeout: 4000 },
+    )
   })
 
   it('shows nothing to a peer whose projection carries no cards', () => {
@@ -68,6 +78,24 @@ describe('the row that answers Git Rebase', () => {
   // that hands the owner nothing, not a state the fake reaches today.
   it('renders no row for an offer of our own that carries no cards', () => {
     renderBoard({ pending: rebasePending(null) })
+    expect(screen.queryByTestId('board-rebase-row')).toBeNull()
+  })
+
+  // The line D2's flights must not cross: a game action never waits on an
+  // animation nobody plays (`_useInsideStaging`'s rule). Written before those
+  // flights existed, so it holds across the change rather than being made to.
+  it('commits at once under reduced motion, with nothing left flying', () => {
+    mockReducedMotion(true)
+    const onResolve = vi.fn()
+    renderBoard({
+      pending: rebasePending([
+        { uid: 'r0', id: 'attack-bug' },
+        { uid: 'r1', id: 'release-frontend' },
+      ]),
+      actions: { onResolve },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+    expect(onResolve).toHaveBeenCalled()
     expect(screen.queryByTestId('board-rebase-row')).toBeNull()
   })
 })

@@ -1,8 +1,10 @@
 import type { TableActions } from '@release/ui'
 import { Card, ConfirmAction, cardById, Typography } from '@release/ui'
+import { play } from '@release/ui/animations'
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
-import type { BoardState } from '~/entities/game/board'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { BoardAnchors, BoardState } from '~/entities/game/board'
+import { useReducedMotion } from '~/shared/lib/useReducedMotion'
 import styles from './_useRebaseStaging.module.css'
 
 // Git Rebase — the top of a pile, shown to its owner and to nobody else. The
@@ -18,15 +20,54 @@ import styles from './_useRebaseStaging.module.css'
 // test and a keyboard can both reach, and a drag can be layered over this same
 // state later. The difference is recorded on the audit page rather than left
 // for the next reader to find.
+//
+// THE FLIGHTS (Task D2): ported from the approved playground scene
+// (`apps/playground/stories/interactive/GitCards/Rebase.tsx`), values verbatim.
+// Two legs travel — out of the pile into the row, and face-down back onto it in
+// the order that was chosen.
+//
+// ONE DIVERGENCE FROM `_useCherryPickStaging`, and it is deliberate: that hook
+// dispatches its RESOLVE at once and lets the flight run behind it, because the
+// card it picked has somewhere visible to be. Rebase's plan (#108, task D2)
+// asks for the opposite — the RESOLVE fires when the last card lands — because
+// nothing about a committed reorder is visible in the projection (a deck's
+// contents are never projected), so there is no second renderer to race, and
+// the flight IS the whole of what the player is told happened. Reduced motion
+// still answers at once: a game action must never wait on an animation nobody
+// plays (`_useInsideStaging`'s rule).
 type Order = Record<number, string[]>
+
+// timings — the approved scene
+const DEAL_DUR = 520 // cards fly out of the pile into the row
+const DEAL_STEP = 80 // per-card stagger dealing out
+const DEAL_HOLD = 200 // settle before the row is interactive
+const FLIP_DUR = 420 // = the flipCard preset (flip face-down before flying back)
+const FLIP_HOLD = 260 // hold face-down before the flight
+const BACK_DUR = 600 // = the returnToDeck flight
+const BACK_STEP = 90 // per-card stagger flying back
+
+// centre-to-centre translate + scale — the same helper the sibling hook keeps
+// privately, copied rather than imported across staging hooks.
+function between(from: DOMRect, to: DOMRect): string {
+  const dx = to.left + to.width / 2 - (from.left + from.width / 2)
+  const dy = to.top + to.height / 2 - (from.top + from.height / 2)
+  return `translate(${dx}px, ${dy}px) scale(${to.width / from.width})`
+}
+
+interface Pile {
+  pile: number
+  cards: { uid: string; id: string }[]
+}
 
 export function useRebaseStaging(args: {
   state: BoardState
+  anchors: BoardAnchors
   actions?: TableActions
   copy: { prompt: string; position: string; confirm: string }
   enabled: boolean
 }): { row: ReactNode | null } {
-  const { state, actions, copy, enabled } = args
+  const { state, anchors, actions, copy, enabled } = args
+  const reduced = useReducedMotion()
   const pending = state.pending
   const ours =
     enabled &&
@@ -38,10 +79,37 @@ export function useRebaseStaging(args: {
 
   const [order, setOrder] = useState<Order>({})
   const [confirmed, setConfirmed] = useState(false)
+  // true from confirm through the last flight landing — keeps the cards (now
+  // pinned and animating) mounted after `confirmed`, the same way the sibling
+  // hook's own `flying` outlives its dispatch.
+  const [flying, setFlying] = useState(false)
+  const [faceDown, setFaceDown] = useState(false)
+
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  // The last offer this hook actually saw, read during render — the flight
+  // keeps drawing the row from its own snapshot once `ours` goes null.
+  const pilesRef = useRef<Pile[]>([])
+  if (ours) pilesRef.current = ours.piles
+  const piles: Pile[] = ours ? ours.piles : pilesRef.current
+
+  const dealtKey = useRef<string | null>(null)
+  const timers = useRef<number[]>([])
+  const later = (fn: () => void, ms: number) => {
+    timers.current.push(window.setTimeout(fn, ms))
+  }
+  const clearTimers = () => {
+    for (const t of timers.current) window.clearTimeout(t)
+    timers.current = []
+  }
+  // No timer survives the hook.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-once by design — `clearTimers` is a plain function recreated every render, so listing it would clear timers on every render instead of only on unmount
+  useLayoutEffect(() => clearTimers, [])
 
   // Seeded from the offer, and re-seeded when a different pending opens. Keyed
   // on the pending rather than the mount, the discipline `_useInsideStaging`
-  // states: a latch that outlives what it latches is a bug.
+  // states: a latch that outlives what it latches is a bug. `flying` is left
+  // alone on purpose — it clears when its own flight lands, and a projection
+  // tick clearing the pending mid-flight must not cut it short.
   useEffect(() => {
     if (!ours) {
       setOrder({})
@@ -51,7 +119,53 @@ export function useRebaseStaging(args: {
     setOrder(Object.fromEntries(ours.piles.map((e) => [e.pile, e.cards.map((c) => c.uid)])))
   }, [ours])
 
-  if (!ours || confirmed) return { row: null }
+  // Deal the offer OUT of its pile into the row: every card starts at the
+  // pile's own rect and flies to its slot, staggered. Cosmetic only — the row
+  // is answerable throughout, so this never gates a click.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fires once per episode (guarded by `dealtKey`), not on every render `ours` produces a new identity for
+  useLayoutEffect(() => {
+    if (!ours) {
+      dealtKey.current = null
+      return
+    }
+    const key = `${ours.player}:${ours.piles.map((e) => `${e.pile}/${e.cards.map((c) => c.uid).join(',')}`).join('|')}`
+    if (dealtKey.current === key) return
+    dealtKey.current = key
+    if (reduced) return
+    for (const entry of ours.piles) {
+      const pileRect = anchors.pileBox(entry.pile)?.getBoundingClientRect()
+      if (!pileRect) continue
+      const els = entry.cards.map((c) => cardRefs.current.get(c.uid))
+      for (const el of els) {
+        if (!el) continue
+        el.style.transition = 'none'
+        el.style.transform = between(el.getBoundingClientRect(), pileRect)
+        el.style.opacity = '0'
+      }
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          els.forEach((el, i) => {
+            if (!el) return
+            const delay = i * DEAL_STEP
+            el.style.transition = `transform ${DEAL_DUR}ms var(--ease-out) ${delay}ms, opacity ${DEAL_DUR}ms ${delay}ms`
+            el.style.transform = ''
+            el.style.opacity = ''
+          })
+          later(
+            () => {
+              for (const el of els) {
+                if (!el) continue
+                el.style.transition = ''
+              }
+            },
+            DEAL_DUR + entry.cards.length * DEAL_STEP + DEAL_HOLD,
+          )
+        }),
+      )
+    }
+  }, [ours, reduced, anchors])
+
+  if ((!ours && !flying) || (confirmed && !flying)) return { row: null }
 
   const move = (pile: number, uid: string, delta: number) =>
     setOrder((o) => {
@@ -63,47 +177,107 @@ export function useRebaseStaging(args: {
       return { ...o, [pile]: cards }
     })
 
+  const confirm = () => {
+    if (!ours || confirmed) return
+    // Committed against THIS render's offer: every offered pile, answered
+    // exactly once, or the engine rejects it.
+    const committed = ours.piles.map((e) => ({
+      pile: e.pile,
+      cards: order[e.pile] ?? e.cards.map((c) => c.uid),
+    }))
+    const choice = { kind: 'reorderTop' as const, order: committed }
+
+    // A game action must never wait on an animation nobody plays
+    // (`_useInsideStaging`'s rule). The engine gets its answer either way;
+    // only the moment differs.
+    if (reduced) {
+      setConfirmed(true)
+      actions?.onResolve?.(choice)
+      return
+    }
+
+    setConfirmed(true)
+    setFlying(true)
+    // The order stays secret, so the cards turn their backs before they travel.
+    setFaceDown(true)
+
+    later(() => {
+      let last = 0
+      for (const entry of committed) {
+        const pileRect = anchors.pileBox(entry.pile)?.getBoundingClientRect()
+        entry.cards.forEach((uid, i) => {
+          const el = cardRefs.current.get(uid)
+          if (!el) return
+          const r = el.getBoundingClientRect()
+          el.style.transition = 'none'
+          el.style.transform = 'none'
+          el.style.position = 'fixed'
+          el.style.left = `${r.left}px`
+          el.style.top = `${r.top}px`
+          el.style.inlineSize = `${r.width}px`
+          el.style.margin = '0'
+          // position 1 lands on top of the pile
+          el.style.zIndex = `${50 + (entry.cards.length - i)}`
+          const delay = i * BACK_STEP
+          last = Math.max(last, delay)
+          if (!pileRect) return
+          later(
+            () => play('returnToDeck', el, { from: r, to: pileRect, duration: BACK_DUR }),
+            delay,
+          )
+        })
+      }
+      // The answer goes when the last card is home — see the divergence note
+      // in this file's header for why this one waits and Cherry-pick's does not.
+      later(() => {
+        setFlying(false)
+        setFaceDown(false)
+        actions?.onResolve?.(choice)
+      }, last + BACK_DUR)
+    }, FLIP_DUR + FLIP_HOLD)
+  }
+
   return {
     row: (
       <div className={styles.rows} data-testid="board-rebase-row">
-        {ours.piles.map((entry) => (
+        {piles.map((entry) => (
           <div key={entry.pile} className={styles.row}>
-            {(order[entry.pile] ?? []).map((uid, i) => {
+            {(order[entry.pile] ?? entry.cards.map((c) => c.uid)).map((uid, i) => {
               const offered = entry.cards.find((c) => c.uid === uid)
               const data = offered ? cardById(offered.id) : null
               if (!data) return null
               return (
-                <div key={uid} className={styles.slot}>
+                <div
+                  key={uid}
+                  className={styles.slot}
+                  ref={(el) => {
+                    if (el) cardRefs.current.set(uid, el)
+                    else cardRefs.current.delete(uid)
+                  }}
+                >
                   <Typography variant="tag" className={styles.position}>
                     {i + 1}
                   </Typography>
-                  <Card card={data} interactive={false} width="100%" />
-                  <button
-                    type="button"
-                    data-testid={`rebase-up-${uid}`}
-                    className={styles.move}
-                    aria-label={`${copy.position} ${i}`}
-                    onClick={() => move(entry.pile, uid, -1)}
-                  />
+                  <Card card={data} interactive={false} width="100%" faceDown={faceDown} />
+                  {!confirmed && (
+                    <button
+                      type="button"
+                      data-testid={`rebase-up-${uid}`}
+                      className={styles.move}
+                      aria-label={`${copy.position} ${i}`}
+                      onClick={() => move(entry.pile, uid, -1)}
+                    />
+                  )}
                 </div>
               )
             })}
           </div>
         ))}
         <ConfirmAction
-          open
+          open={!confirmed}
           label={copy.confirm}
           caption={copy.prompt}
-          onConfirm={() => {
-            // Committed against THIS render's offer: every offered pile,
-            // answered exactly once, or the engine rejects it.
-            const committed = ours.piles.map((e) => ({
-              pile: e.pile,
-              cards: order[e.pile] ?? e.cards.map((c) => c.uid),
-            }))
-            setConfirmed(true)
-            actions?.onResolve?.({ kind: 'reorderTop', order: committed })
-          }}
+          onConfirm={confirm}
         />
       </div>
     ),
