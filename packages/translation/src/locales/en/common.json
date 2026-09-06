@@ -336,6 +336,8 @@
     "cherryPickToHand": "→ hand",
     "cherryPickToDeck": "→ deck",
     "cherryPickNoHand": "no hand",
+    "rebasePrompt": "set the order of the top cards — 1 is drawn next",
+    "rebasePosition": "position",
     "requestMiss": "not in hand",
     "tabHistory": "history",
     "tabParticipants": "participants",

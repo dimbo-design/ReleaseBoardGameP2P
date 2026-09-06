@@ -1,0 +1,43 @@
+/* The top of a pile, laid out for its owner only (#108). One row per pile
+   under sudo, sharing the single 1-2-3 numbering — the numbers name positions,
+   and every pile has the same three. Placed on the same band as Cherry-pick's
+   grid (`_useCherryPickStaging.module.css`), because both are the same kind of
+   question asked over the same table. */
+.rows {
+  position: absolute;
+  inset-block-start: 18%;
+  inset-inline: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  align-items: center;
+  transform: translateY(-50%);
+}
+
+.row {
+  display: flex;
+  gap: 30px;
+  align-items: flex-end;
+}
+
+.slot {
+  position: relative;
+  inline-size: 150px;
+}
+
+.position {
+  position: absolute;
+  inset-block-start: -26px;
+  inset-inline: 0;
+  text-align: center;
+}
+
+.move {
+  position: absolute;
+  inset-block-end: -26px;
+  inset-inline: 0;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}

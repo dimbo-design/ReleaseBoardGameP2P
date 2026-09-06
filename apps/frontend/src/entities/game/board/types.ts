@@ -205,6 +205,12 @@ export interface BoardChromeCopy {
   cherryPickToHand: string
   cherryPickToDeck: string
   cherryPickNoHand: string
+  // Git Rebase's private row (#108, `reorderTop`) — the prompt above the row
+  // and the label each position's move button carries. Its own captions for
+  // the same reason Cherry-pick has its own: this question is about ORDER, and
+  // no other pending asks it.
+  rebasePrompt: string
+  rebasePosition: string
   // поле паузы (опционально — рендерится только вместе с обработчиком паузы):
   // подпись поля, состояние тумблера (вкл / выкл) и строка-пояснение
   pauseGame?: string

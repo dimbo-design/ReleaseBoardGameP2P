@@ -84,6 +84,7 @@ import { useDefenseStaging } from './_useDefenseStaging'
 import { useHandLimit } from './_useHandLimit'
 import { useInsideStaging } from './_useInsideStaging'
 import { useNeutralizeStaging } from './_useNeutralizeStaging'
+import { useRebaseStaging } from './_useRebaseStaging'
 import { useRequestStaging } from './_useRequestStaging'
 
 // светофор для лимита зрителей (зеркало палитры из экрана Lobby):
@@ -476,6 +477,19 @@ export default function Board({
       toHand: copy.table.cherryPickToHand,
       toDeck: copy.table.cherryPickToDeck,
       noHand: copy.table.cherryPickNoHand,
+      confirm: copy.pending.confirm,
+    },
+    enabled: !(deal.active || beats.exclusive),
+  })
+  // Git Rebase's private row (#108) — the same band and the same gate as the
+  // grid above, because both are the same kind of question asked over the same
+  // table. Its content is private by projection, not by anything done here.
+  const rebase = useRebaseStaging({
+    state,
+    actions,
+    copy: {
+      prompt: copy.table.rebasePrompt,
+      position: copy.table.rebasePosition,
       confirm: copy.pending.confirm,
     },
     enabled: !(deal.active || beats.exclusive),
@@ -1748,7 +1762,11 @@ export default function Board({
           state.pending.kind === 'pickFromDiscard' &&
           (state.pending.source === 'ai-inside' ||
             state.pending.source === 'operation-git-cherry-pick')
-        ) && (
+        ) &&
+        // Rebase's row asks the same way (#108): the panel has no control for
+        // an ORDER, and two confirm bars over one question is the occlusion
+        // every suppression above exists to avoid.
+        state.pending.kind !== 'reorderTop' && (
           <PendingPrompt
             pending={state.pending}
             hand={you.hand}
@@ -1945,6 +1963,7 @@ export default function Board({
       {requesting.band}
       {inside.row}
       {cherry.grid}
+      {rebase.row}
       {previewOverlay}
 
       {/* the pair flyer — a persistent node (I10: position: fixed against the
