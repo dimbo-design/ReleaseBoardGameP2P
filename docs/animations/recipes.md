@@ -2125,8 +2125,9 @@ above plus `Specific opponent card`.
 
 ## Git Cherry-pick — choose a card out of the whole discard
 
-> **Status: prototype.** The rules-complete resolution is pending the #61 open-questions rework (deck splitting,
-> sudo-to-top-of-deck, empty-discard handling). This recipe transcribes the current showcase.
+> **Status: shipped.** The board plays this scene as of #108 — see
+> [the board recipe](#git-cherry-pick-live-board--the-grid-over-a-heap-that-never-emptied) for what it does
+> differently and why. This recipe transcribes the showcase the board was ported from.
 
 **When to call**
 Play Cherry-pick → `deal()`. Phases `idle → deal → choose → resolve → done`. base: 1 card → hand; sudo: 2 cards →
@@ -2178,7 +2179,8 @@ and flies onto the draw deck; the unpicked cards return to the pile in their ori
 
 ## Git Rebase — look at the top 3 of a deck and reorder them secretly
 
-> **Status: prototype.** Pending the #61 rework (per-player deck knowledge, open question 9).
+> **Status: shipped.** The board plays this scene as of #108 — see
+> [the board recipe](#git-rebase-live-board--a-row-only-its-owner-can-see). This recipe transcribes the showcase.
 
 **When to call**
 Play Rebase → phases `idle → pick → deal → order → resolve → done`. base: one deck (with several, first `pick`
@@ -2220,7 +2222,9 @@ rather than shrinking); then they flip face-down and fly back onto the deck in t
 
 ## System Upgrade — every other player discards one card to the centre
 
-> **Status: prototype.** Pending the #61 rework.
+> **Status: shipped.** The board plays this scene as of #108 — see
+> [the board recipe](#system-upgrade-live-board--one-pending-owed-to-a-whole-roster). This recipe transcribes
+> the showcase.
 
 **When to call**
 Play System Upgrade → phases `idle → throw → (hold | choose) → resolve → done`. base: the thrown cards go to the
@@ -2260,6 +2264,79 @@ holds, drops into the hand — and the rest go to the discard.
 
 **Live reference**
 `Git cards` → System Upgrade — `apps/playground/stories/interactive/GitCards/SystemUpgrade.tsx`.
+
+---
+
+## Git Cherry-pick (live board) — the grid over a heap that never emptied
+
+**When to call.** A `pickFromDiscard` pending whose `source` is `operation-git-cherry-pick` and whose `player` is
+us. Inside's row (`ai-inside`) is the OTHER surface over the same pending kind; the two are siblings, gated on
+`source`, because the offer is the whole discard here and only its Releases there.
+
+**What differs from the story, and why**
+- **The heap underneath is never emptied.** `openPickFromDiscard` leaves the candidates in `decks.discard` until
+  the pick resolves, and the heap renders that same array the whole time the grid is open. So **the unpicked never
+  fly back** — they never left. A return flight would draw each of them twice (once flying, once resting) and land
+  it on a pose the heap does not key by. The story needs that leg because its discard is local state it emptied.
+- **The two sudo roles come from the engine**, not from click order: `openPickFromDiscard` withholds triggers from
+  a base offer and `onPickFromDiscard` refuses one the hand slot, so a trigger in `options` can only be the deck
+  card.
+- **Reduced motion answers at once** — a game action never waits on an animation nobody plays.
+
+**Sequence.** Deal out of the discard box into the grid (`DEAL_DUR 360` / `DEAL_STEP 16`, cap `STAGGER_CAP 40`) →
+pick → the hand card to the centre (`REVEAL_W 220` / `REVEAL_DUR 460`), hold `REVEAL_HOLD 560`, `useHandArrival`
+into the fan; a sudo deck card `flipCard` (`FLIP_DUR 420`) then `returnToDeck` (`DECK_DUR 480`) after `DECK_HOLD 360`.
+
+**Where.** `pages/board/[gameId]/_useCherryPickStaging.tsx`, `pages/board/[gameId]/_Board.tsx`.
+
+---
+
+## Git Rebase (live board) — a row only its owner can see
+
+**When to call.** A `reorderTop` pending whose `player` is us and whose `piles` is non-empty.
+
+**What differs from the story, and why**
+- **Privacy is the projection's, not the hook's.** `pendingView` hands every peer but the owner an empty `piles`,
+  so there is nothing here to hide — and the empty case is what the `piles.length > 0` gate is for.
+- **Buttons, not a drag.** Each card carries a «move up one position» control, because the board needs one a test
+  and a keyboard can both reach. The divergence is recorded in the backlog rather than smoothed over.
+- **The RESOLVE waits for the last landing** — the opposite of Cherry-pick above, because a committed reorder is
+  invisible in the projection, so there is no second renderer to race and the flight IS what the player is told.
+  That disagreement is itself a recorded finding.
+- **Reduced motion answers at once**, with nothing left flying.
+
+**Sequence.** Deal out of `pileBox(pile)` into the numbered row (`DEAL_DUR 520` / `DEAL_STEP 80`, settle
+`DEAL_HOLD 200`) → reorder → `faceDown` flips the row (`FLIP_DUR 420`), hold `FLIP_HOLD 260`, then `returnToDeck`
+per card in the committed order (`BACK_DUR 600` / `BACK_STEP 90`); the answer goes when the last lands.
+
+**Where.** `pages/board/[gameId]/_useRebaseStaging.tsx`, `pages/board/[gameId]/_Board.tsx`.
+
+---
+
+## System Upgrade (live board) — one pending owed to a whole roster
+
+**When to call.** A `systemUpgrade` pending. It is the only pending owed to several seats at once, so one surface
+answers three different questions depending on where this seat stands in it: **owed** (pull one card from the fan
+and commit), **picking** and the actor (the open cards become a choice), or **neither** (they stand, read-only,
+under a caption saying what the table is waiting for).
+
+**What differs from the story, and why**
+- **The centre is the projection's, not a beat's.** `pending.thrown` is public and survives every batch boundary,
+  so the standing cards are rendered from it — exactly as `cardById(pending.requested)` persists for `requestCard`
+  — and `upgradeBeat` animates only ARRIVALS, letting its carrier go in the same commit the projection takes over
+  (I7).
+- **Answers may arrive together or apart.** `planBeats` folds consecutive `upgradeThrown` into one staggered beat;
+  seats answering in separate batches become separate short beats over a centre that persists on its own. Both
+  read the same on the table, which is the point of folding a run.
+- **An empty seat answers for itself.** `driveAbsent` drains the roster past a player who walked away, so one
+  absence cannot hold the match.
+
+**Sequence.** Per throw: `seatBox(player)` → a card-sized box inside the seat (I6), `playToCenter` to the centre
+(`THROW_DUR 460`, growing from `THROW_SCALE 0.42`), staggered `THROW_STEP 260` inside one batch; `drop(key)` on
+landing.
+
+**Where.** `pages/board/[gameId]/_useUpgradeStaging.tsx`, `features/board-beats/upgradeBeat.tsx`,
+`features/board-beats/planBeats.ts`.
 
 ---
 

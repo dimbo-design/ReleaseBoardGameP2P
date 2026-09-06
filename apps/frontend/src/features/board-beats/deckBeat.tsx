@@ -10,8 +10,9 @@ import type { BeatPlan, PileStep } from './planBeats'
 // (`DeckAnimationsStory`), and none of them carries a card whose face anybody
 // sees: a pile is face down before and after, so what moves is the pile.
 //
-// The card that CAUSES a split or a merge is Git Branch / Git Merge and belongs
-// to #108. This is the movement it will reuse.
+// The cards that CAUSE a split or a merge — Git Branch and Git Merge — landed
+// with #61 slice B, and `classifyPiles` (planBeats.ts) derives which movement
+// ran from `pilesChanged` alone. These are the movements they drive.
 
 const GATHER_MS = 360 // the heap collecting itself into a pile
 const TURN_MS = 460 // the gathered pile turning face down on the deck

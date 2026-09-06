@@ -645,28 +645,32 @@ const SCENARIOS: Scenario[] = [
       'features/board-beats/transferBeat.tsx, features/board-beats/planBeats.ts, pages/board/[gameId]/_useRequestStaging.tsx, pages/board/[gameId]/_Board.tsx',
   },
   {
-    name: { ru: 'Git Cherry-pick (прототип)', en: 'Git Cherry-pick (prototype)' },
+    name: { ru: 'Git Cherry-pick', en: 'Git Cherry-pick' },
     from: {
-      ru: 'сброс раздаётся в грид выбора (стаггер DEAL_STEP, cap STAGGER_CAP); выбранная — к центру, useHandArrival в руку; sudo-вторая — flipCard рубашкой + returnToDeck на колоду; невыбранные возвращаются в стопку по scatterAt (порядок сохраняется, без перетасовки). Rules-complete отложен (#61).',
-      en: 'the discard deals into a selection grid (stagger DEAL_STEP, cap STAGGER_CAP); the pick → centre, useHandArrival into the hand; a sudo second card → flipCard back-up + returnToDeck onto the deck; the unpicked return to the pile by scatterAt (order kept, no reshuffle). Rules-complete deferred (#61).',
+      ru: 'сброс раздаётся в грид выбора (стаггер DEAL_STEP, cap STAGGER_CAP); выбранная — к центру, useHandArrival в руку; sudo-вторая — flipCard рубашкой + returnToDeck на колоду; невыбранные возвращаются в стопку по scatterAt (порядок сохраняется, без перетасовки). На живом борде (#108): грид над нетронутой кучей — движок держит кандидатов в `decks.discard` до резолва, поэтому невыбранные никуда не летят (они и не уезжали), а роли двух слотов приходят из самого предложения движка.',
+      en: "the discard deals into a selection grid (stagger DEAL_STEP, cap STAGGER_CAP); the pick → centre, useHandArrival into the hand; a sudo second card → flipCard back-up + returnToDeck onto the deck; the unpicked return to the pile by scatterAt (order kept, no reshuffle). On the live board (#108): the grid stands over an UNCHANGED heap — the engine leaves the candidates in `decks.discard` until the pick resolves, so the unpicked never fly (they never left), and the two sudo roles come from the engine's own offer rather than from click order.",
     },
     where: 'GitCards/CherryPick',
+    board: 'pages/board/[gameId]/_useCherryPickStaging.tsx, pages/board/[gameId]/_Board.tsx',
   },
   {
-    name: { ru: 'Git Rebase (прототип)', en: 'Git Rebase (prototype)' },
+    name: { ru: 'Git Rebase', en: 'Git Rebase' },
     from: {
-      ru: 'верхние 3 карты колоды вылетают в нумерованный ряд (DEAL_DUR/STEP), игрок меняет порядок, затем flipCard рубашкой + returnToDeck обратно на колоду в выбранном порядке (BACK_DUR/STEP). Знание о колоде не моделируется (#61 q9). Rules-complete отложен.',
-      en: 'the top 3 cards fly out into a numbered row (DEAL_DUR/STEP), the player reorders, then flipCard back-up + returnToDeck onto the deck in the chosen order (BACK_DUR/STEP). Deck knowledge is not modelled (#61 q9). Rules-complete deferred.',
+      ru: 'верхние 3 карты колоды вылетают в нумерованный ряд (DEAL_DUR/STEP), игрок меняет порядок, затем flipCard рубашкой + returnToDeck обратно на колоду в выбранном порядке (BACK_DUR/STEP). Знание о колоде не моделируется (#61 q9). На живом борде (#108) приватность обеспечивает проекция: `pendingView` отдаёт всем, кроме владельца, пустой `piles`, так что скрывать в хуке нечего.',
+      en: 'the top 3 cards fly out into a numbered row (DEAL_DUR/STEP), the player reorders, then flipCard back-up + returnToDeck onto the deck in the chosen order (BACK_DUR/STEP). Deck knowledge is not modelled (#61 q9). On the live board (#108) the projection is what makes it private: `pendingView` hands every peer but the owner an empty `piles`, so there is nothing for the hook to hide.',
     },
     where: 'GitCards/Rebase',
+    board: 'pages/board/[gameId]/_useRebaseStaging.tsx, pages/board/[gameId]/_Board.tsx',
   },
   {
-    name: { ru: 'System Upgrade (прототип)', en: 'System Upgrade (prototype)' },
+    name: { ru: 'System Upgrade', en: 'System Upgrade' },
     from: {
-      ru: 'каждый соперник бросает карту с места в центр (THROW_DUR/STEP, рост THROW_SCALE→1); base — после HOLD_MS всё в сброс (centerToDiscard, стаггер CLEAR_STEP); sudo — игрок берёт одну (reveal + useHandArrival), остальные в сброс. Rules-complete отложен.',
-      en: 'each opponent throws a card from its seat to the centre (THROW_DUR/STEP, growing THROW_SCALE→1); base — after HOLD_MS all to the discard (centerToDiscard, stagger CLEAR_STEP); sudo — the player takes one (reveal + useHandArrival), the rest to the discard. Rules-complete deferred.',
+      ru: 'каждый соперник бросает карту с места в центр (THROW_DUR/STEP, рост THROW_SCALE→1); base — после HOLD_MS всё в сброс (centerToDiscard, стаггер CLEAR_STEP); sudo — игрок берёт одну (reveal + useHandArrival), остальные в сброс. На живом борде (#108) стоящие карты рисует проекция (`pending.thrown` публичен и переживает границу батча), а бит анимирует только прилёт и отпускает носителя тем же коммитом.',
+      en: 'each opponent throws a card from its seat to the centre (THROW_DUR/STEP, growing THROW_SCALE→1); base — after HOLD_MS all to the discard (centerToDiscard, stagger CLEAR_STEP); sudo — the player takes one (reveal + useHandArrival), the rest to the discard. On the live board (#108) the standing cards are rendered by the projection (`pending.thrown` is public and survives a batch boundary) and the beat animates only the arrival, letting its carrier go in the same commit.',
     },
     where: 'GitCards/SystemUpgrade',
+    board:
+      'pages/board/[gameId]/_useUpgradeStaging.tsx, features/board-beats/upgradeBeat.tsx, features/board-beats/planBeats.ts, pages/board/[gameId]/_Board.tsx',
   },
   {
     name: { ru: 'Лимит карт в руке', en: 'Hand limit' },
@@ -1261,6 +1265,21 @@ const ISSUES: Issue[] = [
     where: {
       ru: 'ui: table/MoveHistory/MoveHistory.tsx + frontend: entities/game/board/toBoardState.ts:171-186',
       en: 'ui: table/MoveHistory/MoveHistory.tsx + frontend: entities/game/board/toBoardState.ts:171-186',
+      },
+      status: 'open',
+    },
+    {
+      what: {
+      ru: 'Rebase переставляет карты кнопками на борде и перетаскиванием в сцене',
+      en: 'Rebase reorders by buttons on the board and by dragging in the story',
+    },
+    problem: {
+      ru: 'Сцена (`GitCards/Rebase`) меняет порядок указателем: захват, превью слота, отпускание. Борд (#108, `_useRebaseStaging.tsx`) даёт на каждую карту кнопку «на позицию выше», потому что борду нужен орган управления, до которого дотягиваются и тест, и клавиатура, — а drag в jsdom не проверяется ничем. Значит одно и то же движение живёт в двух формах, и одна из них недостижима с клавиатуры, что ставит его в тот же ряд, что и остальной мышиный ввод на борде. Закроет общий орган перестановки в `apps/ui`, которым пользуются обе стороны, — а не второй drag, написанный заново на борде.',
+      en: 'The story (`GitCards/Rebase`) reorders by pointer: grab, preview the slot, release. The board (#108, `_useRebaseStaging.tsx`) gives each card a «move up one position» button, because the board needs a control a test and a keyboard can both reach — and a drag is checked by nothing in jsdom. So one movement exists in two shapes and one of them is unreachable by keyboard, which puts it in the same row as the rest of the board’s pointer-only input. What closes it: a shared reorder control in `apps/ui` used by both sides, rather than a second drag written again on the board.',
+    },
+    where: {
+      ru: 'apps/playground/stories/interactive/GitCards/Rebase.tsx + pages/board/[gameId]/_useRebaseStaging.tsx',
+      en: 'apps/playground/stories/interactive/GitCards/Rebase.tsx + pages/board/[gameId]/_useRebaseStaging.tsx',
     },
     status: 'open',
   },
@@ -1276,6 +1295,36 @@ const ISSUES: Issue[] = [
     where: {
       ru: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
       en: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
+      },
+      status: 'open',
+    },
+    {
+      what: {
+      ru: 'Грид Cherry-pick на борде стоит над ЖИВОЙ кучей, в сцене — над опустошённой',
+      en: 'The board’s Cherry-pick grid stands over a LIVE heap; the story’s over an emptied one',
+    },
+    problem: {
+      ru: 'Сцена вынимает кандидатов из своей кучи в грид, потому что её сброс — локальное состояние. Борд не может: `openPickFromDiscard` оставляет карты в `decks.discard` до резолва, и куча под гридом рисует тот же массив всё время, пока грид открыт. Отсюда следует то, что уже пришлось выяснять правкой (#106→#108): невыбранные НЕ летят обратно — они и не уезжали, а обратный полёт нарисовал бы каждую дважды и посадил бы её на позу, по которой куча не ключуется. Развилка не в одном хуке: любой третий экран над сбросом упрётся в неё же. Закроет либо решение, что проекция на время пендинга вынимает кандидатов из кучи (тогда сцена и борд сойдутся), либо запись этого расхождения в рецепт, чтобы третий экран начинал с него, а не с полёта.',
+      en: 'The story lifts its candidates out of the heap into the grid, because its discard is local state. The board cannot: `openPickFromDiscard` leaves the cards in `decks.discard` until the pick resolves, and the heap under the grid renders that same array the whole time the grid is open. What follows is what a fix round had to establish the hard way (#106→#108): the unpicked do NOT fly back — they never left, and a return flight would draw each of them twice and land it on a pose the heap does not key by. The fork is not confined to one hook: any third surface over the discard meets it. What closes it: either a decision that the projection lifts the candidates out of the heap while the pending stands (which would make story and board agree), or writing the divergence into the recipe so a third surface starts from it rather than from a flight.',
+    },
+    where: {
+      ru: 'apps/playground/stories/interactive/GitCards/CherryPick.tsx + pages/board/[gameId]/_useCherryPickStaging.tsx',
+      en: 'apps/playground/stories/interactive/GitCards/CherryPick.tsx + pages/board/[gameId]/_useCherryPickStaging.tsx',
+    },
+    status: 'open',
+  },
+  {
+    what: {
+      ru: 'Две соседние сцены расходятся в том, ждёт ли RESOLVE своего полёта',
+      en: 'Two neighbouring surfaces disagree about whether a RESOLVE waits for its flight',
+    },
+    problem: {
+      ru: 'Cherry-pick отправляет RESOLVE сразу и пускает полёт следом: у выбранной карты есть куда приехать, и полёт — это то, что происходит с ЛОКАЛЬНЫМ выбором, пока сеть догоняет. Rebase (план #108, задача D2) требует обратного — ответ уходит, когда села последняя карта, — потому что в проекции о зафиксированном порядке не видно ничего (содержимое колоды не проецируется никому), второго рисующего нет, и полёт и есть всё, что игроку сообщают. Оба решения защищены в своих файлах, но правило теперь одно на двоих отсутствует: третий такой экран не сможет выбрать, не перечитав оба. Приведённое движение не спасёт — расходятся не значения, а момент отправки. Закроет запись этого выбора в `docs/animations/` как правила с двумя ветками и признаком, по которому ветка выбирается (есть ли у карты видимое место назначения в проекции), — либо решение, что борд всегда отвечает сразу, и тогда правку в Rebase.',
+      en: 'Cherry-pick dispatches its RESOLVE at once and lets the flight run behind it: the picked card has somewhere visible to land, and the flight is what happens with the LOCAL choice while the network catches up. Rebase (plan #108, task D2) asks for the opposite — the answer goes when the last card lands — because nothing about a committed reorder is visible in the projection (a deck’s contents are projected to nobody), there is no second renderer to race, and the flight IS the whole of what the player is told. Both choices are defended in their own files, but there is now no single rule across them: a third such surface cannot choose without reading both. Aligning the movement would not help — what differs is not a value but the moment of dispatch. What closes it: writing the choice into `docs/animations/` as a rule with two branches and the test that picks one (does the card have a visible destination in the projection?), or a decision that the board always answers at once, and then an edit to Rebase.',
+    },
+    where: {
+      ru: 'pages/board/[gameId]/_useRebaseStaging.tsx + pages/board/[gameId]/_useCherryPickStaging.tsx',
+      en: 'pages/board/[gameId]/_useRebaseStaging.tsx + pages/board/[gameId]/_useCherryPickStaging.tsx',
     },
     status: 'open',
   },
