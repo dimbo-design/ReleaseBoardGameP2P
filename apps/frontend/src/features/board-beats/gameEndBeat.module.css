@@ -1,0 +1,26 @@
+.pops {
+  position: absolute;
+  inset: 0;
+  z-index: 120;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.volley {
+  position: absolute;
+  inset: 0;
+}
+
+.pop {
+  position: absolute;
+  inset-block-end: 24px;
+  will-change: transform, opacity;
+}
+
+.popLeft {
+  inset-inline-start: 40px;
+}
+
+.popRight {
+  inset-inline-end: 40px;
+}

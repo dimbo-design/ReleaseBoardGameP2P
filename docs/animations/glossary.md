@@ -171,7 +171,9 @@ and `BEAT` is the pause between beats, so the order reads as an order and not as
 | `HEAP_HOLD` | `640` | the finished heap stands open at the centre before it goes to the fan |
 | `FLIP_HOLD` / `REVEAL_HOLD` | `380` / `620` | it is all in the hand, then it turns over / the hand is read, and only then the zone arrives |
 
-`GameEndStory` — the last release, the poppers, the window.
+`GameEndStory` / `features/board-beats/gameEndBeat.tsx` — the release-condition victory, the
+poppers, the window. The live runner keys from `gameOver(condition: 'release')`, so direct,
+Security Bug and AI Release wins share the same celebration.
 
 | Name | Value | Beat |
 |---|---|---|

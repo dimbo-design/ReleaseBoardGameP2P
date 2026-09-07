@@ -2530,8 +2530,11 @@ opponents' hands, the deck is down by what was dealt, the zone is on screen. Res
 
 ## Ending a match — the winning release, the poppers, the window
 
-**When to call.** The move that closes the third release slot. Guard: the scene runs once
-(`busy`), and the release is accepted only into its own empty slot.
+**When to call.** On every terminal `gameOver` event, whatever its condition — the poppers are the
+finale of ANY victory, not the release condition's own scene (the rules owner's answer on #133). The
+event is the guard, rather than `released`: a direct play, a Security Bug steal and an AI Release can
+all finish the three-slot condition after their own choreography has settled, and a last-standing win
+has no `released` at all.
 
 **Visual result.** The last release settles into the zone, the poppers go off in code symbols out
 of both bottom corners, and the game-over window comes up **while the confetti is still in the
@@ -2554,8 +2557,8 @@ leaving the fan; a layer for the volleys; the `GameOver` window.
    volleys three events instead of one repeated.
 4. At `OVER_AT` the `GameOver` window appears over the table, and the confetti keeps flying **over
    the window**.
-5. Each volley is taken down `CONFETTI_MS` after it went off, by which time its pieces have flown
-   their arcs out.
+5. The complete confetti layer is taken down `CONFETTI_MS` after the first volley went off, by
+   which time every piece from all three volleys has flown its arc out.
 
 **Params & timings.** `POPPERS` `[0, 1] [620, 0.7] [1450, 1.25]` · `POP_PER_SIDE` 33 · `OVER_AT`
 2400 · `CONFETTI_MS` 8500 · piece spread/reach/spin randomised per volley (see the glossary).
@@ -2564,11 +2567,17 @@ leaving the fan; a layer for the volleys; the `GameOver` window.
 be started from a mount effect, never from a ref callback** — otherwise every new volley kills the
 previous one.
 
-**In the playground only.** Both layers — the confetti and the window — are `inset: 0` of the
-stage, which begins **below** the technical line: that line belongs to the playground, not to the
-screen.
+**Layer bounds.** Both layers — the confetti and the window — are `inset: 0` of their stage. In the
+playground that stage begins **below** the technical line; on the live board it is the whole table.
+The confetti layer is above `GameOver` and does not catch pointer events.
 
-**Live reference.** `Game End` (interactive group).
+**Live reference.** `Game End` (interactive group); the production runner is
+`apps/frontend/src/features/board-beats/gameEndBeat.tsx`, planned by `planBeats.ts` from the terminal
+`gameOver` with no filter on its condition. A last-standing win reaches it through the elimination
+path, and the order needs no special case: `flush()` pushes the elimination beat last of its run and
+the `gameOver` branch flushes before pushing its own, so **the clip plays first and the poppers
+follow**. The victory window waits for both — `_Board.tsx` shows it on an empty queue, never on the
+event — so every screen sees the same three things in the same order.
 
 ---
 

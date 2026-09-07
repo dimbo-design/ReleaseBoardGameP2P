@@ -175,6 +175,18 @@ export type BeatPlan =
     }
   | { kind: 'reshuffle'; key: string; cards: number }
   | { kind: 'piles'; key: string; steps: PileStep[] }
+  // ANY victory celebrates, and the poppers are its finale — the rules owner's
+  // answer on #133: they are not the release condition's own scene. So this is
+  // keyed from the terminal `gameOver` with no filter on `condition`, and not
+  // from `released`, because a Security Bug steal and an AI Release complete the
+  // release condition too, and a last-standing win has no `released` at all.
+  //
+  // A last-standing win reaches this through the elimination path, and the order
+  // takes care of itself: `flush()` pushes the elimination beat last of its run
+  // and this branch flushes before pushing, so the clip plays and only then do
+  // the poppers. The window waits for both — `_Board.tsx` shows it on an empty
+  // queue, never on the event.
+  | { kind: 'gameEnd'; key: string; eventId: number }
   // A player is out: the full-screen video plays over a board that has already
   // settled into its eliminated state (#103). Carries no clip of its own — the
   // runner resolves one from `eventId`, so every peer watching the same
@@ -784,6 +796,11 @@ export function planBeats(
         ...(e.codeReview ? { codeReview: e.codeReview } : {}),
         ...(cost ? { cost } : {}),
       })
+      continue
+    }
+    if (e.type === 'gameOver') {
+      flush()
+      plans.push({ kind: 'gameEnd', key: `gameEnd:${e.id}`, eventId: e.id })
       continue
     }
     if (e.type === 'defended') {
