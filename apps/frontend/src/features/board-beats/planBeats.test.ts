@@ -86,14 +86,32 @@ describe('planBeats', () => {
     expect(planBeats(events, boardBefore())).toEqual([])
   })
 
-  it('celebrates every release-condition victory from the gameOver event itself', () => {
+  it('celebrates a release victory from the gameOver event itself', () => {
     expect(planBeats([gameOver('release')], boardBefore())).toEqual([
       { kind: 'gameEnd', key: 'gameEnd:99', eventId: 99 },
     ])
   })
 
-  it('does not invent choreography for a last-standing victory', () => {
-    expect(planBeats([gameOver('lastStanding')], boardBefore())).toEqual([])
+  // The rules owner's answer on #133: the poppers are the finale of ANY
+  // victory, not the release condition's own scene. This branch first shipped
+  // with a `condition === 'release'` filter and a test pinning the absence —
+  // both are gone, and this is what replaced them.
+  it('celebrates a last-standing victory from the same event', () => {
+    expect(planBeats([gameOver('lastStanding')], boardBefore())).toEqual([
+      { kind: 'gameEnd', key: 'gameEnd:99', eventId: 99 },
+    ])
+  })
+
+  // …and when the win came through an elimination, the clip plays FIRST. The
+  // engine settles both in one reduction (`fake/triggers.ts`: `eliminated`, its
+  // discards, then `gameOver`), so the two beats are planned from one batch and
+  // only their order says which the table sees first.
+  it('puts the elimination clip before the poppers when the win came through one', () => {
+    const plans = planBeats(
+      [{ id: 40, type: 'eliminated', player: 'p2' } as Event, gameOver('lastStanding')],
+      boardBefore(),
+    )
+    expect(plans.map((p) => p.kind)).toEqual(['eliminated', 'gameEnd'])
   })
 
   it('flies the player’s own discard from its slot in the fan', () => {

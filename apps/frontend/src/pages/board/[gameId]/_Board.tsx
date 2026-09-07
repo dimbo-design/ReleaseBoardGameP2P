@@ -270,7 +270,7 @@ export default function Board({
   // HAPPENED, not a thing being decided, so the fan stays live while one flies
   // out (docs/animations/README.md — "Gating the hand", approach 3);
   // `exclusive` is the queue's own answer for terminal beats such as an
-  // elimination or the release-victory poppers.
+  // elimination or the victory poppers.
   // The elimination clips are fetched at idle once the match is actually being
   // played — not while the opening is still running, which is the one stretch
   // where the board has real work to do and nothing can be eliminated yet

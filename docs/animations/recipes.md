@@ -2530,9 +2530,11 @@ opponents' hands, the deck is down by what was dealt, the zone is on screen. Res
 
 ## Ending a match — the winning release, the poppers, the window
 
-**When to call.** On every engine `gameOver` event whose condition is `release`. The event is the
-guard, rather than `released`: a direct play, a Security Bug steal and an AI Release can all finish
-the same three-slot condition, after their own placement / window choreography has settled.
+**When to call.** On every terminal `gameOver` event, whatever its condition — the poppers are the
+finale of ANY victory, not the release condition's own scene (the rules owner's answer on #133). The
+event is the guard, rather than `released`: a direct play, a Security Bug steal and an AI Release can
+all finish the three-slot condition after their own choreography has settled, and a last-standing win
+has no `released` at all.
 
 **Visual result.** The last release settles into the zone, the poppers go off in code symbols out
 of both bottom corners, and the game-over window comes up **while the confetti is still in the
@@ -2570,10 +2572,12 @@ playground that stage begins **below** the technical line; on the live board it 
 The confetti layer is above `GameOver` and does not catch pointer events.
 
 **Live reference.** `Game End` (interactive group); the production runner is
-`apps/frontend/src/features/board-beats/gameEndBeat.tsx`, planned by `planBeats.ts` from
-`gameOver(condition: 'release')`. A `lastStanding` ending deliberately keeps the existing
-elimination-to-window path: no victory scene for that condition has been designed yet, and the gap
-is recorded in the animation backlog rather than filled by guesswork.
+`apps/frontend/src/features/board-beats/gameEndBeat.tsx`, planned by `planBeats.ts` from the terminal
+`gameOver` with no filter on its condition. A last-standing win reaches it through the elimination
+path, and the order needs no special case: `flush()` pushes the elimination beat last of its run and
+the `gameOver` branch flushes before pushing its own, so **the clip plays first and the poppers
+follow**. The victory window waits for both — `_Board.tsx` shows it on an empty queue, never on the
+event — so every screen sees the same three things in the same order.
 
 ---
 

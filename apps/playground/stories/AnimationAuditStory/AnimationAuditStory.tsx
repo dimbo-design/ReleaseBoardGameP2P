@@ -744,18 +744,18 @@ const SCENARIOS: Scenario[] = [
 const ISSUES: Issue[] = [
   {
     what: {
-      ru: 'Для победы последнего выжившего нет утверждённой сцены',
-      en: 'A last-standing victory has no approved scene',
+      ru: 'ЗАКРЫТО: для победы последнего выжившего нет утверждённой сцены',
+      en: 'CLOSED: a last-standing victory has no approved scene',
     },
     problem: {
-      ru: "gameOver(condition: 'lastStanding') приходит после пути исключения игроков, а GameEndStory задаёт только релизный рассказ: последняя карта садится в зону, затем срабатывают хлопушки. В #107 живой борд поэтому празднует все gameOver(condition: 'release') — прямую постановку, кражу Security Bug и AI Release — но для lastStanding сохраняет существующий переход от такта исключения к GameOver. Повторить релизные хлопушки без последней посадки или придумать отдельный финал значило бы выдумать неутверждённую хореографию. Закроет playground-сцена или явное решение владельца, что lastStanding использует те же хлопушки.",
-      en: "gameOver(condition: 'lastStanding') arrives through the elimination path, while GameEndStory specifies only a release story: the last card lands in the zone, then the poppers fire. In #107 the live board therefore celebrates every gameOver(condition: 'release') — direct placement, a Security Bug steal and an AI Release — but preserves the existing elimination-to-GameOver path for lastStanding. Reusing release poppers without the final landing, or inventing another finale, would create unapproved choreography. A playground scene or an explicit owner decision that lastStanding shares the poppers will close the gap.",
+      ru: "gameOver(condition: 'lastStanding') приходит после пути исключения игроков, а GameEndStory задаёт только релизный рассказ, поэтому #107 сперва праздновал лишь gameOver(condition: 'release'). ЗАКРЫТО ОТВЕТОМ ВЛАДЕЛЬЦА (#133): хлопушки — финал ЛЮБОЙ победы, отдельная сцена не нужна, такт ставится на терминальный gameOver без фильтра по условию; окно победы называет победителя и способ, хлопушки идут на каждом экране, а при победе через исключение сначала играет ролик и только потом окно. Фильтр снят, тест на отсутствие заменён на два — празднование по обоим условиям и порядок eliminated → gameEnd в одном батче.",
+      en: "gameOver(condition: 'lastStanding') arrives through the elimination path while GameEndStory specifies only a release story, so #107 at first celebrated gameOver(condition: 'release') alone. CLOSED BY THE OWNER (#133): the poppers are the finale of ANY victory, no separate scene is needed, and the beat is planned on the terminal gameOver with no filter on condition; the window names the winner and which of the two ways they won, the poppers fire on every screen, and when the win came through an elimination the clip plays first and the window follows. The filter is gone, and the test pinning its absence was replaced by two — celebrating on both conditions, and the eliminated → gameEnd order inside one batch.",
     },
     where: {
       ru: 'engine gameOver(lastStanding) + playground GameEnd (только release) + features/board-beats/gameEndBeat.tsx',
       en: 'engine gameOver(lastStanding) + playground GameEnd (release only) + features/board-beats/gameEndBeat.tsx',
     },
-    status: 'open',
+    status: 'ok',
   },
   {
     what: {
