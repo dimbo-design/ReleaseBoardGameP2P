@@ -488,7 +488,7 @@ git commit -m "feat(web): the history reads in the colours of its cards (#136)"
 - Consumes: `catOf` from Task 4.
 - Produces: nothing new; fills `HistoryEntry.combo` (`{ card: string; cat: string }`).
 
-Two yellow supports, two different shapes in the engine. `attacked.sudo` is a **boolean**, so the card name must be resolved from the catalogue id `operation-sudo`. `released.codeReview` is a **CardId**, so it resolves directly.
+Two yellow supports, two different shapes in the engine. `attacked.sudo` is a **boolean**, so the card name must be resolved from the catalogue id `support-sudo`. `released.codeReview` is a **CardId**, so it resolves directly.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -498,8 +498,8 @@ it('shows Sudo as the combo on a boosted attack', () => {
     { id: 1, type: 'attacked', attacker: 'you', card: 'attack-bug', sudo: true, target: 'p2' },
   ]
   const combo = toBoardState(view, log, labels).history[0].combo
-  expect(combo?.card).toBe(cardById('operation-sudo')?.name)
-  expect(combo?.cat).toBe('operation')
+  expect(combo?.card).toBe(cardById('support-sudo')?.name)
+  expect(combo?.cat).toBe('support')
 })
 
 it('shows no combo on a plain attack', () => {
@@ -541,7 +541,7 @@ Add above `toHistoryEntry`:
 // The yellow support alongside a card. Two shapes in the engine, one row: an
 // attack carries `sudo` as a BOOLEAN (the card is implied, so its name comes
 // from the catalogue), a release carries `codeReview` as the card id itself.
-const SUDO_ID = 'operation-sudo'
+const SUDO_ID = 'support-sudo'
 
 function comboOf(e: Event): HistoryEntry['combo'] {
   const id = e.type === 'attacked' && e.sudo ? SUDO_ID : e.type === 'released' ? e.codeReview : undefined
