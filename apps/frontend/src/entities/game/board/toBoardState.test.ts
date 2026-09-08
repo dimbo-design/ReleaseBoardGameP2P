@@ -457,11 +457,10 @@ describe('toBoardState', () => {
       { id: 2, type: 'drawn', player: 'you', pile: 0, deckSize: 38 },
     ] as Event[]
     const history = toBoardState(view, log, labels).history
-    // history is newest-first (see "folds the event log into history newest
-    // first" above), so id 2 — the closed draw — lands at index 0 and id 1 —
-    // the open one — at index 1.
-    expect(history[1].draw).toBe(true)
-    expect(history[0].draw).toBeFalsy()
+    // Assertions keyed by event id rather than index, so they survive any
+    // future change to the ordering of the history array.
+    expect(rowById(history, 1)?.draw).toBe(true)
+    expect(rowById(history, 2)?.draw).toBeFalsy()
   })
 })
 
