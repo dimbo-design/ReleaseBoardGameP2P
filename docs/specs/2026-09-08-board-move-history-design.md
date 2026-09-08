@@ -151,10 +151,28 @@ visible log rather than the delta. No new message type: `SYNC` is already `{ vie
 `forViewer` already does the audience filtering, so a rejoining player cannot be handed events they
 were never entitled to.
 
-This is a resend, not a replay. The client folds these into history and the discard heap; it must not
-animate them. The board's beat planner keys off arriving events, so the resend is marked — a
-`resync: true` flag on the `SYNC` payload — and `planBeats` skips a marked batch. Without this a
-rejoining player watches the entire match replay itself as choreography.
+This is a resend, not a replay, and the danger is concrete rather than theoretical. `isOpening`
+decides freshness from the **projection**, not the feed — "a reconnect mid-game must drop straight to
+the live board" — so mid-match `intro` is null, `_Board.tsx:254` passes `enabled: true`, and every
+restored event clears `useBeats`'s watermark of `0`. The whole match would replay itself as
+choreography.
+
+The fix is the watermark, **not** `planBeats`. `useBeats` already keeps `seen.current` and plans only
+`events.filter((e) => e.id > seen.current)` (`useBeats.ts:593`), and its `!enabled` branch already
+demonstrates the exact move required — "nothing here is to be animated, so the watermark keeps pace
+with the feed" (`useBeats.ts:583`). Two entry points need that treatment:
+
+- **A reload.** `useGame` restores its feed in a *lazy `useState` initialiser*, so the events and
+  their highest id exist on the first render rather than one effect later. `useBeats` takes
+  `restoredThrough?: number` and seeds `seen.current` from it. Synchronous restore is what makes this
+  possible, and `sessionStorage` is synchronous.
+- **A rejoin.** The host's resend arrives over the wire, and those events *are* genuinely new to this
+  peer — it was away. They still must not animate, for the reason `isOpening` already states. So the
+  resend is marked: `syncMessage` gains a `resync` argument, the flag rides on the `SYNC` payload,
+  and `useGame` advances the watermark past a marked batch instead of letting it queue beats.
+
+`planBeats` is untouched. It is a pure fold over events and has no business knowing why a batch
+arrived.
 
 ### 6. The client merges
 
