@@ -150,6 +150,24 @@ function cardTextOf(e: Event): string | undefined {
 const catOf = (id: string | undefined): string | undefined =>
   id ? cardById(id)?.category : undefined
 
+// The yellow support alongside a card. Two shapes in the engine, one row: an
+// attack carries `sudo` as a BOOLEAN (the card is implied, so its name comes
+// from the catalogue), a release carries `codeReview` as the card id itself.
+//
+// The catalogue's Sudo card is 'support-sudo' (category 'support') — not
+// 'operation-sudo' as an earlier draft of this spec named it; the engine's own
+// rules tables (cards.ts, conformance.ts) agree it is 'support-sudo'.
+const SUDO_ID = 'support-sudo'
+
+function comboOf(e: Event): HistoryEntry['combo'] {
+  const id =
+    e.type === 'attacked' && e.sudo ? SUDO_ID : e.type === 'released' ? e.codeReview : undefined
+  if (!id) return undefined
+  const card = cardById(id)
+  if (!card) return undefined
+  return { card: card.name, cat: card.category }
+}
+
 // One row per event. The switch is exhaustive by construction: the `never`
 // default means a new member of the engine's Event union fails `pnpm typecheck`
 // here rather than rendering as an unlabelled grey line nobody notices.
@@ -160,6 +178,7 @@ function toHistoryEntry(e: Event, labels: HistoryLabels): HistoryEntry {
     kind: labels[e.type],
     card: cardTextOf(e),
     cat: catOf(cardIdOf(e)),
+    combo: comboOf(e),
     parent: e.parent,
   }
 

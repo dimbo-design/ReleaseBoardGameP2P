@@ -1,4 +1,5 @@
 import type { Event, PlayerView } from '@release/engine'
+import { cardById } from '@release/ui'
 import { HEAP_SHOW, scatterAt } from '@release/ui/animations'
 import { describe, expect, it } from 'vitest'
 import { type HistoryLabels, standInScatter, toBoardState } from './toBoardState'
@@ -132,6 +133,44 @@ describe('toBoardState', () => {
   it('leaves a row uncoloured when the event carries no card at all', () => {
     const log: Event[] = [{ id: 1, type: 'passed', player: 'you' }]
     expect(toBoardState(view, log, labels).history[0].cat).toBeUndefined()
+  })
+
+  // The brief names the Sudo card's catalogue id as 'operation-sudo'; the real
+  // catalogue (apps/ui/src/cards/catalogue.ts) has no such id — the Sudo card
+  // is 'support-sudo', category 'support'. The engine agrees (cards.ts,
+  // conformance.ts all key sudo combos off 'support-sudo'). Using the brief's
+  // id verbatim would make `cardById(...)` resolve to nothing and the combo
+  // silently vanish, so this test reads the real id from the catalogue.
+  it('shows Sudo as the combo on a boosted attack', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'you', card: 'attack-bug', sudo: true, target: 'p2' },
+    ]
+    const combo = toBoardState(view, log, labels).history[0].combo
+    expect(combo?.card).toBe(cardById('support-sudo')?.name)
+    expect(combo?.cat).toBe('support')
+  })
+
+  it('shows no combo on a plain attack', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'you', card: 'attack-bug', sudo: false, target: 'p2' },
+    ]
+    expect(toBoardState(view, log, labels).history[0].combo).toBeUndefined()
+  })
+
+  it('shows Code Review as the combo on a release that carried one', () => {
+    const log: Event[] = [
+      {
+        id: 1,
+        type: 'released',
+        player: 'you',
+        slot: 'backend',
+        card: 'release-backend',
+        codeReview: 'support-code-review',
+      },
+    ]
+    const combo = toBoardState(view, log, labels).history[0].combo
+    expect(combo?.card).toBe(cardById('support-code-review')?.name)
+    expect(combo?.cat).toBe('support')
   })
 
   it('filters events not visible to the local player out of the history', () => {
