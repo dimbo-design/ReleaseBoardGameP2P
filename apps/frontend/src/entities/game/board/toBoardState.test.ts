@@ -249,6 +249,21 @@ describe('toBoardState', () => {
     expect(pending && 'openedAt' in pending ? pending.openedAt : undefined).toBe(50)
     expect(pending && 'deadline' in pending ? pending.deadline : undefined).toBe(150)
   })
+
+  // Every member of the union must produce a row. The `never` default makes a new
+  // event type a typecheck failure rather than a silent grey line — which is
+  // exactly what #108's two upgrade events would otherwise become on merge.
+  it('produces a row for every event type in the union', () => {
+    const every: Event[] = [
+      { id: 1, type: 'dealt', player: 'you', count: 5 },
+      { id: 2, type: 'drawn', player: 'you', pile: 0, deckSize: 39 },
+      { id: 3, type: 'deckReshuffled', cards: 12 },
+      { id: 4, type: 'pilesChanged', piles: [10, 10] },
+    ] as Event[]
+    const history = toBoardState(view, every, labels).history
+    expect(history).toHaveLength(4)
+    expect(history.every((h) => typeof h.id === 'number')).toBe(true)
+  })
 })
 
 // The decks are the only slice these assertions vary, so they spread the shared

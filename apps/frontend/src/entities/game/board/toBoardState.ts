@@ -134,13 +134,53 @@ function cardTextOf(e: Event): string | undefined {
   }
 }
 
+// One row per event. The switch is exhaustive by construction: the `never`
+// default means a new member of the engine's Event union fails `pnpm typecheck`
+// here rather than rendering as an unlabelled grey line nobody notices.
 function toHistoryEntry(e: Event, labels: HistoryLabels): HistoryEntry {
-  return {
+  const base: HistoryEntry = {
     id: e.id,
     who: actorOf(e) ?? '',
     kind: labels[e.type],
     card: cardTextOf(e),
     parent: e.parent,
+  }
+
+  switch (e.type) {
+    case 'dealt':
+    case 'drawn':
+    case 'released':
+    case 'placed':
+    case 'discarded':
+    case 'windowOpened':
+    case 'windowClosed':
+    case 'passed':
+    case 'unpassed':
+    case 'attacked':
+    case 'defended':
+    case 'tookHit':
+    case 'releaseDestroyed':
+    case 'releaseStolen':
+    case 'releaseReturned':
+    case 'monitoringDestroyed':
+    case 'handTransfer':
+    case 'requested':
+    case 'revealed':
+    case 'aiRevealed':
+    case 'neutralized':
+    case 'eliminated':
+    case 'turnStarted':
+    case 'turnEnded':
+    case 'gameOver':
+    case 'rejected':
+    case 'takenFromDiscard':
+    case 'deckReshuffled':
+    case 'pilesChanged':
+      return base
+    default: {
+      const exhaustive: never = e
+      return exhaustive
+    }
   }
 }
 
