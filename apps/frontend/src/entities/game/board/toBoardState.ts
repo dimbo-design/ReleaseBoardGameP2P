@@ -185,6 +185,24 @@ function targetIdOf(e: Event): string | undefined {
   }
 }
 
+// Rollback sends the attacking card back to its owner's hand; Works on my
+// Machine bounces the effect into the attacker. Both name the ATTACKER, and
+// `defended` carries the DEFENDER — so the name is walked up through `parent`.
+//
+// Omitted rather than guessed when the parent is absent or was filtered out for
+// this viewer: `forViewer` can legitimately hand a peer a defence whose attack
+// was secret, and a tail naming the wrong player is worse than no tail.
+function attackerOf(
+  e: Event,
+  byId: Map<number, Event>,
+  nameOf: Map<string, string>,
+): string | undefined {
+  if (e.parent === undefined) return undefined
+  const parent = byId.get(e.parent)
+  if (parent?.type !== 'attacked') return undefined
+  return nameOf.get(parent.attacker) ?? parent.attacker
+}
+
 // One row per event. The switch is exhaustive by construction: the `never`
 // default means a new member of the engine's Event union fails `pnpm typecheck`
 // here rather than rendering as an unlabelled grey line nobody notices.
@@ -192,6 +210,7 @@ function toHistoryEntry(
   e: Event,
   labels: HistoryLabels,
   nameOf: Map<string, string>,
+  byId: Map<number, Event>,
 ): HistoryEntry {
   const targetId = targetIdOf(e)
   // Falls back to the id only when the seat is not in this projection — better a
@@ -206,6 +225,12 @@ function toHistoryEntry(
     combo: comboOf(e),
     target,
     parent: e.parent,
+  }
+
+  if (e.type === 'defended') {
+    const attacker = attackerOf(e, byId, nameOf)
+    if (attacker && e.effect === 'return') base.returnCard = attacker
+    if (attacker && e.effect === 'reflect') base.redirect = attacker
   }
 
   switch (e.type) {
@@ -327,7 +352,11 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
     [view.self.id, view.self.name],
     ...view.opponents.map((o) => [o.id, o.name] as const),
   ])
-  const history = visible.map((e) => toHistoryEntry(e, labels, nameOf)).reverse()
+  // The visible log by id. Only what THIS viewer can see: a tail resolved through
+  // an event `forViewer` filtered out would name a player the reader was never
+  // shown.
+  const byId = new Map(visible.map((e) => [e.id, e]))
+  const history = visible.map((e) => toHistoryEntry(e, labels, nameOf, byId)).reverse()
 
   return {
     you: {

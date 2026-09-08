@@ -1,8 +1,21 @@
 import type { Event, PlayerView } from '@release/engine'
-import { cardById } from '@release/ui'
+import { cardById, type HistoryEntry } from '@release/ui'
 import { HEAP_SHOW, scatterAt } from '@release/ui/animations'
 import { describe, expect, it } from 'vitest'
 import { type HistoryLabels, standInScatter, toBoardState } from './toBoardState'
+
+// A later task in this plan assembles rows into a tree by `parent`, at which
+// point a defended row becomes a CHILD of the attacked row it answers and its
+// index in the flat `history` array shifts. Walking by id instead keeps these
+// assertions true whether the row is top-level or nested.
+const rowById = (rows: HistoryEntry[], id: number): HistoryEntry | undefined => {
+  for (const r of rows) {
+    if (r.id === id) return r
+    const found = r.children ? rowById(r.children, id) : undefined
+    if (found) return found
+  }
+  return undefined
+}
 
 // A minimal but real PlayerView — every field is the engine's actual shape,
 // not a mock. `hand[0].id` is a catalogue id ('attack-bug'); `hand[0].uid` is
@@ -347,6 +360,81 @@ describe('toBoardState', () => {
   it('leaves an untargeted event without a target', () => {
     const log: Event[] = [{ id: 1, type: 'passed', player: 'you' }]
     expect(toBoardState(view, log, labels).history[0].target).toBeUndefined()
+  })
+
+  it('names the attacker a returned card went back to', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'p2', card: 'attack-bug', sudo: false, target: 'you' },
+      {
+        id: 2,
+        type: 'defended',
+        player: 'you',
+        card: 'defense-rollback',
+        effect: 'return',
+        parent: 1,
+      },
+    ]
+    const history = toBoardState(view, log, labels).history
+    expect(rowById(history, 2)?.returnCard).toBe('bot')
+  })
+
+  it('names the attacker a reflected effect bounced into', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'p2', card: 'attack-bug', sudo: false, target: 'you' },
+      {
+        id: 2,
+        type: 'defended',
+        player: 'you',
+        card: 'defense-works-on-my-machine',
+        effect: 'reflect',
+        parent: 1,
+      },
+    ]
+    const history = toBoardState(view, log, labels).history
+    expect(rowById(history, 2)?.redirect).toBe('bot')
+  })
+
+  it('shows no tail for a plain cancel', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'p2', card: 'attack-bug', sudo: false, target: 'you' },
+      {
+        id: 2,
+        type: 'defended',
+        player: 'you',
+        card: 'defense-not-a-bug',
+        effect: 'cancel',
+        parent: 1,
+      },
+    ]
+    const history = toBoardState(view, log, labels).history
+    const row = rowById(history, 2)
+    expect(row?.returnCard).toBeUndefined()
+    expect(row?.redirect).toBeUndefined()
+  })
+
+  // forViewer can hand a peer a defence whose attack was secret. Naming the wrong
+  // player is worse than naming none.
+  it('omits the tail when the attack it answered is not visible to this player', () => {
+    const log: Event[] = [
+      {
+        id: 1,
+        type: 'attacked',
+        attacker: 'p2',
+        card: 'attack-bug',
+        sudo: false,
+        target: 'you',
+        visibleTo: ['p2'],
+      },
+      {
+        id: 2,
+        type: 'defended',
+        player: 'you',
+        card: 'defense-rollback',
+        effect: 'return',
+        parent: 1,
+      },
+    ]
+    expect(toBoardState(view, log, labels).history[0].returnCard).toBeUndefined()
   })
 })
 
