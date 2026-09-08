@@ -3,7 +3,7 @@ import type { Leaving, Rect } from '@release/ui/animations'
 import { scatterAt } from '@release/ui/animations'
 import { act, render } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
-import type { BeatRun, BoardAnchors, BoardState } from '~/entities/game/board'
+import type { BeatRun, BoardAnchors, BoardState, StagedHandoff } from '~/entities/game/board'
 import { useDiscardBeat } from './discardBeat'
 import type { BeatPlan } from './planBeats'
 
@@ -89,7 +89,7 @@ async function drive(run: () => Promise<void> | undefined) {
   }
 }
 
-function harness() {
+function harness(staging?: { current: StagedHandoff | null }) {
   const anchors = {
     centre: { current: node() },
     hand: { current: node() },
@@ -100,11 +100,63 @@ function harness() {
   } as unknown as BoardAnchors
   const api: { beat?: ReturnType<typeof useDiscardBeat> } = {}
   function Probe() {
-    api.beat = useDiscardBeat(anchors)
+    api.beat = useDiscardBeat(anchors, staging)
     return <>{api.beat.overlay}</>
   }
-  return { api, Probe }
+  return { api, Probe, anchors }
 }
+
+it.each([
+  false,
+  true,
+])('discards staged Git cards from the centre with no hand slot (Sudo: %s)', async (paired) => {
+  exits.items = []
+  const release = vi.fn()
+  const { api, Probe, anchors } = harness({
+    current: { mainUid: 'git', supportUid: paired ? 'sudo' : undefined, el: null, release },
+  })
+  anchors.handSlotAt = () => null
+  const centre = { left: 400, top: 200, width: 150, height: 210 }
+  if (anchors.centre.current) anchors.centre.current.getBoundingClientRect = () => centre as DOMRect
+  const git = cardById('operation-git-branch')
+  const support = cardById('support-sudo')
+  if (!git || !support) throw new Error('missing Git cards')
+  const cards: Extract<BeatPlan, { kind: 'discard' }>['cards'] = [
+    { key: 'd20', eventId: 20, card: git.id, source: { kind: 'hand', index: 0 } },
+    ...(paired
+      ? [{ key: 'd21', eventId: 21, card: support.id, source: { kind: 'hand' as const, index: 1 } }]
+      : []),
+  ]
+  const published: BoardState[] = []
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.run(
+      {
+        kind: 'discard',
+        key: 'discard:20',
+        cards,
+      },
+      {
+        base: {
+          ...base,
+          you: {
+            ...base.you,
+            hand: [{ uid: 'git', card: git }, ...(paired ? [{ uid: 'sudo', card: support }] : [])],
+          },
+        },
+        publish: (state) => published.push(state),
+      },
+    ),
+  )
+  expect(exits.items).toHaveLength(paired ? 2 : 1)
+  expect(exits.items[0]).toMatchObject({ from: centre, card: git, scatter: scatterAt(20) })
+  expect(release).toHaveBeenCalledOnce()
+  expect(published.at(-1)?.you.hand).toEqual([])
+  if (paired) {
+    expect(exits.items[0].layer).toBeGreaterThan(exits.items[1].layer ?? 0)
+    expect(exits.items[1]).toMatchObject({ from: centre, card: support, scatter: scatterAt(21) })
+  }
+})
 
 it('draws the swept cards together before it scatters them', async () => {
   exits.items.length = 0

@@ -19,6 +19,61 @@ so that is where a finding has to show up, in one line with a status. This file 
 in full: what it costs and what would close it. Enter it in both — the page so it is seen, here so
 it can be acted on.
 
+## Resolved board regressions (2026-09-07)
+
+### Clicking Code Review did not start pairing — closed 2026-09-07
+
+Only pulling a support entered the partner phase. A click fell through to standalone play,
+which correctly refuses Code Review. Click and pull now share `stageAtCentre` in
+`_useBoardStaging.ts`; both use the engine's `comboOptions` rather than changing card legality.
+Board regression tests cover clicking through a pair with normal and reduced motion.
+
+### AI releases changed face on landing — closed 2026-09-07
+
+The engine keeps a rules identity (`release-*`) and an events-deck identity (`event`) for the
+same instance. The flight showed the AI face, but `toBoardState` resolved only the rules ID
+for the resting zone. It now displays the event face and preserves `releaseId` for animation
+source lookup. Adapter tests cover all three AI release slots on both sides of the table;
+planner tests verify that rules-ID events still locate the displayed AI card.
+
+### Spent defenses reappeared in the hand — closed 2026-09-08
+
+The board switched back to the turn hand when the defense prompt closed, even though
+the defense staging still excluded its spent cards from the pre-batch shadow. It now keeps
+the defense hand owner until staging catches up. The queue also holds the pre-batch state
+on the render that starts an animated batch, so a late response cannot clear landed staging
+before its beat starts. Batches with no animation continue to show live immediately.
+Full-board regressions cover plain and Sudo defenses, early/late responses and reduced motion.
+
+### DDoS disappeared instead of leaving the table — closed 2026-09-08
+
+An immediate resolution deliberately creates no defense prompt. Its separate `pairToDiscard`
+beat nevertheless looked for a pending card at the centre and found nothing. `attackPlaced`
+now owns the immediate attack's spent cards: hold the staged card or remote fold, then send
+the attack and optional Sudo through `useDiscardExit` on their own event scatters. Remove
+the spent local instances from the shadow at takeoff, preserving other copies in the hand.
+
+### AI returns grew toward the deck row — closed 2026-09-08
+
+The events-deck wrapper stretches to the width of the split main-deck row. Measuring that
+wrapper made `returnToDeck` enlarge the AI card and aim away from its pile. `eventsBox`
+now binds to `Pile.boxRef`, the actual card box (I6). Anchor regressions cover one, two and
+three main piles; all AI return paths share the corrected anchor.
+
+### Git pile choice and confirmation placement — closed 2026-09-08
+
+Branch and ordinary Rebase now receive pile targets from the engine projection when multiple
+main piles exist. Click or pull stages the card, then clicking a highlighted pile dispatches
+that pile index. Sudo Branch retains the choice; Sudo Rebase continues to use all piles.
+Projection and board tests cover selecting the second pile and both Sudo paths.
+The discard beat adopts the staged operation from the centre, releasing its staging in the
+same commit as the spent hand instances leave the shadow; it no longer measures an empty fan slot.
+
+Rebase's confirmation was nested inside its positioned, translated card row, so its bottom
+was the row's bottom rather than the board's. It is now a sibling of the scrollable rows,
+anchored at the board bottom. Removing the row transform also keeps fixed return flights in
+viewport coordinates. Visually verified one row and multiple scrolling rows on the real Board.
+
 ## How to write an entry
 
 ```

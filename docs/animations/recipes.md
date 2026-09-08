@@ -424,6 +424,10 @@ scene itself — this beat runs on the real board (`apps/frontend/src/features/b
   'partner'`, the arrow armed from the centre exactly as a plain aim's is (`aimFromCentre`), and
   every partner still in the fan lit in the support's own category colour (`accentAt` — ComboStory's
   "the TYPE is the message").
+- **Click a support at rest** also starts pairing when `state.comboOptions[uid]` is nonempty.
+  It shares `stageAtCentre` with the pull and measures its starting card box with `slotPlacement`.
+  Code Review need not be in `playable`: the partner offer authorizes the pair. Choose the support,
+  then the release, then pay the release cost if the mode requires it.
 - **Pick a partner** (`onCardClick`, guard `phase === 'partner'`, refused while a cancel or a fold is
   already in flight): not in `state.comboOptions[support.uid]` → `cancel()`, the whole staging
   returns to the fan. A hit commits the fold (`merged: true`) and sets `foldingRef.current = true` —
@@ -498,6 +502,13 @@ clears.
 **The beat — `attacked` / `released(codeReview)` / the resolution split (`features/board-beats/comboBeat.tsx`)**
 What happens once the engine answers is a separate, event-driven beat — it also plays an opponent's
 combo, or a local window attack that staged nothing at all.
+
+An attack resolved immediately (DDoS) has no defense prompt to stand on. Its `attackPlaced`
+plan owns the spent attack and optional Sudo: retain the local staging or the remote fold for
+`SHOW_HOLD`, then send both through `useDiscardExit` using their discard event scatters.
+The same takeoff removes only the spent local instances from the hand shadow. No later
+`pairToDiscard` is planned for those cards.
+
 - **`attackPlaced`**, planned from every `attacked` (sudo or not — a plain attack is this same
   runner's aux-less degenerate case, no separate branch): `runAttack` reads the staging→beat handoff
   SYNCHRONOUSLY, before its first `await` — the actor's OWN play is already standing exactly where
@@ -1584,6 +1595,10 @@ Decided, not emergent: a full-screen autoplaying video is exactly what the prefe
 
 ## AI effects — trigger, pull the event, resolve by effect
 
+On the live board, a placed AI Release or Monitoring keeps its events-deck face in both players'
+zones. `toBoardState` resolves `ReleasedView.event` for display and preserves `ReleasedView.card`
+separately in `releaseId`, so animation events can still locate the card by its rules identity.
+
 **When to call**
 The base deck is clicked (or the draw button) → `start()`. Guard `if (busy) return`. The chosen AI card (tech-bar
 selector) and the zone/discard seeding decide the branch.
@@ -2293,6 +2308,11 @@ into the fan; a sudo deck card `flipCard` (`FLIP_DUR 420`) then `returnToDeck` (
 
 ## Git Rebase (live board) — a row only its owner can see
 
+**Choosing a pile.** With multiple draw piles, Branch and ordinary Rebase stage on click or pull
+and wait for a highlighted pile. The projection supplies those targets; the board sends the
+chosen index. Sudo Branch still chooses one pile; Sudo Rebase applies to all piles directly.
+The staged operation and its support leave from the centre through the discard beat's handoff.
+
 **When to call.** A `reorderTop` pending whose `player` is us and whose `piles` is non-empty.
 
 **What differs from the story, and why**
@@ -2310,6 +2330,10 @@ into the fan; a sudo deck card `flipCard` (`FLIP_DUR 420`) then `returnToDeck` (
 per card in the committed order (`BACK_DUR 600` / `BACK_STEP 90`); the answer goes when the last lands.
 
 **Where.** `pages/board/[gameId]/_useRebaseStaging.tsx`, `pages/board/[gameId]/_Board.tsx`.
+
+**Layout.** The numbered rows scroll independently of the confirmation bar. `ConfirmAction`
+is their sibling at the board bottom; the row wrapper has no transform so returning cards
+can use viewport coordinates without acquiring a different containing block.
 
 ---
 
@@ -2515,6 +2539,14 @@ which owns the window's attack affordance — gets it.
 
 **Params & timings.** `SHOW_HOLD` 1200 ms · `LAND_HOLD` 700 ms · `MERGE_MS` 620 ms · poses: attack
 `rot −4`, cover `rot 6, dx 16, dy −12`, sudo `rot −7`.
+
+**Defense handoff.** An animated batch retains the previous projection starting with its first
+render, before the queue's layout effect starts the beat. A dispatched defense keeps ownership
+of the fan until staging catches up to live, including the exit after its prompt closes. A Sudo
+still waiting for a partner does not retain this ownership after a pass or timeout.
+
+**AI pile geometry.** The board's `eventsBox` binds to `Pile.boxRef`, the card box itself. The
+surrounding deck row can grow when main piles split; its width must never size an AI return.
 
 **Invariants.** **I1** measure every slot before the state clears · **I6** aim at card boxes, never at
 rotated slot rects · **I8** the sequences span many awaits — refs, not closures · **I9** each card

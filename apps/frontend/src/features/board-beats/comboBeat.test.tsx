@@ -244,6 +244,67 @@ it('publishes the attack it just folded in, so the cover has something to cover'
 // and a fabricated `defend` here would tell the table an answer is owed for a
 // throw nobody can answer — with `deriveDock` drawing the known-wrong `0s`
 // expired ring over it for the length of the beat.
+it.each([
+  false,
+  true,
+])('flies an instantly resolved attack to discard (local staging: %s)', async (local) => {
+  resetPlayed()
+  exits.items = []
+  const { api, Probe } = harness()
+  const release = vi.fn(() => played.names.push('release'))
+  const staging = local
+    ? { current: { mainUid: 'ddos#0', supportUid: 'sudo#0', el: boxed(400, 300), release } }
+    : undefined
+  render(<Probe staging={staging} />)
+  const published: BoardState[] = []
+  const attackBase: BoardState = {
+    ...base,
+    you: {
+      ...base.you,
+      hand: [
+        { uid: 'ddos#0', card: card('attack-ddos') },
+        { uid: 'sudo#0', card: card('support-sudo') },
+        { uid: 'ddos#1', card: card('attack-ddos') },
+      ],
+    },
+  }
+  await drive(() =>
+    api.beat?.runAttack(
+      {
+        kind: 'attackPlaced',
+        key: 'attack:5',
+        eventId: 5,
+        attacker: local ? 'p1' : 'p2',
+        target: 'p3',
+        card: 'attack-ddos',
+        sudo: true,
+        resolved: true,
+        spent: [
+          { eventId: 6, card: 'attack-ddos' },
+          { eventId: 7, card: 'support-sudo' },
+        ],
+      },
+      { base: attackBase, publish: (state) => published.push(state) },
+    ),
+  )
+  expect(exits.items).toHaveLength(1)
+  expect(exits.items[0]).toMatchObject({
+    card: { id: 'attack-ddos' },
+    aux: { id: 'support-sudo' },
+    scatter: scatterAt(6),
+    auxScatter: scatterAt(7),
+    from: CENTRE_BOX,
+  })
+  expect(published.every((state) => state.pending?.kind !== 'defend')).toBe(true)
+  if (local) {
+    expect(played.names).toEqual(['release', 'centerToDiscard'])
+    expect(published.at(-1)?.you.hand.map((item) => item.uid)).toEqual(['ddos#1'])
+  } else {
+    expect(played.names).toContain('foldIntoPair')
+    expect(played.names.at(-1)).toBe('centerToDiscard')
+  }
+})
+
 it('never says an answer is owed for an attack that cannot be answered', async () => {
   resetPlayed()
   const { api, Probe } = harness()

@@ -71,6 +71,11 @@ const sameTarget = (a: TableTarget, b: TableTarget): boolean => {
   }
 }
 
+// The projection's target offer describes a solo play. Sudo Rebase applies
+// to every draw pile, while Sudo Branch still splits the chosen one.
+const rebaseAllPiles = (main: CardData, support: CardData | null) =>
+  main.id === 'operation-git-rebase' && support?.id === 'support-sudo'
+
 export interface StagedCard {
   uid: string
   card: CardData
@@ -264,7 +269,10 @@ export function useBoardStaging({
 
   const targets = useMemo(
     () =>
-      staged?.main && staged.phase !== 'dispatched' && !cancelling
+      staged?.main &&
+      staged.phase !== 'dispatched' &&
+      !cancelling &&
+      !rebaseAllPiles(staged.main.card, staged.support?.card ?? null)
         ? (state.targets?.[staged.main.uid] ?? [])
         : [],
     [staged, cancelling, state.targets],
@@ -628,6 +636,29 @@ export function useBoardStaging({
     [reduced, anchors.stage, flyer.raise, flyer.drop, actions],
   )
 
+  // Clicks and pulls share the same centre staging; only their starting rect differs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commitStaged only writes refs/state
+  const stageAtCentre = useCallback(
+    (card: StagedCard, hasTarget: boolean, from?: Rect) => {
+      commitStaged(
+        hasTarget
+          ? { support: null, main: card, phase: 'aim', merged: false }
+          : { support: card, main: null, phase: 'partner', merged: false },
+      )
+      setStage('none')
+      void (async () => {
+        const to = anchors.centre.current?.getBoundingClientRect()
+        if (!reduced && from && to) {
+          const [el] = await flyer.raise([{ key: 'stage', card: card.card, at: from }])
+          if (el) await play('playToCenter', el, { from, to })?.finished
+          flyer.drop('stage')
+        }
+        aimFromCentre()
+      })()
+    },
+    [anchors.centre, reduced, flyer.raise, flyer.drop, aimFromCentre],
+  )
+
   // GESTURE — pulling a card out of the fan puts it on the table. A card with
   // its own targets stages a plain aim (Task 3's path: `main` set, `phase:
   // 'aim'`); a support with no targets of its own but a combo partner stages
@@ -650,7 +681,6 @@ export function useBoardStaging({
   // `discardForRelease.release`, never from `staged` — see the clearing
   // effect further down for why `staged` does not linger once that pending
   // lands.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: commitStaged closes only over refs/setStaged and is stable in effect
   const onHandPlay = useCallback(
     (uid: string, drop: HandPlayDrop): boolean => {
       if (!enabled || stagedRef.current) return false
@@ -681,24 +711,7 @@ export function useBoardStaging({
         stageSoloRelease(card, drop.rect)
         return true
       }
-      commitStaged(
-        hasTarget
-          ? { support: null, main: card, phase: 'aim', merged: false }
-          : { support: card, main: null, phase: 'partner', merged: false },
-      )
-      // EVERY pull sets the stage machine, not only a release's — that is what
-      // stops one play inheriting the last one's whereabouts (#101, Fix C,
-      // finding 5). This pull leaves the stage slot empty, and says so.
-      setStage('none')
-      void (async () => {
-        const to = anchors.centre.current?.getBoundingClientRect()
-        if (!reduced && drop.rect && to) {
-          const [el] = await flyer.raise([{ key: 'stage', card: item.card, at: drop.rect }])
-          if (el) await play('playToCenter', el, { from: drop.rect, to })?.finished
-          flyer.drop('stage')
-        }
-        aimFromCentre()
-      })()
+      stageAtCentre(card, hasTarget, drop.rect)
       return true
     },
     [
@@ -707,12 +720,8 @@ export function useBoardStaging({
       state.targets,
       state.comboOptions,
       state.playable,
-      reduced,
-      aimFromCentre,
       stageSoloRelease,
-      flyer.raise,
-      flyer.drop,
-      anchors.centre,
+      stageAtCentre,
     ],
   )
 
@@ -802,14 +811,35 @@ export function useBoardStaging({
       // with something to aim at would belong at the centre, not here.
       if (!s) {
         const item = handItems[index]
+        if (!item) return false
+        const handIndex = state.you.hand.findIndex((c) => c.uid === item.uid)
+        if (handIndex < 0) return false
+        // Supports are not standalone playable cards. The engine's partner
+        // offer authorizes staging them without dispatching a PLAY yet.
+        if ((state.comboOptions?.[item.uid] ?? []).length > 0) {
+          stageAtCentre(
+            { uid: item.uid, card: item.card, index: handIndex },
+            false,
+            reduced ? undefined : slotBox(index, handItems.length),
+          )
+          return true
+        }
+        if (
+          state.playable.includes(item.uid) &&
+          state.targets?.[item.uid]?.some((target) => target.kind === 'pile')
+        ) {
+          stageAtCentre(
+            { uid: item.uid, card: item.card, index: handIndex },
+            true,
+            reduced ? undefined : slotBox(index, handItems.length),
+          )
+          return true
+        }
         const releaseAtRest =
-          item != null &&
           item.card.category === 'release' &&
           state.playable.includes(item.uid) &&
           (state.targets?.[item.uid] ?? []).length === 0
-        if (!item || !releaseAtRest) return false
-        const handIndex = state.you.hand.findIndex((c) => c.uid === item.uid)
-        if (handIndex < 0) return false
+        if (!releaseAtRest) return false
         stageSoloRelease(
           { uid: item.uid, card: item.card, index: handIndex },
           reduced ? undefined : slotBox(index, handItems.length),
@@ -863,7 +893,10 @@ export function useBoardStaging({
           commitStaged({ support, main, phase: 'dispatched', merged: true })
           dispatchWatermarkRef.current = eventsRef.current.length
           actions?.onAttack?.(main.uid, support.uid)
-        } else if ((state.targets?.[main.uid] ?? []).length > 0) {
+        } else if (
+          (state.targets?.[main.uid] ?? []).length > 0 &&
+          !rebaseAllPiles(main.card, support.card)
+        ) {
           commitStaged({ support, main, phase: 'target', merged: true })
           aimFromCentre()
         } else {
@@ -954,6 +987,7 @@ export function useBoardStaging({
       arrowCtl.stop,
       aimFromCentre,
       stageSoloRelease,
+      stageAtCentre,
       actions,
       cancel,
       costOptions,

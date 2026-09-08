@@ -239,47 +239,49 @@ export function useRebaseStaging(args: {
 
   return {
     row: (
-      <div className={styles.rows} data-testid="board-rebase-row">
-        {piles.map((entry) => (
-          <div key={entry.pile} className={styles.row}>
-            {(order[entry.pile] ?? entry.cards.map((c) => c.uid)).map((uid, i) => {
-              const offered = entry.cards.find((c) => c.uid === uid)
-              const data = offered ? cardById(offered.id) : null
-              if (!data) return null
-              return (
-                <div
-                  key={uid}
-                  className={styles.slot}
-                  ref={(el) => {
-                    if (el) cardRefs.current.set(uid, el)
-                    else cardRefs.current.delete(uid)
-                  }}
-                >
-                  <Typography variant="tag" className={styles.position}>
-                    {i + 1}
-                  </Typography>
-                  <Card card={data} interactive={false} width="100%" faceDown={faceDown} />
-                  {!confirmed && (
-                    <button
-                      type="button"
-                      data-testid={`rebase-up-${uid}`}
-                      className={styles.move}
-                      aria-label={`${copy.position} ${i}`}
-                      onClick={() => move(entry.pile, uid, -1)}
-                    />
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        ))}
+      <>
+        <div className={styles.rows} data-testid="board-rebase-row">
+          {piles.map((entry) => (
+            <div key={entry.pile} className={styles.row}>
+              {(order[entry.pile] ?? entry.cards.map((c) => c.uid)).map((uid, i) => {
+                const offered = entry.cards.find((c) => c.uid === uid)
+                const data = offered ? cardById(offered.id) : null
+                if (!data) return null
+                return (
+                  <div
+                    key={uid}
+                    className={styles.slot}
+                    ref={(el) => {
+                      if (el) cardRefs.current.set(uid, el)
+                      else cardRefs.current.delete(uid)
+                    }}
+                  >
+                    <Typography variant="tag" className={styles.position}>
+                      {i + 1}
+                    </Typography>
+                    <Card card={data} interactive={false} width="100%" faceDown={faceDown} />
+                    {!confirmed && (
+                      <button
+                        type="button"
+                        data-testid={`rebase-up-${uid}`}
+                        className={styles.move}
+                        aria-label={`${copy.position} ${i}`}
+                        onClick={() => move(entry.pile, uid, -1)}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
         <ConfirmAction
           open={!confirmed}
           label={copy.confirm}
           caption={copy.prompt}
           onConfirm={confirm}
         />
-      </div>
+      </>
     ),
   }
 }

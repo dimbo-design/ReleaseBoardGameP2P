@@ -367,6 +367,10 @@ export default function Board({
     enabled: !(deal.active || beats.exclusive),
     matchKey: intro?.gameId ?? null,
   })
+  // The defense still owns its hand exclusions after the beat closes the
+  // prompt: its exit is flying the spent cards while the shadow holds the
+  // old hand. Release that ownership only when staging catches up to live.
+  const defenseOwnsHand = answering || defenseStaging.staged?.phase === 'dispatched'
   // the hand limit owed to US means this hook owns the fan (#104) — a third
   // owner beside `answering` and the turn hook, and the three can never
   // overlap: `state.pending` is one slot.
@@ -567,14 +571,14 @@ export default function Board({
   // deal's and the beat queue's own (unrelated) gaps.
   const liveGapAt = discarding
     ? handLimit.gapAt
-    : answering
+    : defenseOwnsHand
       ? defenseStaging.gapAt
       : alarmMineOpen
         ? neutralizing.gapAt
         : staging.gapAt
   const liveGapSize = discarding
     ? handLimit.gapSize
-    : answering
+    : defenseOwnsHand
       ? defenseStaging.gapSize
       : alarmMineOpen
         ? neutralizing.gapSize
@@ -1138,30 +1142,44 @@ export default function Board({
         <div className={cls(opening.deckStack, enter)} ref={anchors.decks}>
           <div className={opening.pileRow}>
             {decks.main.map((count, i) => (
-              <Pile
+              <div
                 // biome-ignore lint/suspicious/noArrayIndexKey: a pile IS its index — the engine names it that way in `drawn.pile`, and a split leaves the halves where the pile was
                 key={i}
-                label={copy.table.deck}
-                deck="base"
-                count={count}
-                width={pileWidthFor(decks.main.length)}
-                countPos="tl"
-                boxRef={(el) => anchors.bindPile(i, el)}
-              />
+                className={opening.pileTarget}
+              >
+                <Pile
+                  label={copy.table.deck}
+                  deck="base"
+                  count={count}
+                  width={pileWidthFor(decks.main.length)}
+                  countPos="tl"
+                  boxRef={(el) => anchors.bindPile(i, el)}
+                  pickable={staging.targets.some((t) => t.kind === 'pile' && t.pile === i)}
+                />
+                {staging.targets.some((t) => t.kind === 'pile' && t.pile === i) && (
+                  <button
+                    type="button"
+                    className={opening.pilePick}
+                    aria-label={`${copy.table.deck} ${i + 1}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      staging.onTargetPick({ kind: 'pile', pile: i })
+                    }}
+                  />
+                )}
+              </div>
             ))}
           </div>
-          {/* Pile has a closed prop list — no arbitrary attribute passes
-              through it — so the events pile's card box is a wrapping node
-              instead of `boxRef` on the pile itself (matching the discard
-              pile's own `boxRef` would leave nothing here for a test, or a
-              future flight, to find by attribute). */}
-          <div ref={anchors.eventsBox} data-events-box>
+          {/* The wrapper stretches with the draw-pile row; flights must use
+              the pile's actual card box, especially after a Git split. */}
+          <div data-events-box>
             <Pile
               label={copy.table.events}
               deck="ai"
               count={decks.events}
               width={150}
               countPos="tl"
+              boxRef={anchors.eventsBox}
             />
           </div>
         </div>
@@ -1549,14 +1567,12 @@ export default function Board({
               onMouseDown={handInert ? (e) => e.stopPropagation() : undefined}
             >
               <Hand
-                // a `defend` pending owed to us means the defence hook owns
-                // the fan (#101, Task 16) — `answering` picks the source at
-                // every call site below, rather than merging the two hooks'
-                // outputs.
+                // Keep the same owner for items and index-based handlers,
+                // including the exit after the defense prompt closes.
                 items={
                   discarding
                     ? handLimit.handItems
-                    : answering
+                    : defenseOwnsHand
                       ? defenseStaging.handItems
                       : alarmMineOpen
                         ? neutralizing.handItems
@@ -1591,7 +1607,7 @@ export default function Board({
                 stateAt={
                   discarding
                     ? handLimit.stateAt
-                    : answering
+                    : defenseOwnsHand
                       ? defenseStaging.stateAt
                       : alarmMineOpen
                         ? neutralizing.stateAt
@@ -1603,7 +1619,7 @@ export default function Board({
                 accentAt={
                   discarding
                     ? handLimit.accentAt
-                    : answering
+                    : defenseOwnsHand
                       ? defenseStaging.accentAt
                       : alarmMineOpen
                         ? undefined
@@ -1627,7 +1643,7 @@ export default function Board({
                 onCardClick={
                   deal.active || discarding
                     ? undefined
-                    : answering
+                    : defenseOwnsHand
                       ? (i) => defenseStaging.onCardClick(i)
                       : alarmMineOpen
                         ? // a 503 is answered by a PULL, never by a click —
@@ -1655,7 +1671,7 @@ export default function Board({
                     ? undefined
                     : discarding
                       ? handLimit.onHandPlay
-                      : answering
+                      : defenseOwnsHand
                         ? defenseStaging.onHandPlay
                         : alarmMineOpen
                           ? neutralizing.onHandPlay
@@ -1673,7 +1689,7 @@ export default function Board({
                           you.hand,
                           discarding
                             ? handLimit.handItems
-                            : answering
+                            : defenseOwnsHand
                               ? defenseStaging.handItems
                               : alarmMineOpen
                                 ? neutralizing.handItems

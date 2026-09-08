@@ -1,20 +1,34 @@
 import { render } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
+import type { BoardAnchors } from '~/entities/game/board'
 import Board from '../_Board'
 import { makeBoardProps } from './fixture'
 
 // A render-level smoke test: it guards that the board still puts up the DOM
 // shapes an anchor binds to (a discard card box, a release zone per owner) —
-// NOT that the registry actually wires them. A `ref`/`slotRef` prop is
-// invisible to a DOM query, so this file cannot tell a wired anchor from an
-// unwired one; `../../../../entities/game/board/anchors.test.tsx` is what
-// asserts the registry's own behaviour (indexing, per-owner keying, identity).
+// Most checks cover structure; the events-pile regression also captures the
+// real registry to verify which DOM node the board binds for flights.
+// `../../../../entities/game/board/anchors.test.tsx` asserts the registry's
+// own behaviour (indexing, per-owner keying, identity).
 // The hand-slot-per-card structure is already covered by board.test.tsx's
 // real-projection test, so it is not repeated here.
 //
 // The board has no intro in these: the anchors belong to the board, not to the
 // opening, and that is the whole point of the registry existing.
 vi.mock('~/shared/lib/useReducedMotion', () => ({ useReducedMotion: () => true }))
+
+const captured = vi.hoisted(() => ({ anchors: null as BoardAnchors | null }))
+vi.mock('~/entities/game/board', async (importOriginal) => {
+  const real = await importOriginal<typeof import('~/entities/game/board')>()
+  return {
+    ...real,
+    useBoardAnchors: () => {
+      const anchors = real.useBoardAnchors()
+      captured.anchors = anchors
+      return anchors
+    },
+  }
+})
 
 it('still renders the discard as a card box, not just a labelled cell', () => {
   const { container } = render(<Board {...makeBoardProps()} />)
@@ -78,7 +92,17 @@ it('renders an empty centre slot with no stray children', () => {
   expect(cover.children).toHaveLength(0)
 })
 
-it('binds the events pile so a card can fly home to it', () => {
-  render(<Board {...makeBoardProps()} />)
-  expect(document.querySelector('[data-events-box]')).not.toBeNull()
+it.each([
+  { main: [36] },
+  { main: [18, 18] },
+  { main: [12, 12, 12] },
+])('aims AI return flights at the card box with draw piles $main', ({ main }) => {
+  const props = makeBoardProps()
+  render(<Board {...props} state={{ ...props.state, decks: { ...props.state.decks, main } }} />)
+  const wrapper = document.querySelector('[data-events-box]')
+  const cardBox = wrapper?.querySelector('[class*="stack"]')
+  expect(cardBox).toBeTruthy()
+  // The wrapper stretches to the draw row's width after a Git split. Aiming
+  // at it enlarges the returning card instead of landing on the 150px pile.
+  expect(captured.anchors?.eventsBox.current).toBe(cardBox)
 })

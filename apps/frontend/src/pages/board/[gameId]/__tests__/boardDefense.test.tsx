@@ -186,6 +186,20 @@ it('drops a defence on the attack and answers with it', async () => {
   expect(screen.getByTestId('board-cover-staged')).toBeTruthy()
 })
 
+it('returns the fan to normal play when a pending closes before a Sudo partner is chosen', async () => {
+  const initial = defenceBoard({
+    options: ['defense-hotfix#0'],
+    combos: { 'support-sudo#0': ['defense-hotfix#0'] },
+  })
+  const { rerender } = render(initial)
+  await pullFromFan('support-sudo#0')
+  expect(document.querySelectorAll('[data-hand-slot]')).toHaveLength(1)
+  // Passing or timing out does not dispatch the staged Sudo. Only a defense
+  // that was actually played may keep filtering the hand after pending ends.
+  rerender(<Board {...initial.props} state={{ ...initial.props.state, pending: null }} />)
+  expect(document.querySelectorAll('[data-hand-slot]')).toHaveLength(2)
+})
+
 it('offers nothing the projection did not offer', async () => {
   // legality is the engine's answer, never the UI's — a card the pending does
   // not list cannot be pulled to answer with

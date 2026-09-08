@@ -93,16 +93,23 @@ export function playableFor(state: GameState, viewerId: PlayerId): CardUid[] {
     .map((c) => c.uid)
 }
 
-// An entry only for the playable cards that need a target — the same
-// `attackTargets` the reducer itself validates against, so the offer and the
-// acceptance cannot drift.
+// Playable attacks name their legal targets; Branch and base Rebase name a
+// draw pile when there is more than one to choose from. Sudo Rebase reaches
+// all piles instead, so its paired gesture does not use this solo offer.
 export function targetsFor(state: GameState, viewerId: PlayerId): Record<CardUid, Target[]> {
   const result: Record<CardUid, Target[]> = {}
   const hand = state.players[viewerId].hand
   for (const uid of playableFor(state, viewerId)) {
     const card = hand.find((c) => c.uid === uid)
-    if (!card || rulesFor(card.id)?.kind !== 'attack') continue
-    result[uid] = attackTargets(state, viewerId, card.id)
+    if (!card) continue
+    if (rulesFor(card.id)?.kind === 'attack') {
+      result[uid] = attackTargets(state, viewerId, card.id)
+    } else if (
+      (card.id === 'operation-git-branch' || card.id === 'operation-git-rebase') &&
+      state.decks.main.length > 1
+    ) {
+      result[uid] = state.decks.main.map((_, pile) => ({ kind: 'pile', pile }))
+    }
   }
   return result
 }

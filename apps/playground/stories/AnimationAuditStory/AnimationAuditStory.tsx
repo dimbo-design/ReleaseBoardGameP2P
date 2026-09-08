@@ -763,6 +763,96 @@ const ISSUES: Issue[] = [
   },
   {
     what: {
+      ru: 'Git не давал выбрать колоду, подтверждение Rebase перекрывало карты',
+      en: 'Git omitted pile selection and Rebase confirmation covered the cards',
+    },
+    problem: {
+      ru: 'Исправлено: Branch и обычный Rebase предлагают основные колоды через targets движка. Sudo Branch сохраняет выбор, Sudo Rebase использует все колоды. Подтверждение вынесено из прокручиваемых рядов к нижнему краю доски; проверено в браузере.',
+      en: 'Fixed: Branch and ordinary Rebase offer draw piles through engine targets. Sudo Branch keeps the choice; Sudo Rebase uses every pile. Confirmation sits outside the scrolling rows at the board bottom, verified in the browser.',
+    },
+    where: {
+      ru: 'fake/project.ts + pages/board/[gameId]/_Board.tsx + _useBoardStaging.ts + _useRebaseStaging.tsx',
+      en: 'fake/project.ts + pages/board/[gameId]/_Board.tsx + _useBoardStaging.ts + _useRebaseStaging.tsx',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'Сыгранная защита возвращалась в веер во время сброса',
+      en: 'Played defenses reappeared in the fan during discard',
+    },
+    problem: {
+      ru: 'Исправлено: веер остаётся у защитного жеста до завершения передачи. Очередь сохраняет прежнюю проекцию уже на первом кадре новой анимации. Проверены обычная защита, Sudo, быстрый и поздний ответ, reduced motion.',
+      en: 'Fixed: the defense gesture keeps ownership of the fan until handoff finishes. The queue preserves the previous projection on the first render of an animated batch. Covered plain/Sudo defenses, early/late responses and reduced motion.',
+    },
+    where: {
+      ru: 'pages/board/[gameId]/_Board.tsx + features/board-beats/useBeats.ts',
+      en: 'pages/board/[gameId]/_Board.tsx + features/board-beats/useBeats.ts',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'DDoS исчезала без полёта в сброс',
+      en: 'DDoS disappeared without a discard flight',
+    },
+    problem: {
+      ru: 'Исправлено: мгновенно разрешённая атака сама удерживает карту в центре и отправляет её вместе с Sudo в сброс через useDiscardExit. Отдельный такт больше не ищет несуществующий запрос защиты.',
+      en: 'Fixed: an instantly resolved attack owns its centre hold and sends itself and its Sudo through useDiscardExit. A separate beat no longer searches for a defense prompt that never existed.',
+    },
+    where: {
+      ru: 'features/board-beats/planBeats.ts + comboBeat.tsx',
+      en: 'features/board-beats/planBeats.ts + comboBeat.tsx',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'Возвращающаяся AI-карта увеличивалась после разделения колод',
+      en: 'Returning AI cards grew after draw piles were split',
+    },
+    problem: {
+      ru: 'Исправлено: eventsBox привязан к Pile.boxRef, а не к растянутой обёртке. Все обратные полёты используют реальный размер и положение AI-колоды; проверены один, два и три основных стека.',
+      en: 'Fixed: eventsBox uses Pile.boxRef instead of the stretched wrapper. Every return uses the actual AI pile card geometry; verified with one, two and three draw piles.',
+    },
+    where: {
+      ru: 'pages/board/[gameId]/_Board.tsx (eventsBox)',
+      en: 'pages/board/[gameId]/_Board.tsx (eventsBox)',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'Клик по Code Review не начинал комбо',
+      en: 'Clicking Code Review did not start pairing',
+    },
+    problem: {
+      ru: 'Исправлено: клик и вытягивание используют stageAtCentre. Партнёров разрешает comboOptions движка; после Code Review выбирается релиз и оплачивается его стоимость.',
+      en: 'Fixed: clicking and pulling share stageAtCentre. The engine comboOptions authorize partners; choose Code Review, then the release and its cost.',
+    },
+    where: {
+      ru: 'pages/board/[gameId]/_useBoardStaging.ts',
+      en: 'pages/board/[gameId]/_useBoardStaging.ts',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'AI-релиз менял лицо после посадки в зону',
+      en: 'AI releases changed face after landing in the zone',
+    },
+    problem: {
+      ru: 'Исправлено: toBoardState показывает лицо event и сохраняет id правил в releaseId. Своя и чужая зоны сохраняют AI-карту; поиск источника анимации использует id правил.',
+      en: 'Fixed: toBoardState displays the event face and retains the rules identity in releaseId. Both zones keep the AI card; animation source lookup uses the rules identity.',
+    },
+    where: {
+      ru: 'entities/game/board/toBoardState.ts, features/board-beats/planBeats.ts',
+      en: 'entities/game/board/toBoardState.ts, features/board-beats/planBeats.ts',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
       ru: 'Промах Security Bug нечем показать — правило есть, такта нет',
       en: 'A missed Security Bug has nothing to show it — the rule exists, the beat does not',
     },
@@ -1265,11 +1355,11 @@ const ISSUES: Issue[] = [
     where: {
       ru: 'ui: table/MoveHistory/MoveHistory.tsx + frontend: entities/game/board/toBoardState.ts:171-186',
       en: 'ui: table/MoveHistory/MoveHistory.tsx + frontend: entities/game/board/toBoardState.ts:171-186',
-      },
-      status: 'open',
     },
-    {
-      what: {
+    status: 'open',
+  },
+  {
+    what: {
       ru: 'Rebase переставляет карты кнопками на борде и перетаскиванием в сцене',
       en: 'Rebase reorders by buttons on the board and by dragging in the story',
     },
@@ -1295,11 +1385,11 @@ const ISSUES: Issue[] = [
     where: {
       ru: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
       en: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
-      },
-      status: 'open',
     },
-    {
-      what: {
+    status: 'open',
+  },
+  {
+    what: {
       ru: 'Грид Cherry-pick на борде стоит над ЖИВОЙ кучей, в сцене — над опустошённой',
       en: 'The board’s Cherry-pick grid stands over a LIVE heap; the story’s over an emptied one',
     },

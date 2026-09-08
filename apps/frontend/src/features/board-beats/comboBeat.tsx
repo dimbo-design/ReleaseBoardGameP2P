@@ -144,6 +144,52 @@ export function useComboBeat(
       const { staging: s } = latest.current
       const handoff = s?.current
 
+      // DDoS resolves without a defense prompt. Keep its staged card (or the
+      // remote fold) visible until this beat sends it to discard itself; a
+      // later pairToDiscard cannot find a pending render for this attack.
+      if (plan.resolved && plan.spent && plan.spent.length > 0) {
+        const mine = plan.attacker === ctx.base.selfId
+        await nextFrames()
+        const el =
+          mine && handoff
+            ? handoff.el
+            : await foldIn(plan.attacker, plan.card, plan.sudo ? 'support-sudo' : undefined, ctx)
+        const from = rectOf(latest.current.anchors.centre.current)
+        const main = cardById(plan.card)
+        const mainSpent = plan.spent.find((item) => item.card === plan.card)
+        const auxSpent = plan.spent.find((item) => item.card === 'support-sudo')
+        await wait(SHOW_HOLD)
+        // Hand back the staged node and remove the spent instances from the
+        // shadow in the same commit as the discard carrier takes over.
+        if (mine) {
+          const hand = [...ctx.base.you.hand]
+          for (const spent of plan.spent) {
+            const uid = spent.card === plan.card ? handoff?.mainUid : handoff?.supportUid
+            const at = hand.findIndex((item) =>
+              uid ? item.uid === uid : item.card.id === spent.card,
+            )
+            if (at >= 0) hand.splice(at, 1)
+          }
+          ctx.publish({ ...ctx.base, you: { ...ctx.base.you, hand } })
+          handoff?.release()
+        }
+        flyer.drop('fold')
+        if (from && main && mainSpent) {
+          await latest.current.send([
+            {
+              key: `instant:${mainSpent.eventId}`,
+              card: main,
+              aux: auxSpent ? cardById(auxSpent.card) : null,
+              el,
+              from,
+              scatter: scatterAt(mainSpent.eventId),
+              auxScatter: auxSpent ? scatterAt(auxSpent.eventId) : undefined,
+            },
+          ])
+        }
+        return
+      }
+
       // WHAT THE CARRIER HANDS OVER TO — the same question for every seat, so
       // one answer for all of them (#101, Fix D, finding 7). Letting go of
       // whatever held the attack (the fold's carrier below, or the actor's own

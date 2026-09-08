@@ -48,6 +48,18 @@
   align-items: flex-start;
 }
 
+.pileTarget {
+  position: relative;
+}
+
+.pilePick {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
 /* the centre of the table — a little ABOVE the geometric middle (42%, not 50%):
    there it does not argue with the hand, nor with the preview that rises out of
    it. The same value in every scene. Here the player's own cards gather in it

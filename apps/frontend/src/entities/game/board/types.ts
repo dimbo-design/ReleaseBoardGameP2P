@@ -46,6 +46,8 @@ export interface BoardOpponent {
   name: string
   handCount: number
   release: ReleaseSlots
+  // Rules identities remain available when a slot displays an AI card face.
+  releaseId?: Partial<Record<keyof ReleaseSlots, string>>
   // A played Code Review lying under the release it protects.
   support?: ReleaseSupport
   eliminated?: boolean
@@ -61,6 +63,7 @@ export interface BoardState {
     name: string
     hand: HandItem[]
     release: ReleaseSlots
+    releaseId?: Partial<Record<keyof ReleaseSlots, string>>
     // A played Code Review lying under the release it protects.
     support?: ReleaseSupport
     eliminated?: boolean

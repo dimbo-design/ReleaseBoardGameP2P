@@ -253,6 +253,26 @@ describe('planBeats', () => {
     ])
   })
 
+  it.each(['p1', 'p2'])('finds an AI release by its rules identity for %s', (player) => {
+    const base = boardBefore()
+    const release = { frontend: card('ai-release-frontend') }
+    const releaseId = { frontend: 'release-frontend' }
+    const before = boardBefore({
+      you: { ...base.you, release, releaseId },
+      opponents: [{ ...base.opponents[0], release, releaseId }],
+    })
+    const plans = planBeats(
+      [discarded(4, { player, card: 'release-frontend', reason: 'destroyed' })],
+      before,
+    )
+    expect(plans).toMatchObject([
+      {
+        kind: 'discard',
+        cards: [{ source: { kind: 'release', player, slot: 'frontend' } }],
+      },
+    ])
+  })
+
   it('flies a destroyed card out of the release slot it stood in', () => {
     const [beat] = planBeats(
       [discarded(4, { card: 'release-frontend', reason: 'destroyed' })],
@@ -1402,7 +1422,31 @@ describe('planBeats — an attack resolved inside its own play (#19 follow-up)',
       boardBefore(),
     )
     const attack = plans.find((p) => p.kind === 'attackPlaced')
-    expect(attack).toMatchObject({ card: 'attack-ddos', resolved: true })
+    expect(attack).toMatchObject({
+      card: 'attack-ddos',
+      resolved: true,
+      spent: [{ eventId: 11, card: 'attack-ddos' }],
+    })
+    expect(plans.map((p) => p.kind)).toEqual(['attackPlaced'])
+  })
+
+  it('keeps the Sudo discard with the instantly resolved attack', () => {
+    const plans = planBeats(
+      [
+        { id: 10, type: 'attacked', attacker: 'p1', card: 'attack-ddos', sudo: true, target: 'p2' },
+        { id: 11, type: 'discarded', player: 'p1', card: 'attack-ddos', reason: 'attackSpent' },
+        { id: 12, type: 'discarded', player: 'p1', card: 'support-sudo', reason: 'attackSpent' },
+      ],
+      boardBefore(),
+    )
+    expect(plans).toHaveLength(1)
+    expect(plans[0]).toMatchObject({
+      kind: 'attackPlaced',
+      spent: [
+        { eventId: 11, card: 'attack-ddos' },
+        { eventId: 12, card: 'support-sudo' },
+      ],
+    })
   })
 
   // An ordinary attack stands until it is answered, and must keep saying so.

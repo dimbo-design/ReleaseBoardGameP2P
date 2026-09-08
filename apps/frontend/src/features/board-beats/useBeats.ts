@@ -178,7 +178,7 @@ export function useBeats(args: {
   // that produced it.
   const [advanced, setAdvanced] = useState<BoardState | null>(null)
 
-  const discards = useDiscardBeat(anchors)
+  const discards = useDiscardBeat(anchors, staging)
   const draws = useDrawBeat(anchors)
   const decks = useDeckBeat(anchors)
   const combo = useComboBeat(anchors, staging, clearPaidCost, takeStagedRelease)
@@ -666,6 +666,17 @@ export function useBeats(args: {
     void drain()
   }, [events, live, enabled, reduced, beatOf, drain, running, restoredThrough])
 
+  // Keep the pre-batch board on the render that queues an arriving batch too.
+  // `running` is set in the layout effect, but staging's catch-up effects also
+  // observe this render: showing `live` here would clear an already-landed
+  // defense before the queue restores the hand it is animating away from.
+  const unqueued = enabled && !reduced && !running ? events.filter((e) => e.id > seen.current) : []
+  // A non-animated batch never starts a runner, so it must show live now;
+  // there would be no later queue render to release a preview shadow.
+  const awaitingBatch =
+    unqueued.length > 0 &&
+    planBeats(unqueued, settled.current, live.pending, live.decks.discardCount).length > 0
+
   return {
     // The shadow is what the running beat has published, or its own base while
     // it has published nothing yet. The one exception is the opening, which
@@ -675,7 +686,8 @@ export function useBeats(args: {
     // beat reports done, so the handover to the live projection is the queue's
     // own last frame.
     shadow:
-      (running?.exclusive ? (advanced ?? intro?.shadow) : (advanced ?? running?.base)) ?? null,
+      (running?.exclusive ? (advanced ?? intro?.shadow) : (advanced ?? running?.base)) ??
+      (awaitingBatch ? settled.current : null),
     overlays: [
       ...discards.overlay,
       ...draws.overlay,

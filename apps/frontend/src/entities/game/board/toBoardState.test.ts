@@ -365,8 +365,35 @@ describe('toBoardState', () => {
     const state = toBoardState(withEvents, [], labels)
     expect(state.you.releaseEvent).toEqual({ frontend: 'ai-release-frontend' })
     expect(state.opponents[0].releaseEvent).toEqual({ monitoring: 'ai-monitoring' })
-    // the slots themselves are unchanged — the card still reads as an ordinary one
-    expect(state.you.release.frontend?.id).toBe('release-frontend')
+    expect(state.you.release.frontend?.id).toBe('ai-release-frontend')
+    expect(state.opponents[0].release.monitoring?.id).toBe('ai-monitoring')
+    expect(state.you.release.backend?.id).toBe('release-backend')
+    expect(state.you.releaseId).toEqual({
+      frontend: 'release-frontend',
+      backend: 'release-backend',
+    })
+    expect(state.opponents[0].releaseId).toEqual({ monitoring: 'protection-monitoring' })
+  })
+
+  it.each([
+    'frontend',
+    'backend',
+    'database',
+  ] as const)('keeps the AI %s face in both release zones', (slot) => {
+    const release = {
+      [slot]: { uid: 'event#1', card: `release-${slot}`, event: `ai-release-${slot}` },
+    }
+    const state = toBoardState(
+      {
+        ...view,
+        self: { ...view.self, release },
+        opponents: [{ ...view.opponents[0], release }],
+      },
+      [],
+      labels,
+    )
+    expect(state.you.release[slot]?.id).toBe(`ai-release-${slot}`)
+    expect(state.opponents[0].release[slot]?.id).toBe(`ai-release-${slot}`)
   })
 
   it('carries a defend pending openedAt through unchanged, alongside deadline', () => {

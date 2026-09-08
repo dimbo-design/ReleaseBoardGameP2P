@@ -31,12 +31,23 @@ const cardOrPlaceholder = (id: string): CardData => cardById(id) ?? PLACEHOLDER_
 // dropped here, not hidden by the kit. The codeReview half rides separately,
 // as the slot's support (see `toReleaseSupport`).
 function toReleaseSlots(release: ReleaseView) {
+  const face = (slot: ReleaseView[keyof ReleaseView]) =>
+    slot ? cardOrPlaceholder(slot.event ?? slot.card) : undefined
   return {
-    frontend: release.frontend ? cardOrPlaceholder(release.frontend.card) : undefined,
-    backend: release.backend ? cardOrPlaceholder(release.backend.card) : undefined,
-    database: release.database ? cardOrPlaceholder(release.database.card) : undefined,
-    monitoring: release.monitoring ? cardOrPlaceholder(release.monitoring.card) : undefined,
+    frontend: face(release.frontend),
+    backend: face(release.backend),
+    database: face(release.database),
+    monitoring: face(release.monitoring),
   }
+}
+
+// Animation events name the rules id even when the visible card is from AI.
+function toReleaseIds(release: ReleaseView): NonNullable<BoardState['you']['releaseId']> {
+  return Object.fromEntries(
+    Object.entries(release)
+      .filter(([, card]) => card != null)
+      .map(([slot, card]) => [slot, card.card]),
+  )
 }
 
 // The identities `toReleaseSlots` above drops. All four slots are the engine's
@@ -423,6 +434,7 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
       name: view.self.name,
       hand: view.self.hand.map((c) => ({ uid: c.uid, card: cardOrPlaceholder(c.id) })),
       release: toReleaseSlots(view.self.release),
+      releaseId: toReleaseIds(view.self.release),
       support: toReleaseSupport(view.self.release),
       releaseUid: toReleaseUids(view.self.release),
       releaseEvent: toReleaseEvents(view.self.release),
@@ -432,6 +444,7 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
       name: o.name,
       handCount: o.handCount,
       release: toReleaseSlots(o.release),
+      releaseId: toReleaseIds(o.release),
       support: toReleaseSupport(o.release),
       releaseEvent: toReleaseEvents(o.release),
       eliminated: o.eliminated,

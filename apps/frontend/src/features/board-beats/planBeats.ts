@@ -255,6 +255,8 @@ export type BeatPlan =
        * attack that stands until it is answered.
        */
       resolved?: true
+      /** Immediate resolutions own their exit; no pending card stands for a later beat. */
+      spent?: { eventId: number; card: string }[]
     }
   // Every release flies into its slot. `codeReview` rides along when the play
   // was a combo; `cost` when the rules made it pay for itself — the card is
@@ -395,8 +397,14 @@ const FROM_RELEASE = new Set<DiscardReason>(['destroyed', 'neutralized'])
 // `ReleaseSlots` has no string index signature (it names its four keys
 // explicitly), so the lookup takes it by its own type rather than a generic
 // Record — `keyof ReleaseSlots` keeps the cast at the one line that needs it.
-const slotHolding = (release: ReleaseSlots, card: string): string | null =>
-  (Object.keys(release) as (keyof ReleaseSlots)[]).find((k) => release[k]?.id === card) ?? null
+const slotHolding = (
+  release: ReleaseSlots,
+  card: string,
+  ids?: BoardState['you']['releaseId'],
+): string | null =>
+  (Object.keys(release) as (keyof ReleaseSlots)[]).find(
+    (k) => (ids?.[k] ?? release[k]?.id) === card,
+  ) ?? null
 
 function sourceOf(
   e: Extract<Event, { type: 'discarded' }>,
@@ -405,10 +413,8 @@ function sourceOf(
 ): DiscardSource | null {
   const mine = e.player === before.selfId
   if (FROM_RELEASE.has(e.reason)) {
-    const release = mine
-      ? before.you.release
-      : before.opponents.find((o) => o.id === e.player)?.release
-    const slot = release ? slotHolding(release, e.card) : null
+    const owner = mine ? before.you : before.opponents.find((o) => o.id === e.player)
+    const slot = owner ? slotHolding(owner.release, e.card, owner.releaseId) : null
     // Found in the zone: it left the zone. Not found: fall through and look
     // where the card actually was — the reason narrows the search, it does not
     // decide the answer. A Code Review attached to a destroyed release lives in
@@ -793,7 +799,20 @@ export function planBeats(
       // owes nobody one, and the batch is where that fact actually lives.
       const after = events[i + 1]
       const resolved =
-        after?.type === 'discarded' && after.reason === 'attackSpent' && after.card === e.card
+        after?.type === 'discarded' &&
+        after.reason === 'attackSpent' &&
+        after.card === e.card &&
+        after.player === e.attacker
+      const spent: { eventId: number; card: string }[] = []
+      if (resolved) {
+        for (let j = i + 1; j < events.length; j++) {
+          const d = events[j]
+          if (d.type !== 'discarded' || d.reason !== 'attackSpent' || d.player !== e.attacker) break
+          spent.push({ eventId: d.id, card: d.card })
+          owned.add(d.id)
+        }
+        openAttack = null
+      }
       plans.push({
         kind: 'attackPlaced',
         key: `attack:${e.id}`,
@@ -802,7 +821,7 @@ export function planBeats(
         attacker: e.attacker,
         card: e.card,
         sudo: e.sudo,
-        ...(resolved ? { resolved: true as const } : {}),
+        ...(resolved ? { resolved: true as const, spent } : {}),
       })
       continue
     }

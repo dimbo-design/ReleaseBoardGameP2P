@@ -191,6 +191,7 @@ function Probe({
         <div key={c.uid} data-hand-slot />
       ))}
       <div data-testid="hand">{shown.you.hand.length}</div>
+      <div data-testid="turn">{shown.turn}</div>
       {/* The deck tells the three states apart where the hand cannot: preDeal
           and afterDiscard both have an empty fan, and only the deck count says
           whether the board is showing the opening's shadow or the projection. */}
@@ -233,6 +234,27 @@ const mount = (intro?: IntroBeat | null) => {
 // batch left behind — and jsdom drives requestAnimationFrame on a real timer, so
 // flushing microtasks alone no longer reaches the other side of it.
 const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 80))))
+
+it('shows live immediately for a batch with no animation plans', async () => {
+  motion.reduced = false
+  try {
+    const { getByTestId, rerender } = render(
+      <Probe live={{ ...preDiscard, turn: 'p1' }} events={[]} anchors={stub} />,
+    )
+    rerender(
+      <Probe
+        live={{ ...preDiscard, turn: 'p2' }}
+        events={[{ id: 1, type: 'turnStarted', player: 'p2', index: 1 }]}
+        anchors={stub}
+      />,
+    )
+    await flush()
+    expect(getByTestId('turn').textContent).toBe('p2')
+    expect(getByTestId('running').textContent).toBe('idle')
+  } finally {
+    motion.reduced = true
+  }
+})
 
 // An opening that reports when it is told to, so a test can watch the order.
 const introBeat = (log: string[], run?: () => Promise<void>): IntroBeat => ({

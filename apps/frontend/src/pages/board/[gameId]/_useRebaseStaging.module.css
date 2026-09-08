@@ -1,18 +1,21 @@
 /* The top of a pile, laid out for its owner only (#108). One row per pile
    under sudo, sharing the single 1-2-3 numbering — the numbers name positions,
-   and every pile has the same three. Placed on the same band as Cherry-pick's
-   grid (`_useCherryPickStaging.module.css`), because both are the same kind of
-   question asked over the same table. */
+   and every pile has the same three. Keep the confirm bar outside this scroll
+   area, at the table's bottom. No transform: return flights pin the card nodes
+   against viewport coordinates, so this must not become their containing block. */
 .rows {
   position: absolute;
-  inset-block-start: 18%;
+  inset-block: 8px 0;
   inset-inline: 0;
   z-index: 40;
   display: flex;
   flex-direction: column;
   gap: 24px;
   align-items: center;
-  transform: translateY(-50%);
+  justify-content: safe center;
+  padding-block: 26px 150px;
+  overflow-y: auto;
+  pointer-events: none;
 }
 
 .row {
@@ -24,6 +27,7 @@
 .slot {
   position: relative;
   inline-size: 150px;
+  pointer-events: auto;
 }
 
 .position {
