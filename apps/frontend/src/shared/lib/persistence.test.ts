@@ -96,3 +96,36 @@ describe('when sessionStorage throws (Safari private mode)', () => {
     vi.restoreAllMocks()
   })
 })
+
+import { clearLog, readLog, writeLog } from './persistence'
+
+describe('the move log record', () => {
+  it('round-trips the events it was given', () => {
+    writeLog({ gameId: 'g1', events: [{ id: 1 }, { id: 2 }], savedAt: 1_000 })
+    expect(readLog('g1', 1_000)).toEqual([{ id: 1 }, { id: 2 }])
+  })
+
+  // The persisted form of the guard useGame already runs in memory: seat ids
+  // repeat between games, so another match's feed is not this match's history.
+  it('refuses a log belonging to another game', () => {
+    writeLog({ gameId: 'g1', events: [{ id: 1 }], savedAt: 1_000 })
+    expect(readLog('g2', 1_000)).toBeNull()
+  })
+
+  it('drops a log older than the restore window', () => {
+    writeLog({ gameId: 'g1', events: [{ id: 1 }], savedAt: 0 })
+    expect(readLog('g1', RESTORE_TTL_MS + 1)).toBeNull()
+  })
+
+  it('drops a record it cannot parse rather than failing the same way forever', () => {
+    sessionStorage.setItem('release:log', '{not json')
+    expect(readLog('g1', 1_000)).toBeNull()
+    expect(sessionStorage.getItem('release:log')).toBeNull()
+  })
+
+  it('clears', () => {
+    writeLog({ gameId: 'g1', events: [{ id: 1 }], savedAt: 1_000 })
+    clearLog()
+    expect(readLog('g1', 1_000)).toBeNull()
+  })
+})
