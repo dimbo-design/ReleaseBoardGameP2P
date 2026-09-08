@@ -108,9 +108,10 @@ function actorOf(e: Event): string | undefined {
   }
 }
 
-// The primary card an event is about, resolved to its display name — never
-// the raw id, so an unknown card can't leak an internal string into the UI.
-function cardTextOf(e: Event): string | undefined {
+// The id behind the primary card an event is about — the same events,
+// unresolved, so a row can be coloured by the card's category (`catOf`)
+// without re-deriving which field on `e` holds it.
+function cardIdOf(e: Event): string | undefined {
   switch (e.type) {
     case 'released':
     case 'placed':
@@ -123,16 +124,31 @@ function cardTextOf(e: Event): string | undefined {
     case 'monitoringDestroyed':
     case 'requested':
     case 'revealed':
-      return cardOrPlaceholder(e.card).name
+      return e.card
     case 'drawn':
     case 'handTransfer':
-      return e.card ? cardOrPlaceholder(e.card).name : undefined
+      return e.card
     case 'aiRevealed':
-      return cardOrPlaceholder(e.aiCard).name
+      return e.aiCard
     default:
       return undefined
   }
 }
+
+// The primary card an event is about, resolved to its display name — never
+// the raw id, so an unknown card can't leak an internal string into the UI.
+// Total via `cardOrPlaceholder`, unlike `cardIdOf` which stays raw.
+function cardTextOf(e: Event): string | undefined {
+  const id = cardIdOf(e)
+  return id ? cardOrPlaceholder(id).name : undefined
+}
+
+// The row's colour. Deliberately NOT `cardOrPlaceholder(...).category`: the
+// placeholder is an 'attack', so an unrecognised card would render confidently
+// red. `MoveHistory` treats an absent `cat` as "no accent", which is the honest
+// rendering of a card the catalogue cannot name.
+const catOf = (id: string | undefined): string | undefined =>
+  id ? cardById(id)?.category : undefined
 
 // One row per event. The switch is exhaustive by construction: the `never`
 // default means a new member of the engine's Event union fails `pnpm typecheck`
@@ -143,6 +159,7 @@ function toHistoryEntry(e: Event, labels: HistoryLabels): HistoryEntry {
     who: actorOf(e) ?? '',
     kind: labels[e.type],
     card: cardTextOf(e),
+    cat: catOf(cardIdOf(e)),
     parent: e.parent,
   }
 

@@ -117,6 +117,23 @@ describe('toBoardState', () => {
     expect(history[0].parent).toBe(1)
   })
 
+  it('colours a row by the category of its card', () => {
+    const log: Event[] = [{ id: 1, type: 'placed', player: 'you', card: 'attack-bug' }]
+    expect(toBoardState(view, log, labels).history[0].cat).toBe('attack')
+  })
+
+  // PLACEHOLDER_CARD.category is 'attack'; using it here would paint every
+  // unrecognised card red with full confidence. No colour is the honest answer.
+  it('leaves a row uncoloured when the catalogue does not know the card', () => {
+    const log: Event[] = [{ id: 1, type: 'placed', player: 'you', card: 'not-a-card' }]
+    expect(toBoardState(view, log, labels).history[0].cat).toBeUndefined()
+  })
+
+  it('leaves a row uncoloured when the event carries no card at all', () => {
+    const log: Event[] = [{ id: 1, type: 'passed', player: 'you' }]
+    expect(toBoardState(view, log, labels).history[0].cat).toBeUndefined()
+  })
+
   it('filters events not visible to the local player out of the history', () => {
     const log: Event[] = [
       { id: 1, type: 'drawn', player: 'you', pile: 0, deckSize: 39, visibleTo: ['p2'] },
