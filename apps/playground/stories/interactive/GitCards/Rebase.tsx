@@ -1,12 +1,5 @@
-import {
-  type ReactNode,
-  type PointerEvent as ReactPointerEvent,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react'
-import { play } from '@/animations'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { play, useCardReorder } from '@/animations'
 import { CARDS } from '@/cards'
 import type { Card as CardType } from '@/cards/types'
 import { nextHandUid } from '@/mocks/hand'
@@ -57,14 +50,6 @@ interface Row {
   deckId: number
   cards: RCard[]
 }
-interface Drag {
-  row: number // row array index
-  uid: string
-  x: number // dragged card offset within its row (row-local; follows the pointer)
-  y: number
-  to: number // slot the card would drop into (0..2)
-}
-
 // the draw decks in play, derived from the toggle (counts are cosmetic)
 const decksFor = (n: DeckCount) =>
   Array.from({ length: n }, (_, i) => ({ id: i, count: 22 - i * 2 }))
@@ -77,18 +62,6 @@ const buildRow = (deckId: number): Row => ({
   })),
 })
 
-// the order committed when the drag drops: others fill the slots ≠ `to` in their
-// current order, the dragged card takes slot `to`. Symmetric in both directions.
-function commitOrder(cards: RCard[], uid: string, to: number): RCard[] {
-  const dragged = cards.find((c) => c.uid === uid)
-  if (!dragged) return cards
-  const others = cards.filter((c) => c.uid !== uid)
-  const res: RCard[] = []
-  let k = 0
-  for (let s = 0; s < 3; s++) res.push(s === to ? dragged : others[k++])
-  return res
-}
-
 export default function Rebase({ selector }: { selector: ReactNode }) {
   const { lang } = useLang()
   const [sudo, setSudo] = useState(false)
@@ -96,14 +69,24 @@ export default function Rebase({ selector }: { selector: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [rows, setRows] = useState<Row[]>([])
   const [faceDown, setFaceDown] = useState(false) // flip on resolve (secret order)
-  const [drag, setDrag] = useState<Drag | null>(null)
 
-  const rowRefs = useRef<Map<number, HTMLElement>>(new Map())
   const cardEls = useRef<Map<string, HTMLElement>>(new Map())
   const deckRefs = useRef<Map<number, HTMLElement>>(new Map())
-  const grab = useRef<{ gx: number; gy: number; rowRect: DOMRect } | null>(null)
-  const toRef = useRef(0) // last drop slot, read by the pointerup commit
   const timers = useRef<number[]>([])
+
+  const reorder = useCardReorder({
+    enabled: phase === 'order',
+    step: STEP,
+    rows: rows.map((row) => ({ id: row.deckId, cards: row.cards.map((c) => c.uid) })),
+    onReorder: (id, order) =>
+      setRows((current) =>
+        current.map((row) =>
+          row.deckId === id
+            ? { ...row, cards: order.flatMap((uid) => row.cards.filter((c) => c.uid === uid)) }
+            : row,
+        ),
+      ),
+  })
 
   const decks = decksFor(decksN)
 
@@ -181,59 +164,8 @@ export default function Rebase({ selector }: { selector: ReactNode }) {
     later(() => setPhase('order'), DEAL_DUR + maxDelay + DEAL_HOLD)
   }, [phase])
 
-  // drag: subscribe once per new grab (row/uid); the pointer stream moves the
-  // dragged card (absolute + transform, row-local) and previews the drop slot
-  // (siblings glide to fill it). On release the card is NOT position-switched —
-  // it stays absolute and only its transform changes, so the .orderCard
-  // transition glides it into its slot instead of teleporting.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-subscribe only on a new grab, not on every pointer move
-  useLayoutEffect(() => {
-    if (!drag) return
-    const rowIdx = drag.row
-    const uid = drag.uid
-    const onMove = (e: PointerEvent) => {
-      const g = grab.current
-      if (!g) return
-      const x = e.clientX - g.gx - g.rowRect.left
-      const y = e.clientY - g.gy - g.rowRect.top
-      const to = Math.max(0, Math.min(2, Math.round(x / STEP)))
-      toRef.current = to
-      setDrag((d) => (d ? { ...d, x, y, to } : d))
-    }
-    const onUp = () => {
-      const to = toRef.current
-      setRows((rs) =>
-        rs.map((r, i) => (i === rowIdx ? { ...r, cards: commitOrder(r.cards, uid, to) } : r)),
-      )
-      setDrag(null)
-      grab.current = null
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    return () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-  }, [drag?.row, drag?.uid])
-
-  const onCardDown = (rowIdx: number, uid: string, e: ReactPointerEvent) => {
-    if (phase !== 'order' || drag) return
-    const rowEl = rowRefs.current.get(rowIdx)
-    const cardEl = cardEls.current.get(uid)
-    if (!rowEl || !cardEl) return
-    e.preventDefault()
-    const cr = cardEl.getBoundingClientRect()
-    const rr = rowEl.getBoundingClientRect()
-    const dIdx = rows[rowIdx].cards.findIndex((c) => c.uid === uid)
-    grab.current = { gx: e.clientX - cr.left, gy: e.clientY - cr.top, rowRect: rr }
-    toRef.current = dIdx
-    setDrag({ row: rowIdx, uid, x: cr.left - rr.left, y: cr.top - rr.top, to: dIdx })
-  }
-
   function toIdle() {
     clearTimers()
-    setDrag(null)
-    grab.current = null
     setRows([])
     setFaceDown(false)
     setPhase('idle')
@@ -289,7 +221,7 @@ export default function Rebase({ selector }: { selector: ReactNode }) {
   }
 
   function confirm() {
-    if (phase !== 'order') return
+    if (phase !== 'order' || reorder.drag) return
     setPhase('resolve')
     setFaceDown(true) // the reordered cards flip face-down — the order stays secret
     later(flyBackToDecks, FLIP_DUR + FLIP_HOLD)
@@ -315,14 +247,6 @@ export default function Rebase({ selector }: { selector: ReactNode }) {
     ru: 'перетаскиванием задай порядок · 1 — верх колоды',
     en: 'drag to set the order · 1 = top of deck',
   })
-
-  // the slot a card occupies during a drag: the dragged one floats, the others
-  // fill the slots other than the drop slot, in their committed order
-  const previewSlot = (cards: RCard[], c: RCard, d: Drag): number => {
-    const slots = [0, 1, 2].filter((s) => s !== d.to)
-    const others = cards.filter((x) => x.uid !== d.uid)
-    return slots[others.indexOf(c)] ?? 0
-  }
 
   return (
     <div className={styles.root}>
@@ -398,13 +322,9 @@ export default function Rebase({ selector }: { selector: ReactNode }) {
               ))}
             </div>
             <div className={styles.rows} style={{ gap: ROWS_GAP }}>
-              {rows.map((row, ri) => (
+              {rows.map((row) => (
                 <div
                   key={row.deckId}
-                  ref={(el) => {
-                    if (el) rowRefs.current.set(ri, el)
-                    else rowRefs.current.delete(ri)
-                  }}
                   className={styles.orderRow}
                   style={{ inlineSize: ROW_W, blockSize: ROW_H }}
                 >
@@ -424,18 +344,11 @@ export default function Rebase({ selector }: { selector: ReactNode }) {
                     </Typography>
                   )}
                   {row.cards.map((c, idx) => {
-                    const dragRow = drag?.row === ri
-                    const isDragged = dragRow && drag?.uid === c.uid
-                    const slot =
-                      dragRow && drag && !isDragged ? previewSlot(row.cards, c, drag) : idx
-                    const style =
-                      isDragged && drag
-                        ? {
-                            inlineSize: REORDER_W,
-                            transform: `translate(${drag.x}px, ${drag.y}px)`,
-                            zIndex: 6,
-                          }
-                        : { inlineSize: REORDER_W, transform: `translate(${slot * STEP}px, 0)` }
+                    const position = reorder.position(row.deckId, c.uid, idx)
+                    const style = {
+                      inlineSize: REORDER_W,
+                      transform: `translate(${position.x}px, ${position.y}px)`,
+                    }
                     return (
                       <div
                         key={c.uid}
@@ -443,9 +356,9 @@ export default function Rebase({ selector }: { selector: ReactNode }) {
                           if (el) cardEls.current.set(c.uid, el)
                           else cardEls.current.delete(c.uid)
                         }}
-                        className={`${styles.orderCard} ${isDragged ? styles.dragging : ''}`}
+                        className={`${styles.orderCard} ${position.dragging ? styles.dragging : ''}`}
                         style={style}
-                        onPointerDown={(e) => onCardDown(ri, c.uid, e)}
+                        onPointerDown={(e) => reorder.onPointerDown(row.deckId, c.uid, e)}
                       >
                         <Card
                           card={c.card}

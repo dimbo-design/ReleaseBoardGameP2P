@@ -1510,25 +1510,13 @@ the attack it answered … so the history tree needs no inference». Это не
 
 ---
 
-### Rebase переставляет карты кнопками на борде и перетаскиванием в сцене
+### Rebase reorder interaction — closed 2026-09-08
 
-**Что не хватает.** Одного органа перестановки. Сцена `GitCards/Rebase` меняет порядок указателем —
-захват, превью слота, отпускание. Борд (#108) даёт на каждую карту кнопку «на позицию выше»
-(`pages/board/[gameId]/_useRebaseStaging.tsx`), потому что борду нужен орган, до которого дотягиваются
-и тест, и клавиатура: drag в jsdom не проверяется ничем.
-
-**Чем грозит.** Движение написано дважды в двух формах, и правки к нему теперь надо вносить дважды —
-ровно тот случай, против которого стоит правило #88 «движение в двух сценах — это модуль, а не
-копия». Вторая цена — доступность: перетаскивание с клавиатуры недостижимо, и Rebase становится ещё
-одной мышиной дверью рядом с теми, что уже записаны за `Hand`.
-
-**Что закроет.** Общий орган перестановки в `apps/ui` — список с кнопками ИЛИ drag поверх одного и
-того же состояния, — которым пользуются обе стороны. Не второй drag, написанный заново на борде: это
-удвоит проблему вместо того, чтобы закрыть её.
-
-**Статус.** `открыто`. Строка в реестре находок на странице аудита заведена, статус `open`.
-
----
+The board's empty move-up buttons had no usable visible hit area, and did not implement the
+playground's drag gesture. Both now use `useCardReorder` from `apps/ui/src/animations`.
+Cards preview their insertion and can move in both directions; short rows use their actual length.
+The board also supports arrow keys and seeds order by offer identity rather than projection-object
+identity, so an unrelated refresh does not undo the player's work.
 
 ### Грид Cherry-pick на борде стоит над живой кучей, а в сцене — над опустошённой
 

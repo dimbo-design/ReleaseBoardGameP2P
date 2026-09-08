@@ -19,29 +19,41 @@
 }
 
 .row {
-  display: flex;
-  gap: 30px;
-  align-items: flex-end;
+  position: relative;
+  flex: none;
+  block-size: 210px;
 }
 
 .slot {
-  position: relative;
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
   inline-size: 150px;
   pointer-events: auto;
+  touch-action: none;
+  transition: transform 300ms var(--ease-out);
 }
 
 .position {
   position: absolute;
   inset-block-start: -26px;
-  inset-inline: 0;
+  inline-size: 150px;
   text-align: center;
 }
 
 .move {
   position: absolute;
-  inset-block-end: -26px;
-  inset-inline: 0;
-  cursor: pointer;
+  inset: 0;
+  cursor: grab;
   background: none;
   border: 0;
+}
+
+.dragging {
+  z-index: 6;
+  transition: none;
+}
+
+.dragging .move {
+  cursor: grabbing;
 }

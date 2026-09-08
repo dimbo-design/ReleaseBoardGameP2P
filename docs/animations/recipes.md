@@ -2318,8 +2318,9 @@ The staged operation and its support leave from the centre through the discard b
 **What differs from the story, and why**
 - **Privacy is the projection's, not the hook's.** `pendingView` hands every peer but the owner an empty `piles`,
   so there is nothing here to hide — and the empty case is what the `piles.length > 0` gate is for.
-- **Buttons, not a drag.** Each card carries a «move up one position» control, because the board needs one a test
-  and a keyboard can both reach. The divergence is recorded in the backlog rather than smoothed over.
+- **Shared drag.** `useCardReorder` powers both the board and playground: drag left/right, preview the
+  insertion, release to commit within that pile. Arrow keys also reorder on the board. Rows with fewer
+  than three cards clamp to their actual length. Projection refreshes preserve the chosen order.
 - **The RESOLVE waits for the last landing** — the opposite of Cherry-pick above, because a committed reorder is
   invisible in the projection, so there is no second renderer to race and the flight IS what the player is told.
   That disagreement is itself a recorded finding.

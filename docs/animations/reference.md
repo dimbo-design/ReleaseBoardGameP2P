@@ -428,3 +428,11 @@ Import and use declaratively — the animation is built in.
 | `TurnDock` | `@/table/TurnDock` | one fixed frame whose slots never move; the content inside them changes. `Swap` orchestrates `rollOut` → `rollIn` (a live layer in flow + the outgoing one absolutely overlaid), `Reveal` orchestrates `popIn` / `popOut` for a small element in reserved space. |
 | `ReleaseZone` | `@/table/ReleaseZone` | `slotRef?(key, el)` exposes each slot's node so a consumer can measure it and fly a card into that slot (AI Release / Monitoring landing). A position hook only — no visual effect. |
 | `Arrow` | `@/primitives/Arrow` | see the Arrow toolkit above (`useArrow`) |
+
+### `useCardReorder`
+
+Shared pointer reordering for the board and playground Rebase rows. Pass `enabled`, `step`,
+`rows: { id, cards: string[] }[]` and `onReorder(row, cards)`. Bind `onPointerDown` to each
+card wrapper and render its `position(row, uid, index)` as a translate. The wrapper’s parent
+is the row. `drag` identifies the active grab; disable confirmation until it ends.
+Pointer cancellation leaves the committed order untouched. Disable while dealing or returning.

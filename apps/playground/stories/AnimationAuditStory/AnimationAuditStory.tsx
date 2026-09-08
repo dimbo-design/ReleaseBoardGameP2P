@@ -1364,14 +1364,14 @@ const ISSUES: Issue[] = [
       en: 'Rebase reorders by buttons on the board and by dragging in the story',
     },
     problem: {
-      ru: 'Сцена (`GitCards/Rebase`) меняет порядок указателем: захват, превью слота, отпускание. Борд (#108, `_useRebaseStaging.tsx`) даёт на каждую карту кнопку «на позицию выше», потому что борду нужен орган управления, до которого дотягиваются и тест, и клавиатура, — а drag в jsdom не проверяется ничем. Значит одно и то же движение живёт в двух формах, и одна из них недостижима с клавиатуры, что ставит его в тот же ряд, что и остальной мышиный ввод на борде. Закроет общий орган перестановки в `apps/ui`, которым пользуются обе стороны, — а не второй drag, написанный заново на борде.',
-      en: 'The story (`GitCards/Rebase`) reorders by pointer: grab, preview the slot, release. The board (#108, `_useRebaseStaging.tsx`) gives each card a «move up one position» button, because the board needs a control a test and a keyboard can both reach — and a drag is checked by nothing in jsdom. So one movement exists in two shapes and one of them is unreachable by keyboard, which puts it in the same row as the rest of the board’s pointer-only input. What closes it: a shared reorder control in `apps/ui` used by both sides, rather than a second drag written again on the board.',
+      ru: 'Исправлено: борд и сцена используют useCardReorder — захват, превью позиции и отпускание. Работают ряды из одной, двух и трёх карт. Борд сохраняет выбранный порядок при обновлении проекции и поддерживает клавиши влево/вправо.',
+      en: 'Fixed: board and story share useCardReorder for grab, insertion preview and drop, including rows of one or two cards. The board preserves the chosen order across projection refreshes and also supports left/right arrow keys.',
     },
     where: {
       ru: 'apps/playground/stories/interactive/GitCards/Rebase.tsx + pages/board/[gameId]/_useRebaseStaging.tsx',
       en: 'apps/playground/stories/interactive/GitCards/Rebase.tsx + pages/board/[gameId]/_useRebaseStaging.tsx',
     },
-    status: 'open',
+    status: 'ok',
   },
   {
     what: {

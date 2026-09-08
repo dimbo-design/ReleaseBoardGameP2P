@@ -10,6 +10,7 @@ export {
   toDiscardParams,
 } from './scatter'
 export { nextFrames, wait } from './timing'
+export { useCardReorder } from './useCardReorder'
 // The third step, and the one the audit page lists under all ten scenes with a
 // discard. It stayed in the playground on the claim that it had one consumer;
 // it had ten, and the frontend's board is the eleventh.

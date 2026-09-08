@@ -1,6 +1,6 @@
 import type { TableActions } from '@release/ui'
 import { Card, ConfirmAction, cardById, Typography } from '@release/ui'
-import { play } from '@release/ui/animations'
+import { play, useCardReorder } from '@release/ui/animations'
 import type { ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BoardAnchors, BoardState } from '~/entities/game/board'
@@ -16,10 +16,8 @@ import styles from './_useRebaseStaging.module.css'
 // the story does — the numbers name positions in a pile, and every pile has the
 // same three positions.
 //
-// Pointer buttons rather than the story's drag: the board needs a control a
-// test and a keyboard can both reach, and a drag can be layered over this same
-// state later. The difference is recorded on the audit page rather than left
-// for the next reader to find.
+// The board and playground share the same drag, insertion preview and drop.
+// Arrow keys provide the same reorder for keyboard users.
 //
 // THE FLIGHTS (Task D2): ported from the approved playground scene
 // (`apps/playground/stories/interactive/GitCards/Rebase.tsx`), values verbatim.
@@ -84,6 +82,7 @@ export function useRebaseStaging(args: {
   // hook's own `flying` outlives its dispatch.
   const [flying, setFlying] = useState(false)
   const [faceDown, setFaceDown] = useState(false)
+  const [ready, setReady] = useState(reduced)
 
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   // The last offer this hook actually saw, read during render — the flight
@@ -91,6 +90,19 @@ export function useRebaseStaging(args: {
   const pilesRef = useRef<Pile[]>([])
   if (ours) pilesRef.current = ours.piles
   const piles: Pile[] = ours ? ours.piles : pilesRef.current
+
+  const offerKey = ours
+    ? `${ours.player}:${ours.piles.map((entry) => `${entry.pile}/${entry.cards.map((c) => c.uid).join(',')}`).join('|')}`
+    : null
+  const reorder = useCardReorder({
+    enabled: Boolean(ours) && ready && !confirmed,
+    step: 180,
+    rows: piles.map((entry) => ({
+      id: entry.pile,
+      cards: order[entry.pile] ?? entry.cards.map((c) => c.uid),
+    })),
+    onReorder: (pile, cards) => setOrder((current) => ({ ...current, [pile]: cards })),
+  })
 
   const dealtKey = useRef<string | null>(null)
   const timers = useRef<number[]>([])
@@ -110,6 +122,7 @@ export function useRebaseStaging(args: {
   // states: a latch that outlives what it latches is a bug. `flying` is left
   // alone on purpose — it clears when its own flight lands, and a projection
   // tick clearing the pending mid-flight must not cut it short.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reseed only for a different offer, not a fresh projection object
   useEffect(() => {
     if (!ours) {
       setOrder({})
@@ -117,7 +130,7 @@ export function useRebaseStaging(args: {
       return
     }
     setOrder(Object.fromEntries(ours.piles.map((e) => [e.pile, e.cards.map((c) => c.uid)])))
-  }, [ours])
+  }, [offerKey])
 
   // Deal the offer OUT of its pile into the row: every card starts at the
   // pile's own rect and flies to its slot, staggered. Cosmetic only — the row
@@ -131,15 +144,23 @@ export function useRebaseStaging(args: {
     const key = `${ours.player}:${ours.piles.map((e) => `${e.pile}/${e.cards.map((c) => c.uid).join(',')}`).join('|')}`
     if (dealtKey.current === key) return
     dealtKey.current = key
+    setReady(reduced)
     if (reduced) return
+    later(
+      () => setReady(true),
+      DEAL_DUR +
+        Math.max(...ours.piles.map((entry) => entry.cards.length - 1)) * DEAL_STEP +
+        DEAL_HOLD,
+    )
     for (const entry of ours.piles) {
       const pileRect = anchors.pileBox(entry.pile)?.getBoundingClientRect()
       if (!pileRect) continue
       const els = entry.cards.map((c) => cardRefs.current.get(c.uid))
+      const rests = els.map((el) => el?.style.transform ?? '')
       for (const el of els) {
         if (!el) continue
         el.style.transition = 'none'
-        el.style.transform = between(el.getBoundingClientRect(), pileRect)
+        el.style.transform = `${el.style.transform} ${between(el.getBoundingClientRect(), pileRect)}`
         el.style.opacity = '0'
       }
       requestAnimationFrame(() =>
@@ -148,7 +169,7 @@ export function useRebaseStaging(args: {
             if (!el) return
             const delay = i * DEAL_STEP
             el.style.transition = `transform ${DEAL_DUR}ms var(--ease-out) ${delay}ms, opacity ${DEAL_DUR}ms ${delay}ms`
-            el.style.transform = ''
+            el.style.transform = rests[i]
             el.style.opacity = ''
           })
           later(
@@ -178,7 +199,7 @@ export function useRebaseStaging(args: {
     })
 
   const confirm = () => {
-    if (!ours || confirmed) return
+    if (!ours || confirmed || !ready || reorder.drag) return
     // Committed against THIS render's offer: every offered pile, answered
     // exactly once, or the engine rejects it.
     const committed = ours.piles.map((e) => ({
@@ -242,31 +263,51 @@ export function useRebaseStaging(args: {
       <>
         <div className={styles.rows} data-testid="board-rebase-row">
           {piles.map((entry) => (
-            <div key={entry.pile} className={styles.row}>
+            <div
+              key={entry.pile}
+              className={styles.row}
+              style={{ inlineSize: entry.cards.length * 180 - 30 }}
+            >
+              {entry.cards.map((c, i) => (
+                <Typography
+                  key={c.uid}
+                  variant="tag"
+                  className={styles.position}
+                  style={{ insetInlineStart: i * 180 }}
+                >
+                  {i + 1}
+                </Typography>
+              ))}
               {(order[entry.pile] ?? entry.cards.map((c) => c.uid)).map((uid, i) => {
                 const offered = entry.cards.find((c) => c.uid === uid)
                 const data = offered ? cardById(offered.id) : null
                 if (!data) return null
+                const position = reorder.position(entry.pile, uid, i)
                 return (
                   <div
                     key={uid}
-                    className={styles.slot}
+                    className={`${styles.slot} ${position.dragging ? styles.dragging : ''}`}
+                    data-testid={`rebase-card-${uid}`}
+                    style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+                    onPointerDown={(e) => reorder.onPointerDown(entry.pile, uid, e)}
                     ref={(el) => {
                       if (el) cardRefs.current.set(uid, el)
                       else cardRefs.current.delete(uid)
                     }}
                   >
-                    <Typography variant="tag" className={styles.position}>
-                      {i + 1}
-                    </Typography>
                     <Card card={data} interactive={false} width="100%" faceDown={faceDown} />
                     {!confirmed && (
                       <button
                         type="button"
-                        data-testid={`rebase-up-${uid}`}
+                        data-testid={`rebase-move-${uid}`}
                         className={styles.move}
-                        aria-label={`${copy.position} ${i}`}
-                        onClick={() => move(entry.pile, uid, -1)}
+                        aria-label={`${copy.position} ${i + 1}`}
+                        disabled={!ready}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+                          e.preventDefault()
+                          move(entry.pile, uid, e.key === 'ArrowLeft' ? -1 : 1)
+                        }}
                       />
                     )}
                   </div>
@@ -276,7 +317,7 @@ export function useRebaseStaging(args: {
           ))}
         </div>
         <ConfirmAction
-          open={!confirmed}
+          open={!confirmed && ready}
           label={copy.confirm}
           caption={copy.prompt}
           onConfirm={confirm}

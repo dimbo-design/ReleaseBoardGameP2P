@@ -34,7 +34,43 @@ function renderBoard(over: { pending: ReturnType<typeof rebasePending>; actions?
 }
 
 describe('the row that answers Git Rebase', () => {
+  it('drags a card to either end and preserves that order across projection refreshes', () => {
+    mockReducedMotion(true)
+    const onResolve = vi.fn()
+    const base = makeBoardProps()
+    const offer = () =>
+      rebasePending([
+        { uid: 'r0', id: 'attack-bug' },
+        { uid: 'r1', id: 'release-frontend' },
+        { uid: 'r2', id: 'defense-hotfix' },
+      ])
+    const board = () => (
+      <Board {...base} state={{ ...base.state, pending: offer() }} actions={{ onResolve }} />
+    )
+    const { rerender } = render(board())
+    const drag = (uid: string, from: number, to: number) => {
+      const el = screen.getByTestId(`rebase-card-${uid}`)
+      el.getBoundingClientRect = () =>
+        ({ left: 400 + from * 180, top: 200, width: 150, height: 210 }) as DOMRect
+      if (el.parentElement)
+        el.parentElement.getBoundingClientRect = () =>
+          ({ left: 400, top: 200, width: 510, height: 210 }) as DOMRect
+      fireEvent.pointerDown(el, { button: 0, clientX: 420 + from * 180, clientY: 230 })
+      fireEvent.pointerMove(window, { clientX: 420 + to * 180, clientY: 230 })
+      fireEvent.pointerUp(window, { clientX: 420 + to * 180, clientY: 230 })
+    }
+    drag('r2', 2, 0)
+    rerender(board())
+    drag('r0', 1, 2)
+    fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+    expect(onResolve).toHaveBeenCalledWith({
+      kind: 'reorderTop',
+      order: [{ pile: 0, cards: ['r2', 'r1', 'r0'] }],
+    })
+  })
+
   it('shows the offered cards in a numbered row and commits the order', async () => {
+    mockReducedMotion(false)
     const onResolve = vi.fn()
     renderBoard({
       pending: rebasePending([
@@ -46,9 +82,13 @@ describe('the row that answers Git Rebase', () => {
     })
     expect(screen.getByTestId('board-rebase-row')).not.toBeNull()
 
+    await vi.waitFor(
+      () => expect(screen.getByRole('button', { name: /confirm|подтвердить/i })).toBeTruthy(),
+      { timeout: 2000 },
+    )
     // Move the third card to the front, then commit.
-    fireEvent.click(screen.getByTestId('rebase-up-r2'))
-    fireEvent.click(screen.getByTestId('rebase-up-r2'))
+    fireEvent.keyDown(screen.getByTestId('rebase-move-r2'), { key: 'ArrowLeft' })
+    fireEvent.keyDown(screen.getByTestId('rebase-move-r2'), { key: 'ArrowLeft' })
     fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
     // The answer waits for the last card to land (task D2's own divergence from
     // Cherry-pick, reasoned in `_useRebaseStaging.tsx`'s header), so this is a
