@@ -168,10 +168,35 @@ function comboOf(e: Event): HistoryEntry['combo'] {
   return { card: card.name, cat: card.category }
 }
 
+// Who the move was aimed at. The PLAYER half only: `attacked` carries a target
+// player and never a card, so the sword pointing at a card has no source in the
+// feed (docs/animations/backlog.md). A row that shows less is correct; one that
+// invents a card target is not.
+function targetIdOf(e: Event): string | undefined {
+  switch (e.type) {
+    case 'attacked':
+    case 'requested':
+      return e.target
+    case 'releaseStolen':
+    case 'handTransfer':
+      return e.to
+    default:
+      return undefined
+  }
+}
+
 // One row per event. The switch is exhaustive by construction: the `never`
 // default means a new member of the engine's Event union fails `pnpm typecheck`
 // here rather than rendering as an unlabelled grey line nobody notices.
-function toHistoryEntry(e: Event, labels: HistoryLabels): HistoryEntry {
+function toHistoryEntry(
+  e: Event,
+  labels: HistoryLabels,
+  nameOf: Map<string, string>,
+): HistoryEntry {
+  const targetId = targetIdOf(e)
+  // Falls back to the id only when the seat is not in this projection — better a
+  // raw id than a silently missing target.
+  const target = targetId ? { player: nameOf.get(targetId) ?? targetId } : undefined
   const base: HistoryEntry = {
     id: e.id,
     who: actorOf(e) ?? '',
@@ -179,6 +204,7 @@ function toHistoryEntry(e: Event, labels: HistoryLabels): HistoryEntry {
     card: cardTextOf(e),
     cat: catOf(cardIdOf(e)),
     combo: comboOf(e),
+    target,
     parent: e.parent,
   }
 
@@ -295,7 +321,13 @@ function toDiscardHeap(log: Event[], top: CardData | undefined, count: number): 
 // function never calls `assetUrl` directly).
 export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabels): BoardState {
   const visible = log.filter((e) => !e.visibleTo || e.visibleTo.includes(view.self.id))
-  const history = visible.map((e) => toHistoryEntry(e, labels)).reverse()
+  // Seat id -> display name, for resolving a target (or an attacker, Task 7)
+  // to a name rather than printing the raw id.
+  const nameOf = new Map<string, string>([
+    [view.self.id, view.self.name],
+    ...view.opponents.map((o) => [o.id, o.name] as const),
+  ])
+  const history = visible.map((e) => toHistoryEntry(e, labels, nameOf)).reverse()
 
   return {
     you: {

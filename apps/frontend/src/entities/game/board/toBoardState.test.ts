@@ -320,6 +320,34 @@ describe('toBoardState', () => {
     expect(history).toHaveLength(4)
     expect(history.every((h) => typeof h.id === 'number')).toBe(true)
   })
+
+  it('names the player an attack was aimed at', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'you', card: 'attack-bug', sudo: false, target: 'p2' },
+    ]
+    // 'bot' is the opponent's NAME in the fixture; 'p2' is its id. Asserting the
+    // name proves the projection was consulted rather than the id printed raw.
+    expect(toBoardState(view, log, labels).history[0].target?.player).toBe('bot')
+  })
+
+  it('names the player a demand was aimed at', () => {
+    const log: Event[] = [
+      { id: 1, type: 'requested', attacker: 'you', target: 'p2', card: 'attack-bug', hit: true },
+    ]
+    expect(toBoardState(view, log, labels).history[0].target?.player).toBe('bot')
+  })
+
+  it('names the player a card was handed to', () => {
+    const log: Event[] = [
+      { id: 1, type: 'handTransfer', from: 'p2', to: 'you', card: 'attack-bug' },
+    ]
+    expect(toBoardState(view, log, labels).history[0].target?.player).toBe('you')
+  })
+
+  it('leaves an untargeted event without a target', () => {
+    const log: Event[] = [{ id: 1, type: 'passed', player: 'you' }]
+    expect(toBoardState(view, log, labels).history[0].target).toBeUndefined()
+  })
 })
 
 // The decks are the only slice these assertions vary, so they spread the shared
