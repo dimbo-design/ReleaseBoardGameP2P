@@ -284,4 +284,12 @@ the discard heap survives a reload.
   panel stays empty for them, exactly as the board does today.
 - **Cross-tab or cross-device history.** `sessionStorage` is per-tab by design. Closing the tab loses
   the log, and that trade is already argued in `persistence.ts`.
+- **The log surviving a mid-match KEEPER HANDOVER.** Found during implementation, not at design
+  time. When the keeper role passes to another peer, it travels as `KEEPER_STATE`, whose payload is
+  `{ state: GameState }` — the log is not in it, and `adoptSession` has nothing to inherit, so the
+  successor starts an empty one. The consequence is bounded rather than total: every peer still
+  restores its OWN feed from `sessionStorage`, so history survives a reload as designed; what is
+  lost is the host-side gap-filling for anyone who rejoins *after* a handover. Closing it means
+  changing the `KEEPER_STATE` message shape and the handover protocol — a subsystem this spec never
+  claimed to touch — so it is recorded here and left for its own issue.
 - **Exporting or copying the log.** Not asked for.
