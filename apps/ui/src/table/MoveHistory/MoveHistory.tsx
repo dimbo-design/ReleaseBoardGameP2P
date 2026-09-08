@@ -28,6 +28,9 @@ export interface HistoryEntry {
   // Works on my Machine — эффект отскочил в атакующего (его имя)
   redirect?: string
   system?: boolean
+  // An open draw — the card was revealed as it was taken. Set by the caller: the
+  // kit cannot read it off `kind`, which is translated copy.
+  draw?: boolean
   children?: HistoryEntry[]
 }
 
@@ -116,7 +119,7 @@ function Row({ e, copy, nested = false }: RowProps) {
   }
 
   // добор — техническая запись: без цветного градиента, даже если вскрыта карта
-  const isDraw = e.kind === 'добор'
+  const isDraw = e.draw === true || e.kind === 'добор'
   const accent = e.cat && !isDraw ? `var(--cat-${e.cat})` : undefined
   const label = e.card ?? e.text ?? e.kind
   return (

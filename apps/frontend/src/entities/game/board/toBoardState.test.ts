@@ -436,6 +436,33 @@ describe('toBoardState', () => {
     ]
     expect(toBoardState(view, log, labels).history[0].returnCard).toBeUndefined()
   })
+
+  it('marks elimination, reshuffle and game over as system rows', () => {
+    const log: Event[] = [
+      { id: 1, type: 'eliminated', player: 'p2' },
+      { id: 2, type: 'deckReshuffled', cards: 12 },
+      { id: 3, type: 'gameOver', winner: 'you', condition: 'release' },
+    ] as Event[]
+    expect(toBoardState(view, log, labels).history.map((h) => h.system)).toEqual([true, true, true])
+  })
+
+  it('does not mark an ordinary move as a system row', () => {
+    const log: Event[] = [{ id: 1, type: 'placed', player: 'you', card: 'attack-bug' }]
+    expect(toBoardState(view, log, labels).history[0].system).toBeFalsy()
+  })
+
+  it('badges an open draw and leaves a closed one unbadged', () => {
+    const log: Event[] = [
+      { id: 1, type: 'drawn', player: 'you', card: 'attack-bug', pile: 0, deckSize: 39 },
+      { id: 2, type: 'drawn', player: 'you', pile: 0, deckSize: 38 },
+    ] as Event[]
+    const history = toBoardState(view, log, labels).history
+    // history is newest-first (see "folds the event log into history newest
+    // first" above), so id 2 — the closed draw — lands at index 0 and id 1 —
+    // the open one — at index 1.
+    expect(history[1].draw).toBe(true)
+    expect(history[0].draw).toBeFalsy()
+  })
 })
 
 // The decks are the only slice these assertions vary, so they spread the shared

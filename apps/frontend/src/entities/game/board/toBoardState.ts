@@ -225,6 +225,10 @@ function toHistoryEntry(
     combo: comboOf(e),
     target,
     parent: e.parent,
+    // The table did it, not a seat: nothing to accent, nothing to colour.
+    system: e.type === 'eliminated' || e.type === 'deckReshuffled' || e.type === 'gameOver',
+    // An open draw. A closed one carries no card, and stays a plain row.
+    draw: e.type === 'drawn' && e.card !== undefined,
   }
 
   if (e.type === 'defended') {
