@@ -17,6 +17,10 @@ export interface Session {
   engine: Engine
   state: GameState
   seats: Seat[]
+  // Every event this match has emitted, in id order. The referee used to
+  // reduce, fan out and forget — which is precisely why a peer that missed a
+  // batch could never be told what was in it.
+  log: Event[]
 }
 
 // The session is immutable and every entry point returns a new one, so the
@@ -74,6 +78,10 @@ export function createSession(args: {
     events: args.events,
   })
 
+  // Computed once and reused for both the log and the wire below, so the two
+  // can never disagree about what the deal was.
+  const dealt = args.engine.setupEvents(state)
+
   const session: Session = {
     gameId: args.gameId,
     keeperId: args.keeperId,
@@ -84,6 +92,10 @@ export function createSession(args: {
       peerId: p.peerId,
       absentSince: null,
     })),
+    // The deal is the first thing that happened in this game, so it is the
+    // first thing in the log too — a peer restoring the match needs it to draw
+    // its own hand.
+    log: dealt,
   }
 
   return {
@@ -99,7 +111,7 @@ export function createSession(args: {
       // The deal is the first thing that happened in this game, so it is the
       // first thing in the feed — the move history opened on a blank without it,
       // and the board's intro reads the deal from here.
-      ...syncAll(session, args.engine.setupEvents(state)),
+      ...syncAll(session, dealt),
     ],
   }
 }
@@ -169,7 +181,7 @@ export function rebind(
   if (turn.player === playerId && turn.deadline !== undefined && now >= turn.deadline) {
     const { state, events } = next.engine.reduce(next.state, { type: 'CLOCK_STARTED', at: now })
     if (state !== next.state) {
-      const restamped: Session = { ...next, state }
+      const restamped: Session = { ...next, state, log: [...next.log, ...events] }
       // The new clock is a state change every seat renders (the dock's ring
       // ticks on it), so it travels to everyone — the rejoiner's catch-up
       // projection rides in the same fan-out.
@@ -221,7 +233,7 @@ export function driveAbsent(session: Session, now: number): SessionResult {
 
     const { state, events } = session.engine.reduce(session.state, action)
     if (state !== session.state) {
-      const next: Session = { ...session, state }
+      const next: Session = { ...session, state, log: [...session.log, ...events] }
       return { session: next, outgoing: syncAll(next, events) }
     }
 
@@ -247,7 +259,11 @@ export function driveAbsent(session: Session, now: number): SessionResult {
         : { type: 'DRAW', player: seat.playerId, at: now }
       const retried = session.engine.reduce(session.state, fallback)
       if (retried.state !== session.state) {
-        const next: Session = { ...session, state: retried.state }
+        const next: Session = {
+          ...session,
+          state: retried.state,
+          log: [...session.log, ...retried.events],
+        }
         return { session: next, outgoing: syncAll(next, retried.events) }
       }
     }
@@ -323,7 +339,7 @@ export function applyIntent(
     return { session, outgoing: [{ to: fromPeerId, message }] }
   }
 
-  const next: Session = { ...session, state }
+  const next: Session = { ...session, state, log: [...session.log, ...events] }
   return { session: next, outgoing: syncAll(next, events) }
 }
 
@@ -369,6 +385,11 @@ export function adoptSession(args: {
     engine: args.engine,
     state: args.state,
     seats: args.seats,
+    // KEEPER_STATE (handover, above) carries GameState alone, not the log the
+    // predecessor had accumulated — so the successor starts a fresh one. A gap
+    // for a later task: today a handover mid-match loses history for anyone
+    // who rejoins the new keeper afterward.
+    log: [],
   }
 }
 
@@ -399,7 +420,7 @@ export function tick(session: Session, now: number): SessionResult {
       at: now,
     })
     if (state === session.state) return { session, outgoing: [] }
-    const next: Session = { ...session, state }
+    const next: Session = { ...session, state, log: [...session.log, ...events] }
     return { session: next, outgoing: syncAll(next, events) }
   }
 
@@ -439,7 +460,7 @@ export function tick(session: Session, now: number): SessionResult {
         at: now,
       })
       if (state === session.state) return { session, outgoing: [] }
-      const next: Session = { ...session, state }
+      const next: Session = { ...session, state, log: [...session.log, ...events] }
       return { session: next, outgoing: syncAll(next, events) }
     }
 
@@ -496,7 +517,7 @@ export function tick(session: Session, now: number): SessionResult {
         }
       }
       if (state === session.state) return { session, outgoing: [] }
-      const next: Session = { ...session, state }
+      const next: Session = { ...session, state, log: [...session.log, ...events] }
       return { session: next, outgoing: syncAll(next, events) }
     }
   }

@@ -37,6 +37,28 @@ function twoPlayerSession() {
   })
 }
 
+// The referee used to reduce, fan out and forget. That is exactly why a peer
+// which missed a batch could never afterwards be told what was in it.
+it('accumulates every event it has reduced', () => {
+  const { session: start } = twoPlayerSession()
+  const { session } = applyIntent(start, 'peer-a', { type: 'DRAW' }, 1_000)
+  expect(session.log.length).toBeGreaterThan(start.log.length)
+})
+
+it('keeps the log in id order', () => {
+  const { session: start } = twoPlayerSession()
+  const { session } = applyIntent(start, 'peer-a', { type: 'DRAW' }, 1_000)
+  const ids = session.log.map((e) => e.id)
+  expect(ids).toEqual([...ids].sort((a, b) => a - b))
+})
+
+// The deal itself is in the log from the start: it is the first thing the
+// engine emitted, and a peer restoring the match needs it to draw its own hand.
+it('has the opening deal in it before anyone has acted', () => {
+  const { session } = twoPlayerSession()
+  expect(session.log.length).toBeGreaterThan(0)
+})
+
 // One step of driving whichever seat holds the turn, using only applyIntent:
 // pays a pending release cost, plays a release when one is playable, else
 // draws or pushes. `twoPlayerSession()`'s seed-1 opening hand holds no release
