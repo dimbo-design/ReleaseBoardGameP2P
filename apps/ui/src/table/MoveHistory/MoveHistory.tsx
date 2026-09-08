@@ -1,6 +1,7 @@
-import type { CSSProperties } from 'react'
-import ScrollArea from '@/primitives/ScrollArea'
+import { type CSSProperties, useLayoutEffect, useRef } from 'react'
+import ScrollArea, { type ScrollAreaHandle } from '@/primitives/ScrollArea'
 import Typography from '@/primitives/Typography'
+import { followTail } from './followTail'
 import styles from './MoveHistory.module.css'
 
 export interface HistoryTarget {
@@ -195,9 +196,19 @@ interface MoveHistoryProps {
 // История: слева — карта/действие (+ связка/цель/возврат), справа — кто;
 // реакции и последствия вложены иерархией; слева фон-градиент из цвета типа.
 export default function MoveHistory({ entries = [], copy }: MoveHistoryProps) {
+  const area = useRef<ScrollAreaHandle>(null)
+
+  // The scrolling element is overlayscrollbars' own viewport, not a div in this
+  // file — `ScrollAreaHandle.viewport()` is the only way to reach it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the dependency is a row arriving, not a value read in the body — entries.length is exactly what the follow should re-run after
+  useLayoutEffect(() => {
+    const viewport = area.current?.viewport()
+    if (viewport) followTail(viewport)
+  }, [entries.length])
+
   return (
     <div className={styles.box}>
-      <ScrollArea className={styles.list} contentClassName={styles.listFlow}>
+      <ScrollArea ref={area} className={styles.list} contentClassName={styles.listFlow}>
         {entries.map((e) => (
           <Row key={e.id} e={e} copy={copy} />
         ))}
