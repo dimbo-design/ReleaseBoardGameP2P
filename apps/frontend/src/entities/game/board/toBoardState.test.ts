@@ -111,15 +111,18 @@ describe('toBoardState', () => {
     expect(() => toBoardState(unknownDiscard, [], labels)).not.toThrow()
   })
 
-  it('folds the event log into history newest first', () => {
+  // Oldest first, newest at the bottom — the order the approved story reads in
+  // (`apps/ui/src/mocks/table.ts`: "История ходов (сверху — раньше)"), and the
+  // only order in which a child can sit under the parent it answers.
+  it('folds the event log into history oldest first', () => {
     const log: Event[] = [
       { id: 1, type: 'drawn', player: 'you', pile: 0, deckSize: 39 },
       { id: 2, type: 'placed', player: 'p2', card: 'attack-bug' },
     ]
     const history = toBoardState(view, log, labels).history
     expect(history.length).toBe(2)
-    expect(history[0].kind).toBe(labels.placed)
-    expect(history[1].kind).toBe(labels.drawn)
+    expect(history[0].kind).toBe(labels.drawn)
+    expect(history[1].kind).toBe(labels.placed)
   })
 
   it('preserves parent so MoveHistory can build its tree', () => {
@@ -128,7 +131,72 @@ describe('toBoardState', () => {
       { id: 2, type: 'eliminated', player: 'p2', parent: 1 },
     ]
     const history = toBoardState(view, log, labels).history
-    expect(history[0].parent).toBe(1)
+    // history[0] is the root (id 1) once rows are assembled into a tree; the
+    // id-2 row nests under it as its child rather than sitting flat beside it.
+    expect(rowById(history, 1)?.children?.map((c) => c.id)).toEqual([2])
+  })
+
+  it('nests an answer under the move it answered', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'p2', card: 'attack-bug', sudo: false, target: 'you' },
+      {
+        id: 2,
+        type: 'defended',
+        player: 'you',
+        card: 'defense-not-a-bug',
+        effect: 'cancel',
+        parent: 1,
+      },
+    ]
+    const history = toBoardState(view, log, labels).history
+    expect(history).toHaveLength(1)
+    expect(history[0].children?.map((c) => c.id)).toEqual([2])
+  })
+
+  // Row renders Row, so a chain is preserved rather than flattened.
+  it('preserves a chain three deep', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'p2', card: 'attack-bug', sudo: false, target: 'you' },
+      {
+        id: 2,
+        type: 'defended',
+        player: 'you',
+        card: 'defense-not-a-bug',
+        effect: 'cancel',
+        parent: 1,
+      },
+      { id: 3, type: 'discarded', player: 'you', card: 'attack-bug', reason: 'effect', parent: 2 },
+    ] as Event[]
+    const history = toBoardState(view, log, labels).history
+    expect(history).toHaveLength(1)
+    expect(history[0].children?.[0].children?.map((c) => c.id)).toEqual([3])
+  })
+
+  // An orphan is promoted, never dropped: MoveHistory walks only downward from
+  // the roots it is handed, so a re-parented-to-nothing row would vanish.
+  it('promotes a row whose parent this player never saw', () => {
+    const log: Event[] = [
+      {
+        id: 1,
+        type: 'attacked',
+        attacker: 'p2',
+        card: 'attack-bug',
+        sudo: false,
+        target: 'you',
+        visibleTo: ['p2'],
+      },
+      {
+        id: 2,
+        type: 'defended',
+        player: 'you',
+        card: 'defense-not-a-bug',
+        effect: 'cancel',
+        parent: 1,
+      },
+    ]
+    const history = toBoardState(view, log, labels).history
+    expect(history).toHaveLength(1)
+    expect(history[0].id).toBe(2)
   })
 
   it('colours a row by the category of its card', () => {

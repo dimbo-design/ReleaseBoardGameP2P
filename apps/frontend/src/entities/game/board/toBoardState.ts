@@ -343,6 +343,31 @@ function toDiscardHeap(log: Event[], top: CardData | undefined, count: number): 
   return heap.slice(-Math.min(HEAP_SHOW, count))
 }
 
+/**
+ * The flat rows become the tree `MoveHistory` renders. `parent` is the engine's
+ * own — "a defence names the attack it answered ... so the history tree needs no
+ * inference" (packages/engine/src/events.ts) — so this assembles, it does not
+ * infer.
+ *
+ * An entry whose parent is absent, or names an entry filtered out for this
+ * viewer, stays at top level. `MoveHistory` walks only downward from the roots
+ * it is handed, so an orphan re-parented to nothing would not render at all —
+ * promotion is what keeps a partially-visible log complete.
+ */
+export function buildHistoryTree(entries: HistoryEntry[]): HistoryEntry[] {
+  const byId = new Map(entries.map((e) => [e.id, e]))
+  const roots: HistoryEntry[] = []
+  for (const entry of entries) {
+    const parent = entry.parent === undefined ? undefined : byId.get(entry.parent)
+    if (!parent) {
+      roots.push(entry)
+      continue
+    }
+    parent.children = [...(parent.children ?? []), entry]
+  }
+  return roots
+}
+
 // The projection becomes a table: PlayerView + the event log + translated
 // labels -> everything the kit's Table needs to render. Pure — no React, no
 // clock, no randomness. Total — an unknown card id renders a placeholder
@@ -360,7 +385,7 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
   // an event `forViewer` filtered out would name a player the reader was never
   // shown.
   const byId = new Map(visible.map((e) => [e.id, e]))
-  const history = visible.map((e) => toHistoryEntry(e, labels, nameOf, byId)).reverse()
+  const history = buildHistoryTree(visible.map((e) => toHistoryEntry(e, labels, nameOf, byId)))
 
   return {
     you: {
