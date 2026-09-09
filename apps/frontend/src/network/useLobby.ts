@@ -452,7 +452,7 @@ export function useLobby(): UseLobby {
         if (!current.peers[peerId]) return
         // The roster and the keeper are separate books and both have to be
         // told. Without this the seat stays bound to a dead peer id: its SYNCs
-        // are addressed into the void, `driveAbsent` never starts its grace
+        // are addressed into the void, `driveUnattended` never starts its grace
         // period, and a returning player finds their own seat occupied —
         // `rebind` refuses a seat whose peerId is not null.
         keeperRef.current?.peerLeft(peerId)
@@ -552,7 +552,7 @@ export function useLobby(): UseLobby {
             // alone, the referee's seat would still name the stale peer id
             // and `rebind` (session/referee.ts) refuses to claim a seat whose
             // peerId is not null — soft-locking the seat with no self-healing
-            // path, since `driveAbsent`'s bot fallback never engages either
+            // path, since `driveUnattended`'s bot fallback never engages either
             // (the referee believes the seat is still connected). Telling the
             // referee here does not replace onDisconnect's own call to this;
             // `disconnect` is a no-op for a peer id the referee does not
@@ -933,7 +933,7 @@ export function useLobby(): UseLobby {
       const engine = createFakeEngine()
       // The absence-clock trap: a stored `absentSince` describes time that
       // passed while nothing was keeping the table. Restored as-is, the first
-      // tick's `driveAbsent` would see every seat far past its 30s grace and
+      // tick's `driveUnattended` would see every seat far past its 30s grace and
       // bot-play the whole match before a single player could re-dial — so
       // every seat but the host's own is restamped to now. The host's own
       // seat keeps its peer id: the room code IS that id and it was just
@@ -1339,7 +1339,7 @@ export function useLobby(): UseLobby {
   //
   // Nothing rewrites it afterwards. The keeper deliberately stays alive here,
   // but the only caller is the results screen (pages/board/[gameId]/stats.tsx),
-  // reached once the match is over — and `tick` and `driveAbsent` both no-op on
+  // reached once the match is over — and `tick` and `driveUnattended` both no-op on
   // a finished game, so its commits are reference-identical and never queue a
   // write.
   const leaveGame = useCallback(() => {

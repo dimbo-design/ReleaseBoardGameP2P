@@ -4,7 +4,7 @@ import type { Seat } from './referee'
 //
 // Two rules, and both matter. Every seat's absence is restamped to `now`: a
 // stored `absentSince` describes time that passed while nothing was keeping
-// the table, and `driveAbsent` reading it would see every seat far past its
+// the table, and `driveUnattended` reading it would see every seat far past its
 // 30s grace and bot-play the whole match before a single player could re-dial.
 // The pause was not time spent.
 //

@@ -3,7 +3,7 @@ import type { Intent } from '../types'
 import {
   applyIntent,
   commit,
-  driveAbsent,
+  driveUnattended,
   type Outgoing,
   rebind,
   type SessionRef,
@@ -105,7 +105,7 @@ export function createLocalLink(args: {
   ticker.start(() => {
     const now = args.now()
     commit(args.ref, tick(args.ref.current, now), deliver)
-    commit(args.ref, driveAbsent(args.ref.current, now), deliver)
+    commit(args.ref, driveUnattended(args.ref.current, now), deliver)
   })
 
   return {

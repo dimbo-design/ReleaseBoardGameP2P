@@ -1005,7 +1005,7 @@ it('recovers a returning seat even when its JOIN_REQUEST beats onDisconnect ther
   // in the rejoin branch, the referee's seat still names the dead peer id,
   // `rebind` refuses the claim, and the seat is soft-locked with no
   // self-healing path: every later intent from RETURNED fails seat
-  // resolution, and driveAbsent never engages because the referee still
+  // resolution, and driveUnattended never engages because the referee still
   // believes the seat is connected.
   rejoin()
 

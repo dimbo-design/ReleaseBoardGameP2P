@@ -231,7 +231,7 @@ export function rebind(
 // owed by the *human* and must never front a live UI, because it would silently
 // answer the reaction window for someone sitting right there. Here the seat is
 // empty, so there is no decision to take away.
-export function driveAbsent(session: Session, now: number): SessionResult {
+export function driveUnattended(session: Session, now: number): SessionResult {
   // A keeper with nobody connected has no table to keep moving: every SYNC it
   // produced would be addressed to a seat that cannot receive it, and the
   // match would advance for no one. Not reachable for a host-keeper, which
@@ -506,7 +506,7 @@ export function tick(session: Session, now: number): SessionResult {
 
     if (now >= turn.deadline) {
       // The same rule as the stalled defence above: a deadline never fires
-      // against a seat with nobody in it — driveAbsent's grace period owns a
+      // against a seat with nobody in it — driveUnattended's grace period owns a
       // disconnected seat's forward progress.
       const seat = session.seats.find((s) => s.playerId === turn.player)
       if (!seat?.peerId) return { session, outgoing: [] }

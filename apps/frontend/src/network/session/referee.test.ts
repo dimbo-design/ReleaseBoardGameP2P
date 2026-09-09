@@ -4,7 +4,7 @@ import {
   applyIntent,
   createSession,
   disconnect,
-  driveAbsent,
+  driveUnattended,
   rebind,
   type Session,
   type SessionResult,
@@ -58,7 +58,7 @@ function botFirstSession(seed = 1) {
 
 it('drives a bot seat at once: there is no absence to wait out', () => {
   const { session } = botFirstSession()
-  const driven = driveAbsent(session, 1_000)
+  const driven = driveUnattended(session, 1_000)
   expect(driven.session).not.toBe(session)
   expect(driven.outgoing.length).toBeGreaterThan(0)
 })
@@ -72,8 +72,8 @@ it('still makes a human seat wait out the absence grace', () => {
       s.playerId === 'a' ? { playerId: 'a', peerId: null, absentSince: 1_000 } : s,
     ),
   }
-  expect(driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS - 1).session).toBe(dropped)
-  expect(driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS).session).not.toBe(dropped)
+  expect(driveUnattended(dropped, 1_000 + ABSENT_GRACE_MS - 1).session).toBe(dropped)
+  expect(driveUnattended(dropped, 1_000 + ABSENT_GRACE_MS).session).not.toBe(dropped)
 })
 
 // The referee used to reduce, fan out and forget. That is exactly why a peer
@@ -493,7 +493,7 @@ it('keeps firing the turn deadline while a release waits for its price', () => {
 
 // The release is TAKEN BACK, not paid for. Paying is the other thing an expiry
 // could plausibly do — it is exactly what `botAction` does with this pending
-// (packages/engine/src/fake/bots.ts), and what `driveAbsent` uses for a seat
+// (packages/engine/src/fake/bots.ts), and what `driveUnattended` uses for a seat
 // that has actually left. A timeout is not a decision to spend a card, so the
 // zone stays empty and the release stays in the hand it never left.
 it('takes the unpaid release back rather than paying for it', () => {
@@ -541,7 +541,7 @@ it('folds every sub-step of the multi-step draw path into one log append', () =>
   expect(grown).toContain('turnEnded') // the PUSH sub-step right after it
 })
 
-it('leaves an expired turn to driveAbsent when its seat is disconnected', () => {
+it('leaves an expired turn to driveUnattended when its seat is disconnected', () => {
   const { session } = twoPlayerSession()
   const started = tick(session, 1_000).session
   const gone: Session = {
@@ -656,7 +656,7 @@ it('never closes a live reaction window on an absent seat`s behalf', () => {
     ),
   }
 
-  const result = driveAbsent(absent, ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(absent, ABSENT_GRACE_MS + 1)
 
   expect(result.session.state.window).not.toBeNull()
   expect(result.session.state.window?.deadline).toBe(window.deadline)
@@ -695,7 +695,7 @@ it('leaves a stalled defence for a disconnected seat to resolve on reconnection'
 
 // The reviewer's scenario on #113, decided as: the absence shield hands the
 // turn BACK on return, it does not spend it. The deadline expires while the
-// seat is empty (tick refuses to fire it — driveAbsent's grace owns absence),
+// seat is empty (tick refuses to fire it — driveUnattended's grace owns absence),
 // and the player comes back inside the grace window. Without the re-stamp the
 // very next tick would see a seated player and an expired clock, and auto-play
 // their whole turn before they get a single frame to act in.
@@ -778,7 +778,7 @@ it('does not drive absent seats when no seat is connected at all', () => {
     ...session,
     seats: session.seats.map((s) => ({ ...s, peerId: null, absentSince: 0 })),
   }
-  const result = driveAbsent(empty, ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(empty, ABSENT_GRACE_MS + 1)
   // A keeper with no audience advances nothing: no state change, no fan-out.
   expect(result.session).toBe(empty)
   expect(result.outgoing).toEqual([])
@@ -792,11 +792,11 @@ it('still drives an absent seat while another seat is connected', () => {
       s.playerId === session.state.turn.player ? { ...s, peerId: null, absentSince: 0 } : s,
     ),
   }
-  const result = driveAbsent(oneGone, ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(oneGone, ABSENT_GRACE_MS + 1)
   expect(result.session).not.toBe(oneGone)
 })
 
-// driveAbsent's OTHER commit (referee.ts, ~232-238): botAction's own
+// driveUnattended's OTHER commit (referee.ts, ~232-238): botAction's own
 // suggestion is accepted on the first try, rather than falling through to the
 // DRAW/PUSH net below it. Staged with a pending `discardForRelease` decision
 // owed by the absent seat itself, so botAction answers it with a RESOLVE that
@@ -811,7 +811,7 @@ it('logs what an absent seat`s own accepted bot suggestion commits', () => {
   const dropped = disconnect(staged, owner?.peerId ?? '', 2_000).session
   const before = dropped.log.length
 
-  const result = driveAbsent(dropped, 2_000 + ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(dropped, 2_000 + ABSENT_GRACE_MS + 1)
 
   // Paying the release's cost discards a card and places the release — losing
   // either this whole append (referee.ts's `log: [...session.log, ...events]`

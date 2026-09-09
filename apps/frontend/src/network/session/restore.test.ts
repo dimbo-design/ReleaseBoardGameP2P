@@ -18,7 +18,7 @@ it('empties every other seat and restamps its absence to now', () => {
 })
 
 // The trap: a seat that was already absent carries an old timestamp. Restored
-// as-is, driveAbsent sees it far past the 30s grace and bot-plays it before
+// as-is, driveUnattended sees it far past the 30s grace and bot-plays it before
 // the player has any chance to re-dial. The pause was not time spent.
 it('restamps a seat that was already absent before the reload', () => {
   const seats = restoreSeats(stored, 'ROOMCODE', 10_000)
