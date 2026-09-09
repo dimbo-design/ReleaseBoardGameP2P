@@ -1,4 +1,6 @@
+import type { GameState } from '@release/engine'
 import { createFakeEngine, FAKE_DECK, FAKE_EVENTS, TURN_ACTION_MS } from '@release/engine/fake'
+import { vi } from 'vitest'
 import {
   ABSENT_GRACE_MS,
   applyIntent,
@@ -61,6 +63,60 @@ it('drives a bot seat at once: there is no absence to wait out', () => {
   const driven = driveUnattended(session, 1_000)
   expect(driven.session).not.toBe(session)
   expect(driven.outgoing.length).toBeGreaterThan(0)
+})
+
+// Not a recovery — a name. A stall that says nothing costs an hour to find; one
+// that says which seat and which pending costs a minute.
+it('complains when an unattended seat cannot answer the pending it owes', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const { session } = botFirstSession()
+  // A pending owed by the bot that its policy has no answer for: with the
+  // discard empty, `botAction`'s `pickFromDiscard` branch (bots.ts) offers
+  // `card: ''` — not null, but `onPickFromDiscard` (discard.ts) rejects it
+  // outright as "not on offer", which is exactly the shape of the trigger-card
+  // rejection this task exists to name. Either way `reduce` leaves state
+  // untouched, so this fixture stands in for both without needing a real
+  // trigger card in the discard pile.
+  const stuck: Session = {
+    ...session,
+    state: {
+      ...session.state,
+      // The exact variant from packages/engine/src/state.ts:154 — `source` is
+      // part of it, and `picks` is typed `1 | 2`.
+      pending: {
+        kind: 'pickFromDiscard',
+        player: 'a',
+        options: [],
+        picks: 1,
+        source: 'operation-git-cherry-pick',
+      },
+    } as GameState,
+  }
+  driveUnattended(stuck, 1_000)
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('pickFromDiscard'))
+  warn.mockRestore()
+})
+
+// The flip side of the test above: a bot with nothing to do (someone else's
+// turn, nothing pending on it) returns no action too, and that is not a
+// stall — it is every ordinary tick. `seatOwes` is what tells the two apart;
+// without it this would warn constantly rather than only on a genuine one.
+it('says nothing about a bot that simply has nothing to do right now', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const { session } = botFirstSession()
+  // The same table, turned to `b`'s turn with nothing pending and no window
+  // open — the ordinary shape of a tick where the unattended bot (seat `a`)
+  // legitimately has nothing to answer.
+  const idle: Session = {
+    ...session,
+    state: { ...session.state, turn: { ...session.state.turn, player: 'b' } },
+  }
+
+  const result = driveUnattended(idle, 1_000)
+
+  expect(result.session).toBe(idle)
+  expect(warn).not.toHaveBeenCalled()
+  warn.mockRestore()
 })
 
 it('still makes a human seat wait out the absence grace', () => {

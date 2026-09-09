@@ -223,6 +223,21 @@ export function rebind(
   }
 }
 
+// Whether the table is actually waiting on this seat, as opposed to the seat
+// simply having nothing to do right now (not its turn, no window open).
+function seatOwes(state: GameState, playerId: PlayerId): boolean {
+  if (state.over) return false
+  // `player` is read as OPTIONAL on purpose, and that is the whole subtlety.
+  // Every Pending variant carries one today, so `state.pending.player` would
+  // compile — but a pending owed to several seats at once carries none, and
+  // this predicate is exactly the code that would then stop compiling. Reading
+  // it optionally answers "not this seat" for such a pending, which is the
+  // right answer for a warning: a roster-wide pending is nobody's solo stall.
+  const owed = (state.pending as { player?: PlayerId } | null)?.player
+  if (state.pending) return owed === playerId
+  return state.turn.player === playerId
+}
+
 // The engine has no concept of a player who left, so a pending owed by one
 // would stall the game permanently. Past the grace period the keeper plays that
 // seat with the engine's own opponent policy.
@@ -255,7 +270,6 @@ export function driveUnattended(session: Session, now: number): SessionResult {
   // the one the game is actually waiting on need not be seated first.
   for (const seat of unattended) {
     const action = botAction(session.engine, session.state, seat.playerId, now)
-    if (!action) continue
 
     // `tick` owns the window deadline, and it is the only thing that owns it.
     // When an unattended seat holds the open window, botAction answers with
@@ -265,43 +279,62 @@ export function driveUnattended(session: Session, now: number): SessionResult {
     // human whose grace period just ran out. The keeper's clock is the only
     // clock (spec decision 6), so the suggestion is dropped and the window
     // expires on its own deadline, through `tick`, or not at all.
-    if (action.type === 'WINDOW_EXPIRED') continue
+    if (action?.type === 'WINDOW_EXPIRED') continue
 
-    const { state, events } = session.engine.reduce(session.state, action)
-    if (state !== session.state) {
-      const next: Session = { ...session, state, log: [...session.log, ...events] }
-      return { session: next, outgoing: syncAll(next, events) }
+    if (action) {
+      const { state, events } = session.engine.reduce(session.state, action)
+      if (state !== session.state) {
+        const next: Session = { ...session, state, log: [...session.log, ...events] }
+        return { session: next, outgoing: syncAll(next, events) }
+      }
+
+      // botAction's suggestion was rejected outright. An absent seat still owes
+      // the table forward progress, so on its own uninterrupted turn fall back
+      // to the same escape hatch a human out of moves would take: draw if it
+      // hasn't, or end the turn if it has. Anything still rejected means there
+      // is truly nothing to do, and the next expired seat gets a turn instead.
+      //
+      // This covers a proactive turn only, and deliberately so: it is a net for
+      // a `playable` list that offers more than `onPlay` accepts, and `playable`
+      // is only consulted on a seat's own turn. A pending is answered from the
+      // option list the engine itself publishes on the pending view, so its
+      // answer is legal by construction and there is nothing to fall back to —
+      // which is why an option list the engine cannot answer has to be fixed in
+      // the engine rather than papered over here. `playableFor`
+      // (packages/engine/src/fake/project.ts) checking the release cost is that
+      // fix for the case this net was written against.
+      const { turn, pending, window, over } = session.state
+      if (turn.player === seat.playerId && !pending && !window && !over) {
+        const fallback: Action = drawObligationMet(session.state)
+          ? { type: 'PUSH', player: seat.playerId, at: now }
+          : { type: 'DRAW', player: seat.playerId, at: now }
+        const retried = session.engine.reduce(session.state, fallback)
+        if (retried.state !== session.state) {
+          const next: Session = {
+            ...session,
+            state: retried.state,
+            log: [...session.log, ...retried.events],
+          }
+          return { session: next, outgoing: syncAll(next, retried.events) }
+        }
+      }
     }
 
-    // botAction's suggestion was rejected outright. An absent seat still owes
-    // the table forward progress, so on its own uninterrupted turn fall back
-    // to the same escape hatch a human out of moves would take: draw if it
-    // hasn't, or end the turn if it has. Anything still rejected means there
-    // is truly nothing to do, and the next expired seat gets a turn instead.
-    //
-    // This covers a proactive turn only, and deliberately so: it is a net for
-    // a `playable` list that offers more than `onPlay` accepts, and `playable`
-    // is only consulted on a seat's own turn. A pending is answered from the
-    // option list the engine itself publishes on the pending view, so its
-    // answer is legal by construction and there is nothing to fall back to —
-    // which is why an option list the engine cannot answer has to be fixed in
-    // the engine rather than papered over here. `playableFor`
-    // (packages/engine/src/fake/project.ts) checking the release cost is that
-    // fix for the case this net was written against.
-    const { turn, pending, window, over } = session.state
-    if (turn.player === seat.playerId && !pending && !window && !over) {
-      const fallback: Action = drawObligationMet(session.state)
-        ? { type: 'PUSH', player: seat.playerId, at: now }
-        : { type: 'DRAW', player: seat.playerId, at: now }
-      const retried = session.engine.reduce(session.state, fallback)
-      if (retried.state !== session.state) {
-        const next: Session = {
-          ...session,
-          state: retried.state,
-          log: [...session.log, ...retried.events],
-        }
-        return { session: next, outgoing: syncAll(next, retried.events) }
-      }
+    // Getting here means nothing above moved the table forward for this seat:
+    // botAction had no answer at all (the exhaustive switch's `default` in
+    // bots.ts, kept for a Pending kind not yet wired into it), or the answer it
+    // gave was rejected outright — including, on a proactive turn, the
+    // draw/push net just above that exists for exactly this. A seat that owes
+    // the table an answer and has none is a stall: nothing else can move until
+    // it resolves, and with no human in that seat nobody will resolve it by
+    // hand. A pending is answered from the option list the engine itself
+    // publishes on the pending view, so its answer is legal by construction —
+    // an option list the engine still refuses is an engine bug to fix rather
+    // than something to paper over here.
+    if (import.meta.env.DEV && seatOwes(session.state, seat.playerId)) {
+      console.warn(
+        `[referee] ${seat.playerId} owes ${session.state.pending?.kind ?? 'a move'} and its policy has no answer — the table cannot advance`,
+      )
     }
   }
 
