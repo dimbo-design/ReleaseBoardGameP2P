@@ -2056,3 +2056,41 @@ it('stores the solo match as resumable, with no room to resume into', () => {
   expect(stored?.roomCode).toBeNull()
   expect(stored?.gameId).toBe(result.current.gameId)
 })
+
+it("gates the solo table on the human's intro alone, not the bots sitting with it", () => {
+  // The turn clock is the tell: `tick` (session/referee.ts) stamps it on the
+  // very first tick the keeper's ticker runs after the gate opens — before
+  // that, `gated()` (session/remoteLink.ts) short-circuits the ticker and
+  // nothing about the session changes. So an undefined deadline that turns
+  // into a real one, purely from ticking, is proof the gate opened; and if it
+  // stays undefined after the human alone has reported, the gate was still
+  // waiting on someone else — exactly what waiting on the bots would look
+  // like, since neither ever calls introReady.
+  vi.useFakeTimers()
+  try {
+    const { result } = renderHook(() => useLobby())
+    act(() => {
+      result.current.startSolo('Ann', ['Bot 1', 'Bot 2'], {})
+    })
+    expect(result.current.gameSync?.view.turn.deadline).toBeUndefined()
+
+    // Ticks land, but the gate is still shut: nobody has reported yet.
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.gameSync?.view.turn.deadline).toBeUndefined()
+
+    // The human's own seat reports its intro. If the gate's `expect` named the
+    // bots too — the copy-paste `startGame`'s own list invites — this alone
+    // would not be enough to open it.
+    act(() => {
+      result.current.introReady()
+    })
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.gameSync?.view.turn.deadline).toBeDefined()
+  } finally {
+    vi.useRealTimers()
+  }
+})
