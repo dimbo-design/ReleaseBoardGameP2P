@@ -9,7 +9,7 @@ import { type Game, useGame } from './useGame'
 // directly so a sync can be handed over one render at a time.
 let session: {
   gameLink: { submit: (i: unknown) => void } | null
-  gameSync: { view: PlayerView; events: Event[] } | null
+  gameSync: { view: PlayerView; events: Event[]; resync?: boolean } | null
   gameId: string | null
 }
 
@@ -159,4 +159,59 @@ it('writes the feed back so the next load can restore it', () => {
   session = { gameLink: null, gameSync: { view: view(), events: [dealt('p1')] }, gameId: 'g1' }
   render(<Probe seen={[]} />)
   expect(readLog('g1', Date.now())).toHaveLength(1)
+})
+
+// Finding A (Critical): the returned `events` folds in an unprocessed sync via
+// `pending`/`carried` on THIS render — that is the whole point of that
+// mechanism. `restoredThrough` must cover the same render's events for the
+// same reason. Before the fix it was just `restoredThrough.current`, a ref
+// bumped only inside the passive sync effect, which runs strictly after this
+// render's layout effects — so a peer whose very first sync is a resync (a
+// reconnect or late join, where the ref starts at 0) would see those events
+// with a stale, uncovering mark on the very render they first appear.
+it('a resync already covers its own events in restoredThrough, on the same render they appear', () => {
+  const seen: { events: Event[]; restoredThrough: number }[] = []
+  function Watch() {
+    const game = useGame()
+    useLayoutEffect(() => {
+      if (game.view) seen.push({ events: game.events, restoredThrough: game.restoredThrough })
+    }, [game.view, game.events, game.restoredThrough])
+    return null
+  }
+
+  session = { gameLink: null, gameSync: null, gameId: 'resync-live' }
+  const { rerender } = render(<Watch />)
+
+  session = {
+    gameLink: null,
+    gameSync: { view: view(), events: [dealt('p1'), drawn('p1')], resync: true },
+    gameId: 'resync-live',
+  }
+  rerender(<Watch />)
+
+  // The FIRST layout effect to see this sync's events is the one whose
+  // `restoredThrough` we must trust — a later render "fixing" it is too late.
+  expect(seen[0].events.map((e) => e.id)).toEqual([1, 3])
+  expect(seen[0].restoredThrough).toBe(3)
+})
+
+// Finding B (Important): both the clear effect and the persist effect list
+// `gameId` in their deps and fire in the same commit, in declaration order.
+// The persist effect's closure still holds the STALE events from the outgoing
+// game (`setEvents([])` in the clear effect only takes effect on a later
+// render), so without a guard it re-plants the record `clearLog()` just wiped,
+// mislabelled under the new game. No further sync arrives here to overwrite
+// that bad write with a correct one, so it is exactly what a reload would see.
+it('does not persist the outgoing game’s events under the new game’s id', () => {
+  session = {
+    gameLink: null,
+    gameSync: { view: view(), events: [dealt('p1')] },
+    gameId: 'leak-old',
+  }
+  const { rerender } = render(<Probe seen={[]} />)
+
+  session = { gameLink: null, gameSync: null, gameId: 'leak-new' }
+  rerender(<Probe seen={[]} />)
+
+  expect(readLog('leak-new', Date.now())).toBeNull()
 })

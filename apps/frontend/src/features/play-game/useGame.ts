@@ -58,6 +58,16 @@ export function useGame(): Game {
   // of it is a movement anybody should watch.
   const restoredThrough = useRef(events.at(-1)?.id ?? 0)
 
+  // Whether `events` (and `restoredThrough.current`) still belong to `gameId`,
+  // as of the START of this render — read before any effect of this same
+  // commit can move `seenGame.current` to a new id. The clear effect just
+  // below does exactly that, in the same commit, before the persist effect
+  // runs, so a persist effect that re-read `seenGame.current` itself would see
+  // the NEW id and never notice the game had just changed. Snapshotting it
+  // here, in a plain render-time variable, is what lets both `carried` and the
+  // persist effect agree on "this render still describes the outgoing game".
+  const sameGame = seenGame.current === gameId
+
   useEffect(() => {
     // A new game must not inherit the last one's feed.
     if (seenGame.current !== gameId) {
@@ -80,9 +90,16 @@ export function useGame(): Game {
   }, [sync])
 
   useEffect(() => {
-    if (!gameId || events.length === 0) return
+    // Without `sameGame`, a commit where `gameId` just changed would still run
+    // this effect with the OUTGOING game's `events` in its closure — the clear
+    // effect above resets `events` via `setEvents([])`, but that only takes
+    // effect on the NEXT render. Writing here anyway would re-plant the record
+    // `clearLog()` (in that same effect, run first) just wiped, mislabelled
+    // under the new game — exactly the leak the `carried` guard's own comment
+    // warns about, just on the write side instead of the read side.
+    if (!gameId || events.length === 0 || !sameGame) return
     writeLog({ gameId, events, savedAt: Date.now() })
-  }, [gameId, events])
+  }, [gameId, events, sameGame])
 
   // An intent carries neither player nor clock — the referee stamps both from
   // the connection it arrived on, so a peer cannot act for another seat.
@@ -102,12 +119,24 @@ export function useGame(): Game {
   // starts it still holds the last one's feed. Read as empty here rather than
   // handing the new game a history it did not have — the seat ids repeat between
   // games, so a stale `dealt` would otherwise be taken for this game's deal.
-  const carried = seenGame.current === gameId ? events : []
+  const carried = sameGame ? events : []
+
+  // A resync not yet folded in by the sync effect above is already reflected in
+  // `pending` — and so in the `events` returned below — on THIS render. The ref
+  // only advances inside that effect, which runs strictly after this render's
+  // layout effects, so reading just `restoredThrough.current` here would lag
+  // the very feed it is supposed to cover. Mirror the effect's own rule
+  // (`sync.events.at(-1)?.id ?? restoredThrough.current`) directly in the
+  // return expression, the same way `pending`/`carried` mirror it for `events`.
+  const restoredNow =
+    pending.length > 0 && sync?.resync
+      ? (sync.events.at(-1)?.id ?? restoredThrough.current)
+      : restoredThrough.current
 
   return {
     view: sync?.view ?? null,
     events: pending.length > 0 ? mergeEvents(carried, pending) : carried,
-    restoredThrough: restoredThrough.current,
+    restoredThrough: restoredNow,
     play: (card, target, combo) => submit({ type: 'PLAY', card, target, combo }),
     draw: (pile) => submit({ type: 'DRAW', pile }),
     push: () => submit({ type: 'PUSH' }),
