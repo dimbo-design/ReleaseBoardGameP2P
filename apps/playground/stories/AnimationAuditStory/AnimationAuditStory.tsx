@@ -1251,8 +1251,8 @@ const ISSUES: Issue[] = [
   },
   {
     what: {
-      ru: 'История: меч, направленный в карту',
-      en: 'History: the sword pointing at a card',
+      ru: 'Истории нечем показать меч, направленный в карту: `attacked` несёт только игрока',
+      en: 'MoveHistory has nothing to show a card-pointed sword with — `attacked` carries only the player',
     },
     problem: {
       ru: '`MoveHistory` рисует цель двух видов — игрока и карту (`DDoS ⚔ Monitoring` в истории на `/playground/table`). Из фида выводится только первая: `attacked` (`packages/engine/src/events.ts:30`) несёт `target: PlayerId` и никогда не карту. Строка с картой-целью собирается лишь склейкой атаки с её последствием (`monitoringDestroyed`, `releaseDestroyed`) в одну строку — это чтение правил, а не следствие событий, поэтому не сделано (#136). Закроет решение — склеивать ли атаку с последствием в одну строку, или добавить карту-цель в само событие `attacked`. См. `docs/animations/backlog.md`.',
