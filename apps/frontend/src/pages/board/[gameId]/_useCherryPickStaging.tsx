@@ -224,13 +224,35 @@ export function useCherryPickStaging(args: {
     return { hand: a, deck: b }
   })()
 
-  const canSelect = (uid: string, id: string) => {
-    if (picks.includes(uid)) return true
-    if (picks.length >= (ours?.picks ?? (sudo ? 2 : 1))) return false
-    if (!isTrigger(id)) return true
-    // Only one trigger may be held, and only for the single deck slot.
-    return sudo && !picks.some((u) => isTrigger(idOfOption(options, u)))
+  const max = ours?.picks ?? (sudo ? 2 : 1)
+
+  // A trigger may only ever hold the DECK slot, and that slot exists only when
+  // two cards are taken — so a set of picks is legal while it holds no more
+  // triggers than it has deck slots. Stated over the resulting SET rather than
+  // per candidate card, because a swap has to be judged the same way an
+  // addition is: by what the player would be left holding.
+  const legal = (set: string[]) =>
+    set.filter((u) => isTrigger(idOfOption(options, u))).length <= (max === 2 ? 1 : 0)
+
+  // What one click does. A picked card is released; an unpicked one joins while
+  // there is room, and once there is none it takes the OLDEST pick's place
+  // instead of being ignored.
+  //
+  // Ignoring it is what made a mis-click uncorrectable: every other card went
+  // inert the moment `picks` filled, and the only way out was to guess that
+  // clicking the CHOSEN card releases it. Nothing said so, so the grid read as
+  // broken — which is how it was reported off the deployed playground.
+  //
+  // Returns `p` ITSELF when the click changes nothing, which is what lets
+  // `canSelect` below be "would this click do anything?" rather than a second
+  // copy of these rules that can drift out of step with them.
+  const nextPicks = (p: string[], uid: string): string[] => {
+    if (p.includes(uid)) return p.filter((u) => u !== uid)
+    const grown = p.length < max ? [...p, uid] : [...p.slice(1), uid]
+    return legal(grown) ? grown : p
   }
+
+  const canSelect = (uid: string) => nextPicks(picks, uid) !== picks
 
   const ready = ours ? picks.length === ours.picks : false
 
@@ -376,7 +398,7 @@ export function useCherryPickStaging(args: {
             const handRole = roles.hand === o.uid
             const deckRole = roles.deck === o.uid
             const selected = handRole || deckRole
-            const blocked = !confirmed && !selected && !canSelect(o.uid, o.id)
+            const blocked = !confirmed && !selected && !canSelect(o.uid)
             return (
               <button
                 key={o.uid}
@@ -389,13 +411,7 @@ export function useCherryPickStaging(args: {
                 className={`${styles.cell} ${blocked ? styles.blocked : ''}`}
                 onClick={() => {
                   if (confirmed) return
-                  setPicks((p) =>
-                    p.includes(o.uid)
-                      ? p.filter((u) => u !== o.uid)
-                      : canSelect(o.uid, o.id)
-                        ? [...p, o.uid]
-                        : p,
-                  )
+                  setPicks((p) => nextPicks(p, o.uid))
                 }}
               >
                 <Card

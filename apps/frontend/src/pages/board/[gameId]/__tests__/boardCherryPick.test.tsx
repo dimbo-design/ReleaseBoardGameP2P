@@ -146,3 +146,69 @@ describe("the grid that answers Git Cherry-pick's own pick", () => {
     expect(exits.items.flat()).not.toContain('c1')
   })
 })
+
+// A pick you cannot move is a pick you cannot correct. `canSelect` refused
+// every unpicked card the moment `picks` was full, and the click handler
+// returned the array unchanged — so the only way out of a mis-click was to
+// notice that clicking the CHOSEN card releases it. On the deployed
+// playground that reads as a dead grid, which is how it was reported.
+describe('changing a pick before confirming', () => {
+  it('moves the single pick to the card clicked next', () => {
+    const onResolve = vi.fn()
+    renderBoard({
+      pending: cherryPending([
+        { uid: 'c1', id: 'attack-bug' },
+        { uid: 'c2', id: 'release-frontend' },
+      ]),
+      actions: { onResolve },
+    })
+    fireEvent.click(screen.getByTestId('cherry-cell-c1'))
+    fireEvent.click(screen.getByTestId('cherry-cell-c2'))
+    fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+    expect(onResolve).toHaveBeenCalledWith({ kind: 'pickFromDiscard', card: 'c2' })
+  })
+
+  // Two slots full: the new card takes the OLDEST one's place, so the pick
+  // that survives is the one chosen most recently.
+  it('replaces the oldest of two sudo picks', () => {
+    const onResolve = vi.fn()
+    renderBoard({
+      pending: cherryPending(
+        [
+          { uid: 'c1', id: 'attack-bug' },
+          { uid: 'c2', id: 'release-frontend' },
+          { uid: 'c3', id: 'release-backend' },
+        ],
+        2,
+      ),
+      actions: { onResolve },
+    })
+    fireEvent.click(screen.getByTestId('cherry-cell-c1'))
+    fireEvent.click(screen.getByTestId('cherry-cell-c2'))
+    fireEvent.click(screen.getByTestId('cherry-cell-c3'))
+    fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+    expect(onResolve).toHaveBeenCalledWith({
+      kind: 'pickFromDiscard',
+      card: 'c2',
+      toDeck: 'c3',
+    })
+  })
+
+  // The swap is not a licence to reach an illegal pair. A trigger may only
+  // ever hold the DECK slot, so a base pick — whose only slot is the hand —
+  // still refuses one, full or not.
+  it('refuses to swap a trigger into the single hand slot', () => {
+    const onResolve = vi.fn()
+    renderBoard({
+      pending: cherryPending([
+        { uid: 'c1', id: 'release-frontend' },
+        { uid: 'c2', id: 'trigger-error-503' },
+      ]),
+      actions: { onResolve },
+    })
+    fireEvent.click(screen.getByTestId('cherry-cell-c1'))
+    fireEvent.click(screen.getByTestId('cherry-cell-c2'))
+    fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+    expect(onResolve).toHaveBeenCalledWith({ kind: 'pickFromDiscard', card: 'c1' })
+  })
+})
