@@ -5,6 +5,7 @@ import {
   clearKeeper,
   clearSession,
   getClientId,
+  readSession,
   type StoredKeeper,
   type StoredSession,
 } from '~/shared/lib/persistence'
@@ -68,6 +69,11 @@ vi.mock('./transport/peer', () => ({
 
 beforeEach(() => {
   transports.length = 0
+  // createTransport is one shared vi.fn() for the whole file, so its call
+  // history accumulates across every test unless cleared here — without this,
+  // a solo test asserting `.not.toHaveBeenCalled()` would see every networked
+  // test that ran before it and fail no matter what it does itself.
+  vi.mocked(createTransport).mockClear()
   // The hook writes `release:session` / `release:keeper` now, so a record left
   // by the previous test would be read as this one's — and now that the mount
   // effect restores from one automatically (host restore, below), a leftover
@@ -2009,4 +2015,44 @@ it("retry() firing while an earlier attempt's dial is still inside createTranspo
   // even though the connection the player is actually looking at (this
   // transport) succeeded.
   expect(result.current.reconnect.status).toBe('idle')
+})
+
+it('starts a solo match with no transport and no room', () => {
+  const { result } = renderHook(() => useLobby())
+  act(() => {
+    result.current.startSolo('Ann', ['Bot 1', 'Bot 2'], {})
+  })
+
+  // The room is what solo does without. `gameId` is what carries the player to
+  // the board (FollowGameStart watches it).
+  expect(createTransport).not.toHaveBeenCalled()
+  expect(result.current.roomCode).toBeNull()
+  expect(result.current.gameId).toMatch(/^solo-\d+$/)
+  expect(result.current.isHost).toBe(true)
+  expect(result.current.gameLink).not.toBeNull()
+
+  // Three seats, the human first, and every one of them in the roster — the
+  // board reads both, and reads a seat missing from the roster as dropped.
+  expect(result.current.seats.map((s) => s.playerId)).toEqual(['p1', 'p2', 'p3'])
+  expect(Object.keys(result.current.state?.peers ?? {})).toHaveLength(3)
+})
+
+it('deals the solo match, so the board has a hand and a deal to replay', () => {
+  const { result } = renderHook(() => useLobby())
+  act(() => {
+    result.current.startSolo('Ann', ['Bot 1'], {})
+  })
+  expect(result.current.gameSync?.view).toBeTruthy()
+  expect(result.current.gameSync?.events.length).toBeGreaterThan(0)
+})
+
+it('stores the solo match as resumable, with no room to resume into', () => {
+  const { result } = renderHook(() => useLobby())
+  act(() => {
+    result.current.startSolo('Ann', ['Bot 1'], {})
+  })
+  const stored = readSession()
+  expect(stored?.role).toBe('solo')
+  expect(stored?.roomCode).toBeNull()
+  expect(stored?.gameId).toBe(result.current.gameId)
 })

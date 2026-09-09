@@ -45,7 +45,9 @@ import {
 import { isRelayable, relayTargets } from './session/relay'
 import { attachKeeper, createRemoteLink } from './session/remoteLink'
 import { restoreSeats } from './session/restore'
+import { buildSoloTable } from './session/solo'
 import { createStartGate, type StartGate } from './session/startGate'
+import { createLoopbackTransport } from './transport/loopback'
 import { createTransport, type Transport } from './transport/peer'
 import type { Seat as LobbySeat, PeerInfo, Seat, Setup, Where, WireMessage } from './types'
 
@@ -193,6 +195,10 @@ export interface UseLobby {
   transferHost(id: string): void
   setSetup(setup: Setup): void
   startGame(): void
+  // A match against bots: no room, no broker, no transport. The link, the
+  // seating and the projection are the same shape a networked match produces,
+  // so nothing downstream of this hook can tell the difference.
+  startSolo(name: string, botNames: string[], setup: Setup): void
   // The local seat has finished its opening deal. A no-op outside a game, and
   // for a spectator, whose report the host's gate is not waiting on.
   introReady(): void
@@ -872,6 +878,12 @@ export function useLobby(): UseLobby {
     const snapshot = readKeeper()
     if (stored?.role !== 'host' || !snapshot) return false
     if (!stored.gameId || snapshot.gameId !== stored.gameId) return false
+    // A host record always carries a real room code — that peer id is what
+    // the retry loop below redials. Only a solo match ever stores null, and
+    // it does so under role 'solo', never 'host'; this narrows the type for
+    // that fact rather than asserting past it, and a record that somehow
+    // broke that rule has nothing this restore could dial anyway.
+    if (!stored.roomCode) return false
 
     setStatus('connecting')
     setError(null)
@@ -1032,6 +1044,11 @@ export function useLobby(): UseLobby {
   const runGuestReconnect = useCallback(async () => {
     const stored = reconnectSessionRef.current
     if (!stored) return
+    // reconnectSessionRef is only ever set from a role:'guest' record (every
+    // assignment to it checks that first), and a guest always joined a real
+    // room — but the field is shared with solo's null now, so decline the
+    // same way a missing record does rather than dialling joinRoom with one.
+    if (!stored.roomCode) return
     // Bumped before anything awaits, so a retry() fired mid-run (mid-backoff,
     // typically) supersedes this run rather than racing it — every check below
     // reads it back after each await. `sessionEpoch` is the separate teardown
@@ -1453,6 +1470,93 @@ export function useLobby(): UseLobby {
     keeper.resync(engine.setupEvents(session.state))
   }, [dispatch, applySeats, cancelKeeperSave, persistKeeper, rememberGame])
 
+  // The solo half of `startGame`. Everything structural is the same — mint a
+  // match id, seat the table, create the session, attach a keeper, deal — and
+  // two things are not: the transport is a loopback with no recipients, and
+  // the roster is invented here rather than gathered from a lobby.
+  const startSolo = useCallback(
+    (name: string, botNames: string[], setup: Setup) => {
+      // Same teardown, and the same order, as a rematch through startGame: the
+      // gate first, because it must never outlive its session.
+      gateRef.current?.cancel()
+      gateRef.current = null
+      keeperRef.current?.close()
+      keeperRef.current = null
+      cancelKeeperSave()
+      // A stale transport from a session this player walked away from without
+      // leaving (returning to /start from a live guest session never calls
+      // leaveSession) would otherwise leak, exactly as createRoom guards.
+      transportRef.current?.close()
+
+      matchSeqRef.current += 1
+      const id = `solo-${matchSeqRef.current}`
+
+      const t = createLoopbackTransport()
+      transportRef.current = t
+      isHostRef.current = true
+      setIsHost(true)
+      setRoomCode(null)
+      setError(null)
+      setErrorKind(null)
+
+      const table = buildSoloTable({
+        selfPeerId: t.id,
+        clientId: getClientId(),
+        name,
+        botNames,
+        setup,
+      })
+
+      // The engine never sources randomness, so the seed is minted here and the
+      // match is a pure function of it — same as a networked deal.
+      const seed = crypto.getRandomValues(new Uint32Array(1))[0]
+      const engine = createFakeEngine()
+      const { session } = createSession({
+        gameId: id,
+        keeperId: 'p1',
+        engine,
+        seed,
+        players: table.players,
+        setup,
+        deck: FAKE_DECK,
+        events: FAKE_EVENTS,
+      })
+      const ref: SessionRef = { current: session }
+      sessionRef.current = ref
+
+      // The human's seat alone. A bot runs no opening and would never report,
+      // so a gate waiting on one would hold the table for the whole
+      // INTRO_CAP_MS before giving up — and the gate is what stops the bots
+      // taking their turns during the deal animation.
+      const gate = createStartGate({ expect: ['p1'] })
+      gateRef.current = gate
+
+      const keeper = attachKeeper({
+        ref,
+        transport: t,
+        now: () => Date.now(),
+        gate,
+        onCommit: persistKeeper,
+      })
+      keeperRef.current = keeper
+      keeper.link.subscribe(setGameSync)
+      setGameLink(() => keeper.link)
+
+      commit(table.lobby)
+      applySeats(table.seats)
+      writeSession({ roomCode: null, name, role: 'solo', gameId: id, joinedAt: Date.now() })
+      setStatus('in-lobby')
+      gameIdRef.current = id
+      // No navigation here: FollowGameStart is mounted app-wide (pages/_app.tsx)
+      // and watches this very signal, exactly as it does for a networked start.
+      setGameId(id)
+      // The deal, so the board's intro has something to replay and the move
+      // history does not open on a blank.
+      keeper.resync(engine.setupEvents(session.state))
+    },
+    [commit, applySeats, cancelKeeperSave, persistKeeper],
+  )
+
   // The local seat has finished its opening. The host reports into its own
   // keeper; a guest sends the frame, and the host's keeper resolves the seat
   // from the connection it arrived on — the same path an intent takes, so a
@@ -1525,6 +1629,7 @@ export function useLobby(): UseLobby {
       transferHost,
       setSetup,
       startGame,
+      startSolo,
       introReady,
       disband,
       leaveSession,
@@ -1556,6 +1661,7 @@ export function useLobby(): UseLobby {
       transferHost,
       setSetup,
       startGame,
+      startSolo,
       introReady,
       disband,
       leaveSession,

@@ -101,9 +101,11 @@ export function getClientId(): string {
 }
 
 export interface StoredSession {
-  roomCode: string
+  // null for a solo match: there is no room, and nothing to dial on the way
+  // back — the keeper snapshot beside this record is the whole session.
+  roomCode: string | null
   name: string
-  role: 'host' | 'guest'
+  role: 'host' | 'guest' | 'solo'
   gameId: string | null
   joinedAt: number
 }
