@@ -794,8 +794,8 @@ git commit -m "feat(web): start a match against bots, with no room to start it i
 ### Task 5: The bot driver reaches the board
 
 **Files:**
-- Test only: `apps/frontend/src/network/session/solo.test.ts` (a second `describe`, or a new
-  `soloPlay.test.ts` beside it)
+- Create: `apps/frontend/src/network/session/soloPlay.test.ts` (its own file, not a second
+  `describe` inside `solo.test.ts` — that one tests a pure builder, this one drives a live keeper)
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–4.
@@ -847,6 +847,9 @@ function soloGame(botNames: string[]) {
     gameId: 'solo-1',
     keeperId: 'p1',
     engine,
+    // Choose this empirically rather than trusting the literal: a seed whose
+    // opening draw is a trigger opens a pending, PUSH is then refused, and the
+    // turn never reaches p2. Any seed reaching a clean draw serves.
     seed: 7,
     players: table.players,
     setup: {},
@@ -942,6 +945,7 @@ git commit -m "test(web): a bot seat takes its turn, and not during the deal"
 - Create: `apps/frontend/src/features/start-game/useStartSolo.ts`
 - Modify: `apps/frontend/src/features/create-lobby/CreateLobbyForm.tsx`
 - Modify: `apps/frontend/src/features/create-lobby/CreateLobbyForm.module.css`
+- Modify: `apps/frontend/src/pages/start.tsx` (one new `MenuButton`)
 - Modify: `packages/translation/src/locales/en/common.json`,
   `packages/translation/src/locales/ru/common.json`
 - Test: `apps/frontend/src/shared/ui/Form.test.tsx` (create if absent),
@@ -1174,7 +1178,20 @@ Add the one class to `CreateLobbyForm.module.css`, matching the spacing the colu
 }
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [ ] **Step 7: Put it on the start screen**
+
+Spec section 4: "The start screen gets one new `MenuButton` in the first `MenuGroup`, opening the
+same modal." Without it a solo match is reachable only from behind a button labelled "create game".
+In `apps/frontend/src/pages/start.tsx`, add it directly after the existing create button — same
+`value="create"`, because it opens the very same modal:
+
+```tsx
+          <MenuButton value="create" onClick={handleMenuClick}>
+            {t('start.soloCta')}
+          </MenuButton>
+```
+
+- [ ] **Step 8: Run the tests to verify they pass**
 
 ```bash
 pnpm --filter @release/web test -- Form.test.tsx CreateLobbyForm.test.tsx
@@ -1185,17 +1202,17 @@ pnpm typecheck
 
 Expected: PASS.
 
-- [ ] **Step 8: Play it**
+- [ ] **Step 9: Play it**
 
 Run `pnpm dev`, open the start screen, press "create game", type a nickname, leave the bot count at
 1 and press "play with bots". Expected: the board opens, the deal plays, and after your PUSH the bot
 takes its turn without you touching anything. This is the first point in the plan where the mode is
 real; do not move on if it is not.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add apps/frontend/src/shared/ui/Form.tsx apps/frontend/src/shared/ui/Form.test.tsx apps/frontend/src/features packages/translation/src/locales
+git add apps/frontend/src/shared/ui/Form.tsx apps/frontend/src/shared/ui/Form.test.tsx apps/frontend/src/features apps/frontend/src/pages/start.tsx packages/translation/src/locales
 git commit -m "feat(web): play with bots, from the same form that opens a room"
 ```
 
@@ -1211,7 +1228,9 @@ git commit -m "feat(web): play with bots, from the same form that opens a room"
   `apps/frontend/src/pages/__tests__/start.test.tsx`
 
 **Interfaces:**
-- Consumes: `StoredSession.role === 'solo'` (Task 4), `buildSoloTable` (Task 3).
+- Consumes: `StoredSession.role === 'solo'` (Task 4). **Not** `buildSoloTable` — a restore has no
+  `t()` with which to regenerate bot names, so the roster is rebuilt from `snapshot.lobbySeats`,
+  the only source of those names that survives a reload.
 - Produces: nothing new on `UseLobby` — `restoreSolo` runs from the mount effect only.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1562,13 +1581,21 @@ and add the small predicate above `driveUnattended`:
 // simply having nothing to do right now (not its turn, no window open).
 function seatOwes(state: GameState, playerId: PlayerId): boolean {
   if (state.over) return false
-  if (state.pending) return seatOwing(state.pending) === playerId
+  // `player` is read as OPTIONAL on purpose, and that is the whole subtlety.
+  // Every Pending variant carries one today, so `state.pending.player` would
+  // compile — but a pending owed to several seats at once carries none, and
+  // this predicate is exactly the code that would then stop compiling. Reading
+  // it optionally answers "not this seat" for such a pending, which is the
+  // right answer for a warning: a roster-wide pending is nobody's solo stall.
+  const owed = (state.pending as { player?: PlayerId } | null)?.player
+  if (state.pending) return owed === playerId
   return state.turn.player === playerId
 }
 ```
 
-Import `seatOwing` from `@release/engine` if `referee.ts` does not already have it — it is exported
-from `state.ts` and is what `driveUnattended` already uses in the fake's own driver.
+Import nothing new for this: `GameState` and `PlayerId` are already imported by `referee.ts`. Do
+**not** reach for a helper such as `seatOwing` — no such export exists in this repository's
+engine.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
