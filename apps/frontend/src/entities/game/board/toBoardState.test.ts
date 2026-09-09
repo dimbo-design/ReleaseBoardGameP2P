@@ -389,10 +389,13 @@ describe('toBoardState', () => {
     expect(pending && 'deadline' in pending ? pending.deadline : undefined).toBe(150)
   })
 
-  // Every member of the union must produce a row. The `never` default makes a new
-  // event type a typecheck failure rather than a silent grey line — which is
-  // exactly what #108's two upgrade events would otherwise become on merge.
-  it('produces a row for every event type in the union', () => {
+  // This exercises four of the union's twenty-nine members, not all of them —
+  // what actually enforces "every member produces a row" is the `never`
+  // default in `toHistoryEntry`'s switch, at TYPECHECK time: a new event type
+  // fails `pnpm typecheck` there rather than rendering as a silent grey line,
+  // which is exactly what #108's two upgrade events would otherwise become on
+  // merge. This test is a runtime smoke check on a small sample, nothing more.
+  it('produces a row for a sample of event types, of the shape the `never` default enforces for all of them', () => {
     const every: Event[] = [
       { id: 1, type: 'dealt', player: 'you', count: 5 },
       { id: 2, type: 'drawn', player: 'you', pile: 0, deckSize: 39 },

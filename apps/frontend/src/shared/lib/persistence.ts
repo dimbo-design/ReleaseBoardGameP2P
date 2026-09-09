@@ -1,4 +1,4 @@
-// What survives a reload. Three records, all under a `release:` prefix.
+// What survives a reload. Four records, all under a `release:` prefix.
 //
 // Plain functions rather than a store: the keeper snapshot is written from
 // `referee.ts`, which is a pure module with no React in it — and keeping it

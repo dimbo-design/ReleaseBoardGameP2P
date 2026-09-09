@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  clearLog,
   clearSession,
   getClientId,
   RESTORE_TTL_MS,
   readKeeper,
+  readLog,
   readSession,
   writeKeeper,
+  writeLog,
   writeSession,
 } from './persistence'
 
@@ -121,8 +124,6 @@ describe('when sessionStorage throws (Safari private mode)', () => {
     vi.restoreAllMocks()
   })
 })
-
-import { clearLog, readLog, writeLog } from './persistence'
 
 describe('the move log record', () => {
   it('round-trips the events it was given', () => {
