@@ -1249,6 +1249,21 @@ const ISSUES: Issue[] = [
     },
     status: 'open',
   },
+  {
+    what: {
+      ru: 'История: меч, направленный в карту',
+      en: 'History: the sword pointing at a card',
+    },
+    problem: {
+      ru: '`MoveHistory` рисует цель двух видов — игрока и карту (`DDoS ⚔ Monitoring` в истории на `/playground/table`). Из фида выводится только первая: `attacked` (`packages/engine/src/events.ts:30`) несёт `target: PlayerId` и никогда не карту. Строка с картой-целью собирается лишь склейкой атаки с её последствием (`monitoringDestroyed`, `releaseDestroyed`) в одну строку — это чтение правил, а не следствие событий, поэтому не сделано (#136). Закроет решение — склеивать ли атаку с последствием в одну строку, или добавить карту-цель в само событие `attacked`. См. `docs/animations/backlog.md`.',
+      en: '`MoveHistory` draws a target of two kinds — a player and a card (`DDoS ⚔ Monitoring` in the history on `/playground/table`). Only the first comes out of the feed: `attacked` (`packages/engine/src/events.ts:30`) carries `target: PlayerId` and never a card. The card-target row can only come from folding an attack together with its consequence (`monitoringDestroyed`, `releaseDestroyed`) into one line — that is a reading of the rules, not something the events state, so it is not done (#136). What closes it: a decision — fold the attack with its consequence into one line, or add the card target to the `attacked` event itself. See `docs/animations/backlog.md`.',
+    },
+    where: {
+      ru: 'ui: table/MoveHistory/MoveHistory.tsx + frontend: entities/game/board/toBoardState.ts:171-186',
+      en: 'ui: table/MoveHistory/MoveHistory.tsx + frontend: entities/game/board/toBoardState.ts:171-186',
+    },
+    status: 'open',
+  },
 ]
 
 // Section headings, notes, legend and table headers.
