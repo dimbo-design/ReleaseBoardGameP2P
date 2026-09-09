@@ -26,6 +26,13 @@ pnpm-debug.log*
 .env.*
 !.env.example
 
+# --- Worktrees ---
+# Isolated checkouts of this same repo. Each carries its own .git and must
+# never enter the tree: unignored, a stray `add -A` in the main checkout
+# commits an entire second copy of the project.
+.worktrees/
+.claude/worktrees/
+
 superpowers
 docs/superpowers
 .superpowers
