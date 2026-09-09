@@ -132,7 +132,7 @@ export function onAttack(state: GameState, action: Action & { type: 'ATTACK' }):
   }
 
   const log = createLog(state.eventSeq)
-  log.add({
+  const attackedId = log.add({
     type: 'attacked',
     attacker: action.player,
     card: card.id,
@@ -157,6 +157,7 @@ export function onAttack(state: GameState, action: Action & { type: 'ATTACK' }):
         attacker: action.player,
         attack: card.uid,
         attackId: card.id,
+        attackEventId: attackedId,
         sudo,
         ...(sudoCard ? { combo: sudoCard } : {}),
         canDefendWith: defencesFor(state, w.target.player, sudo),
@@ -187,7 +188,7 @@ function onHandDefend(
   const combo = pending.combo ? [pending.combo] : []
 
   if (choice.card === null) {
-    const hitId = log.add({ type: 'tookHit', player: action.player })
+    const hitId = log.add({ type: 'tookHit', player: action.player }, pending.attackEventId)
     const spent = bankSpent(
       { ...state, pending: null },
       log,
@@ -231,7 +232,10 @@ function onHandDefend(
       : defence.id === 'defense-works-on-my-machine'
         ? 'reflect'
         : 'cancel'
-  const defendedId = log.add({ type: 'defended', player: action.player, card: defence.id, effect })
+  const defendedId = log.add(
+    { type: 'defended', player: action.player, card: defence.id, effect },
+    pending.attackEventId,
+  )
 
   const spentHand = setHand(
     state,
@@ -296,7 +300,7 @@ export function onDefend(state: GameState, action: Action & { type: 'RESOLVE' })
 
   // Take the hit.
   if (choice.card === null) {
-    const hitId = log.add({ type: 'tookHit', player: action.player })
+    const hitId = log.add({ type: 'tookHit', player: action.player }, pending.attackEventId)
     const spent = bankSpent(
       { ...state, pending: null },
       log,
@@ -349,7 +353,10 @@ export function onDefend(state: GameState, action: Action & { type: 'RESOLVE' })
       : defence.id === 'defense-works-on-my-machine'
         ? 'reflect'
         : 'cancel'
-  const defendedId = log.add({ type: 'defended', player: action.player, card: defence.id, effect })
+  const defendedId = log.add(
+    { type: 'defended', player: action.player, card: defence.id, effect },
+    pending.attackEventId,
+  )
 
   const spentHand = setHand(
     state,

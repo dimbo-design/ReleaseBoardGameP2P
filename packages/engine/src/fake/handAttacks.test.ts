@@ -396,3 +396,45 @@ it('thaws a frozen card when its owner’s next turn ends', () => {
   const r = reduce(frozen, { type: 'PUSH', player: 'p1', at: 1000 })
   expect(r.state.players.p1.frozen).toEqual([])
 })
+
+// The hand scope has its own attack emission (`openHandAttack`), so the link
+// the release scope makes is a separate one here — same field, other site (#138).
+it('parents a defence to the hand attack it answered', () => {
+  const attacked = reduce(table([BUG], [HOTFIX]), {
+    type: 'PLAY',
+    player: 'p1',
+    card: BUG.uid,
+    target: { kind: 'player', player: 'p2' },
+    at: 1000,
+  })
+  const attack = attacked.events.find((e) => e.type === 'attacked')
+  const r = reduce(attacked.state, {
+    type: 'RESOLVE',
+    player: 'p2',
+    choice: { kind: 'defend', card: HOTFIX.uid },
+    at: 1001,
+  })
+  const defended = r.events.find((e) => e.type === 'defended')
+  expect(attack?.id).toBeDefined()
+  expect(defended?.parent).toBe(attack?.id)
+})
+
+it('parents a taken hand hit to the attack that landed it', () => {
+  const attacked = reduce(table([BUG], [SPARE]), {
+    type: 'PLAY',
+    player: 'p1',
+    card: BUG.uid,
+    target: { kind: 'player', player: 'p2' },
+    at: 1000,
+  })
+  const attack = attacked.events.find((e) => e.type === 'attacked')
+  const r = reduce(attacked.state, {
+    type: 'RESOLVE',
+    player: 'p2',
+    choice: { kind: 'defend', card: null },
+    at: 1001,
+  })
+  const hit = r.events.find((e) => e.type === 'tookHit')
+  expect(attack?.id).toBeDefined()
+  expect(hit?.parent).toBe(attack?.id)
+})

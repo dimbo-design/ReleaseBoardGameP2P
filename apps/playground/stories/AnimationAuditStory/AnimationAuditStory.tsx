@@ -1266,18 +1266,18 @@ const ISSUES: Issue[] = [
   },
   {
     what: {
-      ru: 'Движок не называет атаку, которую отвечает защита — хвосты Rollback/Works on my Machine недостижимы',
-      en: 'The engine never names the attack a defence answered — the Rollback/Works on my Machine tails are unreachable',
+      ru: 'Движок не называл атаку, которую отвечает защита — хвосты Rollback/Works on my Machine были недостижимы',
+      en: 'The engine did not name the attack a defence answered — the Rollback/Works on my Machine tails were unreachable',
     },
     problem: {
-      ru: '`packages/engine/src/events.ts` обещает на `EventBase.parent`: «a defence names the attack it answered … so the history tree needs no inference». Оба места эмиссии `defended` (`packages/engine/src/fake/attacks.ts:234`, `:352`) вызывают `log.add` без второго аргумента, так что `parent` у защиты сегодня всегда `undefined`. `attackerOf` (`toBoardState.ts`) устроен вокруг этой связи и в проде всегда уходит в свою раннюю ветку — `returnCard`/`redirect` и вложенность `defended` под `attacked` в `buildHistoryTree` недостижимы на живом столе. Все четыре теста на эти поля пинят контракт адаптера вручную написанным `parent: 1`, а не следствие настоящих событий движка (#136). См. `docs/animations/backlog.md`.',
-      en: '`packages/engine/src/events.ts` promises on `EventBase.parent`: "a defence names the attack it answered … so the history tree needs no inference". Both `defended` emission sites (`packages/engine/src/fake/attacks.ts:234`, `:352`) call `log.add` with no second argument, so a defence\'s `parent` is always `undefined` today. `attackerOf` (`toBoardState.ts`) is built around that link and always takes its early branch in production — `returnCard`/`redirect` and `defended` nesting under `attacked` in `buildHistoryTree` are unreachable on a live table. All four tests for these fields pin the adapter\'s own contract with a hand-written `parent: 1`, not anything a real engine event produces (#136). See `docs/animations/backlog.md`.',
+      ru: '`packages/engine/src/events.ts` обещал на `EventBase.parent`: «a defence names the attack it answered … so the history tree needs no inference» — это было намерение, а не поведение. Оба места эмиссии `defended` вызывали `log.add` без второго аргумента, так что `parent` у защиты был всегда `undefined`; `attackerOf` (`toBoardState.ts`) устроен вокруг этой связи и в проде всегда уходил в свою раннюю ветку — `returnCard`/`redirect` и вложенность `defended` под `attacked` были недостижимы на живом столе, пока четыре теста с вручную написанным `parent: 1` показывали обратное (#136). Закрыто в #138: id `attacked` едет на пендинге (`attackEventId`), обе точки `defended` и обе точки `tookHit` передают его в `log.add` — под атаку уходит вся ветка обмена. Запись держится тут намеренно даже решённой: цену дала не сама дыра, а зелёные тесты, пинившие контракт адаптера вместо следствия настоящих событий. Ловит это теперь `attackDefenceHistory.test.ts` — он гоняет настоящий движок через адаптер. См. `docs/animations/backlog.md`.',
+      en: '`packages/engine/src/events.ts` promised on `EventBase.parent`: "a defence names the attack it answered … so the history tree needs no inference" — an intent, not a behaviour. Both `defended` emission sites called `log.add` with no second argument, so a defence\'s `parent` was always `undefined`; `attackerOf` (`toBoardState.ts`) is built around that link and always took its early branch in production, so `returnCard`/`redirect` and `defended` nesting under `attacked` were unreachable on a live table while four tests with a hand-written `parent: 1` reported them working (#136). Closed in #138: the `attacked` id rides the pending (`attackEventId`), and both `defended` and both `tookHit` sites pass it to `log.add` — the whole exchange now hangs off the attack. The entry stays here on purpose even though it is solved: what cost us was not the gap but the green tests pinning the adapter\'s contract instead of what real events produce. `attackDefenceHistory.test.ts` is what catches it now — it drives the real engine through the adapter. See `docs/animations/backlog.md`.',
     },
     where: {
-      ru: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
-      en: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
+      ru: 'packages/engine (state.ts attackEventId, fake/attacks.ts, fake/handAttacks.ts) + frontend: entities/game/board/attackDefenceHistory.test.ts',
+      en: 'packages/engine (state.ts attackEventId, fake/attacks.ts, fake/handAttacks.ts) + frontend: entities/game/board/attackDefenceHistory.test.ts',
     },
-    status: 'open',
+    status: 'ok',
   },
 ]
 

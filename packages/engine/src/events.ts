@@ -3,8 +3,17 @@ import type { CardId, NeutralizeMethod, PlayerId, ReleaseSlot } from './state'
 
 export interface EventBase {
   id: number
-  // The causing event's id. A defence names the attack it answered, an attack
-  // names the release it targeted — so the history tree needs no inference.
+  // The causing event's id, so the history tree needs no inference. What is
+  // linked today, and nothing beyond it: an answer to an attack (`defended`,
+  // `tookHit`) names the `attacked` it answered, and a `discarded` names what
+  // spent the card — `eliminated`, `revealed`, `neutralized`, `aiRevealed`,
+  // `tookHit`, `defended`, `monitoringDestroyed` or `releaseReturned`.
+  //
+  // Absent everywhere else, which is a statement about the emitters, not about
+  // what could be linked. This comment once described an intent instead — that
+  // an attack also names the release it targeted — and was read as behaviour
+  // and built on for a whole task before anyone checked (#138). Add a link here
+  // only after the emitter emits it.
   parent?: number
   // The audience, declared by the engine because only the rules know what is
   // secret. Absent means public. The future sync layer filters on this field.

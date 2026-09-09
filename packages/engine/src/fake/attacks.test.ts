@@ -619,3 +619,47 @@ it('logs a turn-played DDoS as an attack, not only as its consequences', () => {
   // The consequence is still logged; the attack is now logged alongside it.
   expect(r.events.some((e) => e.type === 'monitoringDestroyed')).toBe(true)
 })
+
+// The answer to an attack arrives in a LATER reduction than the attack itself,
+// with a fresh log — so the link cannot be made by looking around inside one
+// batch. It is the `attacked` event's id, carried on the defend pending, that
+// makes a defence able to name what it answered (#138).
+it('parents a defence to the attack it answered', () => {
+  const attacked = reduce(staged([BUG], [HOTFIX]), {
+    type: 'ATTACK',
+    player: 'p2',
+    card: BUG.uid,
+    at: 1001,
+  })
+  const attack = attacked.events.find((e) => e.type === 'attacked')
+  const r = reduce(attacked.state, {
+    type: 'RESOLVE',
+    player: 'p1',
+    choice: { kind: 'defend', card: HOTFIX.uid },
+    at: 1002,
+  })
+  const defended = r.events.find((e) => e.type === 'defended')
+  expect(attack?.id).toBeDefined()
+  expect(defended?.parent).toBe(attack?.id)
+})
+
+// The other answer to the same attack. Without this the exchange reads as two
+// unrelated roots — a hit that names nothing beside the attack that caused it.
+it('parents a taken hit to the attack that landed it', () => {
+  const attacked = reduce(staged([BUG], []), {
+    type: 'ATTACK',
+    player: 'p2',
+    card: BUG.uid,
+    at: 1001,
+  })
+  const attack = attacked.events.find((e) => e.type === 'attacked')
+  const r = reduce(attacked.state, {
+    type: 'RESOLVE',
+    player: 'p1',
+    choice: { kind: 'defend', card: null },
+    at: 1002,
+  })
+  const hit = r.events.find((e) => e.type === 'tookHit')
+  expect(attack?.id).toBeDefined()
+  expect(hit?.parent).toBe(attack?.id)
+})

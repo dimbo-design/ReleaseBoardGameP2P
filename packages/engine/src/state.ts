@@ -85,6 +85,11 @@ export type Pending =
       // The attacking card's catalogue id, carried rather than parsed back out of
       // the uid — nothing should depend on the uid's internal format.
       attackId: CardId
+      // The id of the `attacked` event that opened this exchange, so the answer
+      // can name it as its `parent`. The answer is a LATER reduction with its
+      // own log, which cannot see the attack's event — carrying the id here is
+      // what makes the link possible at all (#138).
+      attackEventId: number
       sudo: boolean
       // The Sudo that rode the attack. Held HERE while the exchange is open —
       // like the attack card itself, which lives only on this pending — and
