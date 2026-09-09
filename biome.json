@@ -19,8 +19,8 @@
       "**",
       "!**/dist",
       "!**/node_modules",
-      "!**/.claude/worktrees",
-      "!**/.worktrees",
+      "!.claude/worktrees",
+      "!.worktrees",
       "!**/*.css",
       "!**/*.svg",
       "!apps/frontend/src/app/router.ts"
