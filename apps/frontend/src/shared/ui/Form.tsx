@@ -51,7 +51,13 @@ export default function Form({ onSubmit, requiredMessage = 'Required', ...rest }
             return
           }
           setErrors({})
-          onSubmit(Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>)
+          // With the submitter, so a form with two submit buttons can say which
+          // one was pressed — standard HTML form behaviour, which `new
+          // FormData(form)` alone leaves out.
+          const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLElement | null
+          onSubmit(
+            Object.fromEntries(new FormData(e.currentTarget, submitter)) as Record<string, string>,
+          )
         }}
         onChange={(e) => {
           const input = e.target as unknown as HTMLInputElement

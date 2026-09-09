@@ -70,6 +70,9 @@ export default function StartPage() {
           <MenuButton autoFocus value="create" onClick={handleMenuClick}>
             {t('start.createGame')}
           </MenuButton>
+          <MenuButton value="create" onClick={handleMenuClick}>
+            {t('start.soloCta')}
+          </MenuButton>
           <MenuButton value="join" onClick={handleMenuClick}>
             {t('start.joinGame')}
           </MenuButton>
