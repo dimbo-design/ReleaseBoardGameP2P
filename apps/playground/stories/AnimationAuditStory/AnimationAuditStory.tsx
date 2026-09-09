@@ -1264,6 +1264,21 @@ const ISSUES: Issue[] = [
     },
     status: 'open',
   },
+  {
+    what: {
+      ru: 'Движок не называет атаку, которую отвечает защита — хвосты Rollback/Works on my Machine недостижимы',
+      en: 'The engine never names the attack a defence answered — the Rollback/Works on my Machine tails are unreachable',
+    },
+    problem: {
+      ru: '`packages/engine/src/events.ts` обещает на `EventBase.parent`: «a defence names the attack it answered … so the history tree needs no inference». Оба места эмиссии `defended` (`packages/engine/src/fake/attacks.ts:234`, `:352`) вызывают `log.add` без второго аргумента, так что `parent` у защиты сегодня всегда `undefined`. `attackerOf` (`toBoardState.ts`) устроен вокруг этой связи и в проде всегда уходит в свою раннюю ветку — `returnCard`/`redirect` и вложенность `defended` под `attacked` в `buildHistoryTree` недостижимы на живом столе. Все четыре теста на эти поля пинят контракт адаптера вручную написанным `parent: 1`, а не следствие настоящих событий движка (#136). См. `docs/animations/backlog.md`.',
+      en: '`packages/engine/src/events.ts` promises on `EventBase.parent`: "a defence names the attack it answered … so the history tree needs no inference". Both `defended` emission sites (`packages/engine/src/fake/attacks.ts:234`, `:352`) call `log.add` with no second argument, so a defence\'s `parent` is always `undefined` today. `attackerOf` (`toBoardState.ts`) is built around that link and always takes its early branch in production — `returnCard`/`redirect` and `defended` nesting under `attacked` in `buildHistoryTree` are unreachable on a live table. All four tests for these fields pin the adapter\'s own contract with a hand-written `parent: 1`, not anything a real engine event produces (#136). See `docs/animations/backlog.md`.',
+    },
+    where: {
+      ru: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
+      en: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
+    },
+    status: 'open',
+  },
 ]
 
 // Section headings, notes, legend and table headers.

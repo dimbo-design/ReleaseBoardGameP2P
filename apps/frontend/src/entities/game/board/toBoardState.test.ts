@@ -447,6 +447,15 @@ describe('toBoardState', () => {
     expect(toBoardState(view, log, labels).history[0].who).toBe('bot')
   })
 
+  // I1 (whole-branch review #136): the four tests below all hand-write
+  // `parent: 1` on the `defended` event to link it to its `attacked`. That
+  // pins the adapter's own contract (`attackerOf` walks `parent` correctly
+  // when it is present) — it does NOT prove the feature works against real
+  // engine output. The fake engine never sets this parent: both `defended`
+  // emission sites (`packages/engine/src/fake/attacks.ts:234`, `:352`) call
+  // `log.add` with no parent argument, so `returnCard`/`redirect` and the
+  // attack/defence nesting are unreachable in production today. See the
+  // `buildHistoryTree` doc comment above and `docs/animations/backlog.md`.
   it('names the attacker a returned card went back to', () => {
     const log: Event[] = [
       { id: 1, type: 'attacked', attacker: 'p2', card: 'attack-bug', sudo: false, target: 'you' },
