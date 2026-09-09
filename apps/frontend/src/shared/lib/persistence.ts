@@ -142,6 +142,10 @@ export interface StoredKeeper {
   // seat whose peer is gone. Reconstructing them from the referee's seats is
   // not possible; they were never there.
   lobbySeats: unknown
+  // The match's own event log, so a host reload restores the history as well as
+  // the position. `unknown[]` for the same reason `state` is `unknown`: storage
+  // does not import engine types.
+  log: unknown[]
   savedAt: number
 }
 

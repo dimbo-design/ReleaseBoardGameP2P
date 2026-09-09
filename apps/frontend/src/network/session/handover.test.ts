@@ -130,4 +130,26 @@ it('the successor adopts the state and can keep reducing', () => {
 
   expect(adopted.keeperId).toBe('b')
   expect(adopted.state.players.a.hand).toEqual(start.state.players.a.hand)
+  // KEEPER_STATE (the handover message above) carries GameState alone, so a
+  // successor adopting through it has no log to be given — `log` defaults to
+  // empty rather than being required.
+  expect(adopted.log).toEqual([])
+})
+
+// The other caller of `adoptSession`: a host restoring its own match after a
+// reload (`useLobby.ts`'s `restoreHost`) has the match's own log in hand —
+// read back from storage — and this is what lets it hand it through instead
+// of starting the successor's fresh-log default above.
+it('adopts the log it is given instead, for a host restoring its own match', () => {
+  const start = session()
+  const adopted = adoptSession({
+    state: start.state,
+    gameId: 'g1',
+    keeperId: 'a',
+    engine: createFakeEngine(),
+    seats: start.seats,
+    log: start.log,
+  })
+
+  expect(adopted.log).toEqual(start.log)
 })

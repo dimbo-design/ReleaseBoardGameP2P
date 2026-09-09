@@ -372,12 +372,21 @@ export function handover(session: Session, toPlayerId: PlayerId): SessionResult 
 }
 
 // The successor's side of a handover: it now holds the state it was given.
+// Also the host-reload restore's entry point (`useLobby.ts`'s `restoreHost`),
+// which is why `log` is accepted here rather than always starting fresh: that
+// caller has the match's own log in hand (read back from storage) and passes
+// it through.
 export function adoptSession(args: {
   state: GameState
   gameId: string
   keeperId: PlayerId
   engine: Engine
   seats: Seat[]
+  // Omitted by the handover path above: KEEPER_STATE carries GameState alone,
+  // not the log the predecessor had accumulated, and that message has no
+  // production receiver today — nothing currently adopts a session through it.
+  // Should one arrive, it would start logless, same as this default.
+  log?: Event[]
 }): Session {
   return {
     gameId: args.gameId,
@@ -385,11 +394,7 @@ export function adoptSession(args: {
     engine: args.engine,
     state: args.state,
     seats: args.seats,
-    // KEEPER_STATE (handover, above) carries GameState alone, not the log the
-    // predecessor had accumulated — so the successor starts a fresh one. A gap
-    // for a later task: today a handover mid-match loses history for anyone
-    // who rejoins the new keeper afterward.
-    log: [],
+    log: args.log ?? [],
   }
 }
 

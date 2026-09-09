@@ -36,7 +36,15 @@ it('mints a client id once and returns the same one thereafter', () => {
 it('keeps its records out of localStorage, so a second tab is a second peer', () => {
   writeSession(session())
   getClientId()
-  writeKeeper({ gameId: 'g1', keeperId: 'p1', state: {}, seats: [], lobbySeats: [], savedAt: 0 })
+  writeKeeper({
+    gameId: 'g1',
+    keeperId: 'p1',
+    state: {},
+    seats: [],
+    lobbySeats: [],
+    log: [],
+    savedAt: 0,
+  })
 
   // The record is in the tab's own store...
   expect(sessionStorage.getItem('release:session')).not.toBeNull()
@@ -66,10 +74,27 @@ it('discards a keeper snapshot past the TTL', () => {
     state: { a: 1 },
     seats: [],
     lobbySeats: [],
+    log: [],
     savedAt: 0,
   })
   expect(readKeeper(RESTORE_TTL_MS - 1)).not.toBeNull()
   expect(readKeeper(RESTORE_TTL_MS + 1)).toBeNull()
+})
+
+// A host reload restores the position AND how the match got there — the log is
+// what lets a rejoining board render its move history rather than starting
+// blank at whatever state the keeper happened to be in.
+it('restores the match log along with the state', () => {
+  writeKeeper({
+    gameId: 'g1',
+    keeperId: 'p1',
+    state: {},
+    seats: [],
+    lobbySeats: [],
+    log: [{ id: 1 }, { id: 2 }],
+    savedAt: 1_000,
+  })
+  expect(readKeeper(1_000)?.log).toEqual([{ id: 1 }, { id: 2 }])
 })
 
 it('returns null rather than throwing on corrupt JSON', () => {
