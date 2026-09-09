@@ -590,6 +590,40 @@ it('still animates what arrives after the restored mark', async () => {
   expect(planned.calls.at(-1)?.[0]).toEqual([later])
 })
 
+// ===== fix round 1 (#136): a LIVE resync — no reload, `enabled` already
+// `true` from the first render — where `restoredThrough` itself climbs on a
+// LATER render, alongside the very batch it now covers. That is what a
+// rejoin resend looks like from inside a board that never unmounted:
+// `useGame.ts`'s `restoredNow` (Task 15) moves the mark forward as the
+// projection catches up, while the board's `enabled` was already `true`
+// before the peer dropped. `useRef(restoredThrough ?? 0)` only reads its
+// argument once, so before this fix `seen.current` stays pinned to the mark's
+// FIRST value and the whole resync batch reads as `> seen.current` — planned
+// as choreography, which is the rejoining peer watching every event it
+// missed replay. Both tests above hold `restoredThrough` fixed across their
+// rerender, so neither of them could reach this: this is the case they leave
+// open.
+it('advances the watermark forward when a live resync raises restoredThrough on a later render', async () => {
+  motion.reduced = false
+  planned.calls = []
+  const resync1 = { ...discardEvent, id: discardEvent.id + 1 } as Event
+  const resync2 = { ...discardEvent, id: discardEvent.id + 2 } as Event
+  const { rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} restoredThrough={discardEvent.id} />,
+  )
+  await flush()
+  rerender(
+    <Probe
+      live={afterDiscard}
+      events={[resync1, resync2]}
+      anchors={stub}
+      restoredThrough={resync2.id}
+    />,
+  )
+  await flush()
+  expect(planned.calls).toEqual([])
+})
+
 // ===== the sweep's alarm (#102) — the wire between planBeats' `gather` flag
 // and the queue's own `Beat.alarm`, driven end to end rather than mocked at
 // either end (that is exactly the hole `boardAlarm.test.tsx`'s mocked-`useBeats`

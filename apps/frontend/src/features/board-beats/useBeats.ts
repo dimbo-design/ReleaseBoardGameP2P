@@ -126,7 +126,9 @@ export function useBeats(args: {
   intro?: IntroBeat | null
   // The highest event id already reflected in the projection the board first
   // rendered — a restore, or a resend to a seat that rejoined (`Game.restoredThrough`,
-  // Task 15). Seeds the watermark below so none of it is re-planned as a beat.
+  // Task 15). Seeds the watermark below, and keeps raising it whenever a later
+  // render finds it has climbed further (a live resync) — see `seen` for why
+  // seeding it once is not enough.
   restoredThrough?: number
   // The staging → beat handoff (#100): the page's staged play, read once at
   // the start of `attackPlaced`/`releasePlaced` and cleared through its own
@@ -206,10 +208,23 @@ export function useBeats(args: {
   // Everything at or below `restoredThrough` was already reflected in the
   // projection this board first rendered — a restore, or a resend to a seat
   // that rejoined. The `!enabled` branch below does the same job for the
-  // opening; this does it for a board that arrives mid-match, where
-  // `isOpening` is false and beats are therefore ENABLED from the first frame.
-  // `useRef` initialises ONCE, which is exactly right: `restoredThrough` is a
-  // first-render fact and must never move the watermark backwards later.
+  // opening; this seeds the same watermark for a board that arrives
+  // mid-match, where `isOpening` is false and beats are therefore ENABLED
+  // from the first frame.
+  //
+  // MONOTONIC FORWARD, not "once": `restoredThrough` is not only a
+  // first-render fact. A peer that stays mounted through a resync — no
+  // reload, `enabled` already `true` — sees it advance on a LATER render, as
+  // the projection it was handed catches up (`restoredNow` in `useGame.ts`,
+  // Task 15). A `useRef` that only reads this at construction cannot see
+  // that: `seen` would freeze at whatever `restoredThrough` was on mount, the
+  // whole resync batch would read as `> seen.current`, and it would replay as
+  // choreography — the exact failure this field exists to prevent, just
+  // reached from a rejoin instead of a reload. So the batch effect below
+  // re-checks `restoredThrough` on every pass, BEFORE it filters `events`,
+  // and raises `seen.current` to it whenever it is ahead. Never the other
+  // direction: forward only, so a mark can only climb, and a point the
+  // projection has already restored is never treated as fresh again.
   const seen = useRef(restoredThrough ?? 0)
   const queue = useRef<Beat[]>([])
   const draining = useRef(false)
@@ -585,6 +600,16 @@ export function useBeats(args: {
   // this a queue rather than a one-slot buffer.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `running` re-arms the effect on drain; the body reads `runningRef` because it must also see a beat this same pass started
   useLayoutEffect(() => {
+    // MONOTONIC FORWARD, ahead of everything below: a live resync raises
+    // `restoredThrough` on a pass where `enabled` is already `true`, so
+    // neither branch further down is a safe place to catch it — the
+    // `!enabled` branch never runs on that pass, and the running-beat guard
+    // can return before the fresh-events filter is even reached. Doing it
+    // here, first, guarantees the filter a few lines down always reads a
+    // watermark that already accounts for whatever the projection has
+    // restored as of THIS render.
+    if ((restoredThrough ?? 0) > seen.current) seen.current = restoredThrough ?? 0
+
     // FIRST, before the running-beat guard: nothing here is to be animated, so
     // the watermark keeps pace with the feed and `settled` with the projection.
     // Order matters — the opening is an exclusive beat that occupies the queue
@@ -624,7 +649,7 @@ export function useBeats(args: {
       queue.current.push(beat)
     }
     void drain()
-  }, [events, live, enabled, reduced, beatOf, drain, running])
+  }, [events, live, enabled, reduced, beatOf, drain, running, restoredThrough])
 
   return {
     // The shadow is what the running beat has published, or its own base while
