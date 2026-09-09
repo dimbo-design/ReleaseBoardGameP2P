@@ -13,6 +13,7 @@ import {
 export interface Sync {
   view: PlayerView
   events: Event[]
+  resync?: boolean
 }
 
 // The seam. `useGame` and the page hold this and nothing else, so they cannot

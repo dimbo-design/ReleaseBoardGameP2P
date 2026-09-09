@@ -40,12 +40,18 @@ export interface SessionResult {
   outgoing: Outgoing[]
 }
 
-export function syncMessage(session: Session, playerId: PlayerId, events: Event[]): Message {
+export function syncMessage(
+  session: Session,
+  playerId: PlayerId,
+  events: Event[],
+  resync = false,
+): Message {
   return {
     type: 'SYNC',
     payload: {
       view: session.engine.project(session.state, playerId),
       events: forViewer(events, playerId),
+      ...(resync ? { resync: true } : {}),
     },
   }
 }
@@ -189,9 +195,14 @@ export function rebind(
     }
   }
 
-  // Catch-up is one projection, not a replay: a peer's state was never a fold
-  // over deltas it might have missed.
-  return { session: next, outgoing: [{ to: peerId, message: syncMessage(next, playerId, []) }] }
+  // Catch-up is a projection PLUS the whole log this seat is entitled to,
+  // marked as a resend: a peer's state was never a fold over deltas it might
+  // have missed, and the rejoining board must fold this straight into history
+  // without animating it, rather than replay the match as choreography.
+  return {
+    session: next,
+    outgoing: [{ to: peerId, message: syncMessage(next, playerId, next.log, true) }],
+  }
 }
 
 // The engine has no concept of a player who left, so a pending owed by one

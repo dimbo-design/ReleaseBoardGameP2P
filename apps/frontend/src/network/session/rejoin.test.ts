@@ -1,6 +1,8 @@
+import type { Event } from '@release/engine'
 import { createFakeEngine, FAKE_DECK, FAKE_EVENTS } from '@release/engine/fake'
+import { forViewer } from './audience'
 import { createMemoryNetwork } from './memoryNetwork'
-import { createSession, type SessionRef } from './referee'
+import { applyIntent, createSession, disconnect, rebind, type SessionRef } from './referee'
 import { attachKeeper } from './remoteLink'
 import { restoreSeats } from './restore'
 
@@ -98,4 +100,31 @@ it('a restored keeper resumes the same match a snapshot described', () => {
   keeper.peerReturned('p2', 'guest-returned')
   expect(restoredRef.current.seats.find((s) => s.playerId === 'p2')?.peerId).toBe('guest-returned')
   keeper.close()
+})
+
+it('hands a rejoining seat the whole log it is entitled to, marked as a resend', () => {
+  const { ref } = liveSession()
+  ref.current = applyIntent(ref.current, 'host', { type: 'DRAW', pile: 0 }, 500).session
+  // The seat has to be free before `rebind` will let it be reclaimed — it
+  // refuses to move a seat that is still connected (see the guard's own
+  // comment in referee.ts).
+  ref.current = disconnect(ref.current, 'guest', 900).session
+  // rebind(session, playerId, peerId, now) — a Session, and it needs a clock.
+  const { outgoing } = rebind(ref.current, 'p2', 'guest-returned', 1_000)
+  const sync = outgoing.find((o) => o.message.type === 'SYNC')
+  const payload = sync?.message.type === 'SYNC' ? sync.message.payload : undefined
+  expect(payload).toMatchObject({ resync: true })
+  // Exactly the seat's own slice — forViewer does the filtering, so a resend
+  // cannot hand a peer an event it was never entitled to.
+  expect(payload?.events.map((e: Event) => e.id)).toEqual(
+    forViewer(ref.current.log, 'p2').map((e) => e.id),
+  )
+})
+
+it('does not mark an ordinary sync as a resend', () => {
+  const { ref } = liveSession()
+  const { outgoing } = applyIntent(ref.current, 'host', { type: 'DRAW', pile: 0 }, 500)
+  const sync = outgoing.find((o) => o.message.type === 'SYNC')
+  const payload = sync?.message.type === 'SYNC' ? sync.message.payload : undefined
+  expect(payload?.resync).toBeFalsy()
 })

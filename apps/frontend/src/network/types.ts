@@ -102,7 +102,11 @@ export type Message =
   | { type: 'INTRO_READY'; payload: { gameId: string } }
   | { type: 'INTENT'; payload: { intent: Intent } }
   // Private, per recipient — one projection plus that viewer's events. Never broadcast.
-  | { type: 'SYNC'; payload: { view: PlayerView; events: Event[] } }
+  // `resync` marks a REPLAY of what this seat already ought to know — the full
+  // visible log, handed to a peer that rejoined. It is folded into history and
+  // the discard heap, and it is NOT animated: a reconnect drops straight to the
+  // live board, exactly as `isOpening` already says it must.
+  | { type: 'SYNC'; payload: { view: PlayerView; events: Event[]; resync?: boolean } }
   // The only message carrying GameState, and only to a handover successor.
   | { type: 'KEEPER_STATE'; payload: { state: GameState } }
   // null is the death notice: the keeper is gone and the game cannot continue.
