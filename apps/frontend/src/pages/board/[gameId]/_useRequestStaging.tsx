@@ -109,13 +109,15 @@ export function useRequestStaging(args: {
   return {
     band: (
       <div className={styles.requestBand} data-testid="board-request-band">
-        <CardCatalog
-          cards={HOLDABLE}
-          open={!confirmed}
-          selected={named}
-          chosen={confirmed ? named : null}
-          onPick={(c) => setNamed(c.id)}
-        />
+        <div className={styles.catalog}>
+          <CardCatalog
+            cards={HOLDABLE}
+            open={!confirmed}
+            selected={named}
+            chosen={confirmed ? named : null}
+            onPick={(c) => setNamed(c.id)}
+          />
+        </div>
         <ConfirmAction
           open={!confirmed}
           label={copy.confirm}

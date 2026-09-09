@@ -1,4 +1,4 @@
-// Answering an Error 503 (#102). Active only while the `neutralize503` pending
+// Answering an Error 503 or AI Crush. Active only while that pending
 // is ours — its siblings `_useBoardStaging.ts` (the turn's plays) and
 // `_useDefenseStaging.tsx` (a window's) never run at the same time: a pending
 // suspends normal play, and the engine returns [] from `playableFor` while one
@@ -57,8 +57,11 @@ export type NeutralizeSlotKey = 'frontend' | 'backend' | 'database' | 'monitorin
 // Derived from the kit's own unions rather than re-typed: the method set lives
 // in `@release/ui`'s `intents.ts` and is not on its barrel, and a local copy of
 // it would drift the first time a method is added.
-type NeutralizeMethodId = Extract<TablePending, { kind: 'neutralize503' }>['methods'][number]
-type NeutralizeChoice = Extract<TableChoice, { kind: 'neutralize503' }>
+type NeutralizeMethodId = Extract<
+  TablePending,
+  { kind: 'neutralize503' | 'crush' }
+>['methods'][number]
+type NeutralizeChoice = Extract<TableChoice, { kind: 'neutralize503' | 'crush' }>
 
 /** Where the answer came from, so a rejection knows the way back. The fan for
  *  a Debugger (by uid AND by the index it sat at), its own zone slot for a
@@ -157,7 +160,8 @@ export function useNeutralizeStaging({
   // the pending owed to US — read once, so every reader downstream agrees on
   // the same instant of it.
   const pending =
-    state.pending?.kind === 'neutralize503' && state.pending.player === state.selfId
+    (state.pending?.kind === 'neutralize503' || state.pending?.kind === 'crush') &&
+    state.pending.player === state.selfId
       ? state.pending
       : null
   const active = enabled && pending != null
@@ -292,12 +296,12 @@ export function useNeutralizeStaging({
     // the drag ending (`liftedAt` reads `pull.dragging`)
     onCancel: () => {},
     onDrop: (key, at) => {
-      if (key === 'monitoring') return // never dragged; it answers on a press
+      if (key === 'monitoring' || !pending) return // Monitoring answers on a press
       const uid = state.you.releaseUid?.[key]
       const card = state.you.release[key]
       if (!uid || !card) return
       commit(
-        { kind: 'neutralize503', method: 'sacrifice', card: uid },
+        { kind: pending.kind, method: 'sacrifice', card: uid },
         card,
         { kind: 'zone', slot: key },
         at.rect,
@@ -360,7 +364,7 @@ export function useNeutralizeStaging({
   // GESTURE — the Debugger, pulled out of the fan and dropped on the table.
   const onHandPlay = useCallback(
     (uid: string, drop: HandPlayDrop): boolean => {
-      if (!active || staged || answered || !methods.includes('debugger')) return false
+      if (!active || !pending || staged || answered || !methods.includes('debugger')) return false
       const index = state.you.hand.findIndex((h) => h.uid === uid)
       const item = state.you.hand[index]
       if (item?.card.id !== 'protection-debugger') return false
@@ -368,14 +372,14 @@ export function useNeutralizeStaging({
       // back — dropping it where it came from reads as changing your mind.
       if (!onTable(drop.x, drop.y)) return false
       commit(
-        { kind: 'neutralize503', method: 'debugger' },
+        { kind: pending.kind, method: 'debugger' },
         item.card,
         { kind: 'hand', uid, index },
         drop.rect,
       )
       return true
     },
-    [active, staged, answered, methods, state.you.hand, onTable, commit],
+    [active, pending, staged, answered, methods, state.you.hand, onTable, commit],
   )
 
   // GESTURE — the zone. A sacrifice is dragged out of its slot; Monitoring is
@@ -387,7 +391,7 @@ export function useNeutralizeStaging({
       // `useZonePull`'s own guard — so this check is what stops a right- or
       // middle-click from spending the player's only answer.
       if (e.button !== 0) return
-      if (!grabbable(key)) return
+      if (!pending || !grabbable(key)) return
       const card = state.you.release[key]
       if (!card) return
       if (key === 'monitoring') {
@@ -398,13 +402,13 @@ export function useNeutralizeStaging({
         // second event to wait for.
         setAnswered(true)
         flight.mark(eventsRef.current)
-        actions?.onResolve?.({ kind: 'neutralize503', method: 'monitoring' })
+        actions?.onResolve?.({ kind: pending.kind, method: 'monitoring' })
         return
       }
       pull.render(<Card card={card} interactive={false} width="100%" />)
       pull.begin(key, e.currentTarget, e)
     },
-    [grabbable, state.you.release, actions, flight.mark, pull.render, pull.begin],
+    [pending, grabbable, state.you.release, actions, flight.mark, pull.render, pull.begin],
   )
 
   // the engine said no: the answer goes home and the offer opens again. Scoped
@@ -417,10 +421,10 @@ export function useNeutralizeStaging({
     const rejectedOurs = flight.since(events).some((e) => {
       if (e.type !== 'rejected') return false
       const a = e.action
-      return a.type === 'RESOLVE' && a.choice.kind === 'neutralize503'
+      return a.type === 'RESOLVE' && a.choice.kind === pending?.kind
     })
     if (rejectedOurs) goHome()
-  }, [answered, events, flight.since, goHome])
+  }, [answered, pending?.kind, events, flight.since, goHome])
 
   // the pending is gone: the answer was taken, and staging's job is done. NOT
   // while our own carrier is still delivering the card (`landed`) — the same

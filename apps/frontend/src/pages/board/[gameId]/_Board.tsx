@@ -388,7 +388,11 @@ export default function Board({
   // `pendingDefend` above. `staging.staged` does not gate it: an answer to a
   // 503 goes to the COVER slot, never over the alarm's own.
   const pendingAlarm = state.pending?.kind === 'neutralize503' ? state.pending : null
-  const alarmMine = pendingAlarm?.player === state.selfId
+  const pendingNeutralize =
+    state.pending?.kind === 'neutralize503' || state.pending?.kind === 'crush'
+      ? state.pending
+      : null
+  const alarmMine = pendingNeutralize?.player === state.selfId
   // The AI card a prompt belongs to — `source` on `crush`, `neutralize503`,
   // `handLimit` and `pickFromDiscard`, and only those four: the rest of
   // `TablePending`'s union does not declare the field at all, so the `in`
@@ -411,15 +415,15 @@ export default function Board({
   // raises no `pending` at all (the engine eliminates in the same batch as
   // the reveal), so without this the hand would fly away with nothing on
   // screen explaining it.
-  const glowStrong = (pendingAlarm != null && alarmMine) || beats.alarm
-  // an Error 503 owed to US means the neutralize hook owns the fan and the
+  const glowStrong = (pendingNeutralize != null && alarmMine) || beats.alarm
+  // An Error 503 or AI Crush owed to US means the neutralize hook owns the fan and the
   // zone — the third staging hook, and the third mutually exclusive one: the
   // engine suspends normal play while a pending is open, and a pending has one
   // kind, so `answering` and this can never both be true. Same derived-constant
   // discipline as `answering` above: read once, picked by at every call site.
-  const alarmMineOpen = pendingAlarm != null && alarmMine
+  const alarmMineOpen = pendingNeutralize != null && alarmMine
 
-  // the 503 gesture (#102, Task 9): the card that performs the answer is the
+  // The shared 503 / AI Crush gesture: the card that performs the answer is the
   // card you touch — a Debugger pulled out of the fan, a release dragged out of
   // your own zone, or the standing Monitoring pressed where it is.
   const neutralizing = useNeutralizeStaging({
@@ -1669,7 +1673,7 @@ export default function Board({
             paused={paused}
             onDraw={actions?.onDraw ? () => dockKey(actions.onDraw) : undefined}
             onPush={actions?.onPush ? () => dockKey(actions.onPush) : undefined}
-            onPass={actions?.onPass}
+            onPass={answering ? (unanswered ? declineAttack : undefined) : actions?.onPass}
           />
         </div>
         {/* you already passed on the open window — TurnDock has no notion of
@@ -1703,6 +1707,7 @@ export default function Board({
         // the gesture IS the answer, and the panel covered the very cards it
         // was asking about — same reason, same fix as `defend` above (#102)
         state.pending.kind !== 'neutralize503' &&
+        state.pending.kind !== 'crush' &&
         // the band on the table asks this one, for the same reason the three
         // above are asked by the cards themselves (#105)
         state.pending.kind !== 'requestCard' &&

@@ -8,7 +8,7 @@
 // panel at all — the copies differ only by uid, so there is nothing to choose.
 
 import type { TablePending } from '@release/ui'
-import { render } from '@testing-library/react'
+import { fireEvent, render, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { BoardState } from '~/entities/game/board'
 import Board from '../_Board'
@@ -120,4 +120,21 @@ it('still hands the card over under reduced motion', () => {
   const props = withPending({ kind: 'giveCard', player: 'you', requested: held.card.id })
   render(<Board {...props} actions={{ onResolve }} />)
   expect(onResolve).toHaveBeenCalledTimes(1)
+})
+
+it('names a catalogue card only after confirmation', () => {
+  const onResolve = vi.fn()
+  const props = withPending({ kind: 'requestCard', player: 'you', target: 'p2' })
+  const { getByTestId } = render(<Board {...props} actions={{ onResolve }} />)
+  const band = within(getByTestId('board-request-band'))
+  const confirm = band.getByRole('button', { name: /confirm/i }) as HTMLButtonElement
+  expect(confirm.disabled).toBe(true)
+  fireEvent.click(band.getByRole('button', { name: /Support Code Review/i }))
+  expect(onResolve).not.toHaveBeenCalled()
+  expect(confirm.disabled).toBe(false)
+  fireEvent.click(confirm)
+  expect(onResolve).toHaveBeenCalledExactlyOnceWith({
+    kind: 'requestCard',
+    card: 'support-code-review',
+  })
 })

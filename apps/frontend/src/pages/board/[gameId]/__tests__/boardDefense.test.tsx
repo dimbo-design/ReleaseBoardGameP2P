@@ -276,6 +276,29 @@ it('lets the attack through from the board’s own decline', () => {
   expect(onResolve).toHaveBeenCalledWith({ kind: 'defend', card: null })
 })
 
+it('lets the attack through from the dock Pass key', async () => {
+  const onResolve = vi.fn()
+  const onPass = vi.fn()
+  render(defenceBoard({ options: ['defense-hotfix#0'] }, { onResolve, onPass }))
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 350))
+  })
+  fireEvent.click(screen.getByTestId('dock-key'))
+  expect(onResolve).toHaveBeenCalledWith({ kind: 'defend', card: null })
+  expect(onPass).not.toHaveBeenCalled()
+})
+
+it('does not pass after a defense card has already answered', async () => {
+  const onResolve = vi.fn()
+  const onPass = vi.fn()
+  render(defenceBoard({ options: ['defense-hotfix#0'] }, { onResolve, onPass }))
+  await pullCardFromFan('defense-hotfix#0')
+  onResolve.mockClear()
+  fireEvent.click(screen.getByTestId('dock-key'))
+  expect(onResolve).not.toHaveBeenCalled()
+  expect(onPass).not.toHaveBeenCalled()
+})
+
 // Fix B (#101), Defect 3 — the ask sits with the cards. With no panel and no
 // line of copy, an attack stands at the centre with nothing saying what is
 // owed for it.
