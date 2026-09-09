@@ -32,6 +32,13 @@ const view = (id = 'p1'): PlayerView =>
 const dealt = (player: string): Event => ({ id: 1, type: 'dealt', player, count: 5 }) as Event
 const drawn = (player: string): Event =>
   ({ id: 3, type: 'drawn', player, pile: 0, deckSize: 88 }) as Event
+const rejected = (): Event =>
+  ({
+    id: 7,
+    type: 'rejected',
+    action: { type: 'PLAY', player: 'p1', at: 0 },
+    reason: 'nope',
+  }) as Event
 
 // Reads the feed from a LAYOUT effect, exactly as the board's deal intro does.
 // That timing is the whole point: a passive effect would see a settled feed and
@@ -214,4 +221,26 @@ it('does not persist the outgoing game’s events under the new game’s id', ()
   rerender(<Probe seen={[]} />)
 
   expect(readLog('leak-new', Date.now())).toBeNull()
+})
+
+// I4 (Important, whole-branch review #136): a rejection's id is "neither
+// unique nor monotonic, and it must never enter move history"
+// (network/session/audience.ts) — but `applyIntent`'s rejection path answers
+// with a SYNC carrying `rejectionsIn(events)`, and this hook used to merge
+// `sync.events` into the feed with no type filter at all, so it was written
+// to `release:log` and would come back as a history row on reload.
+it('never lets a rejection into the feed or the persisted log', () => {
+  const seen: { events: Event[] }[] = []
+  session = { gameLink: null, gameSync: null, gameId: 'g1' }
+  const { rerender } = render(<Probe seen={seen} />)
+
+  session = {
+    gameLink: null,
+    gameSync: { view: view(), events: [dealt('p1'), rejected()] },
+    gameId: 'g1',
+  }
+  rerender(<Probe seen={seen} />)
+
+  expect(seen.at(-1)?.events.map((e) => e.type)).toEqual(['dealt'])
+  expect(readLog('g1', Date.now())?.map((e) => (e as Event).type)).toEqual(['dealt'])
 })

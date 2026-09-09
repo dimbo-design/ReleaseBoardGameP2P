@@ -83,10 +83,18 @@ export function useGame(): Game {
     if (!sync || sync === seenSync.current) return
     seenSync.current = sync
     if (sync.events.length === 0) return
+    // A rejection's id is "neither unique nor monotonic, and it must never
+    // enter move history" (network/session/audience.ts) — `applyIntent`'s
+    // rejection path answers with exactly one of these in a SYNC, addressed
+    // only to whoever submitted the rejected intent, and it belongs nowhere
+    // near the feed this effect folds into `events` (and from there,
+    // `writeLog`).
+    const syncEvents = sync.events.filter((e) => e.type !== 'rejected')
+    if (syncEvents.length === 0) return
     // A resend is what this peer already ought to know. It belongs in the feed
     // and in the heap, and it belongs nowhere near the beat queue.
-    if (sync.resync) restoredThrough.current = sync.events.at(-1)?.id ?? restoredThrough.current
-    setEvents((prev) => mergeEvents(prev, sync.events))
+    if (sync.resync) restoredThrough.current = syncEvents.at(-1)?.id ?? restoredThrough.current
+    setEvents((prev) => mergeEvents(prev, syncEvents))
   }, [sync])
 
   useEffect(() => {
@@ -114,7 +122,12 @@ export function useGame(): Game {
   //
   // No double-count: once the effect has run, `seenSync` holds this sync and its
   // events are already in `events`, so nothing is pending.
-  const pending = sync && sync !== seenSync.current ? sync.events : []
+  //
+  // Filtered the same way the effect above filters `sync.events`: a rejection
+  // must never enter the feed (network/session/audience.ts), not even for the
+  // single render before the effect has folded this sync in.
+  const pending =
+    sync && sync !== seenSync.current ? sync.events.filter((e) => e.type !== 'rejected') : []
   // `events` is likewise cleared by an effect, so for one commit after a new game
   // starts it still holds the last one's feed. Read as empty here rather than
   // handing the new game a history it did not have — the seat ids repeat between
@@ -126,11 +139,11 @@ export function useGame(): Game {
   // only advances inside that effect, which runs strictly after this render's
   // layout effects, so reading just `restoredThrough.current` here would lag
   // the very feed it is supposed to cover. Mirror the effect's own rule
-  // (`sync.events.at(-1)?.id ?? restoredThrough.current`) directly in the
+  // (`events.at(-1)?.id ?? restoredThrough.current`) directly in the
   // return expression, the same way `pending`/`carried` mirror it for `events`.
   const restoredNow =
     pending.length > 0 && sync?.resync
-      ? (sync.events.at(-1)?.id ?? restoredThrough.current)
+      ? (pending.at(-1)?.id ?? restoredThrough.current)
       : restoredThrough.current
 
   return {
