@@ -216,9 +216,13 @@ function toHistoryEntry(
   // Falls back to the id only when the seat is not in this projection — better a
   // raw id than a silently missing target.
   const target = targetId ? { player: nameOf.get(targetId) ?? targetId } : undefined
+  const actorId = actorOf(e)
+  // Same fallback `target` uses above: a name when the projection has one, the
+  // raw id rather than a silently missing `who` when it does not.
+  const who = actorId ? (nameOf.get(actorId) ?? actorId) : ''
   const base: HistoryEntry = {
     id: e.id,
-    who: actorOf(e) ?? '',
+    who,
     kind: labels[e.type],
     card: cardTextOf(e),
     cat: catOf(cardIdOf(e)),
@@ -229,6 +233,17 @@ function toHistoryEntry(
     system: e.type === 'eliminated' || e.type === 'deckReshuffled' || e.type === 'gameOver',
     // An open draw. A closed one carries no card, and stays a plain row.
     draw: e.type === 'drawn' && e.card !== undefined,
+    // `MoveHistory`'s system branch reads `e.text ?? `${e.who} ${copy.eliminated}``
+    // — a fallback built specifically for `eliminated`. `gameOver` and
+    // `deckReshuffled` are system rows too, but that fallback reads them wrong:
+    // `who` for a `gameOver` is the WINNER (`actorOf`'s `e.winner`), so the
+    // fallback would tell the player who just won that they are out; `who` for
+    // a `deckReshuffled` is '' (the table did it, not a seat), so the fallback
+    // would read as an unnamed elimination. Both already have a real label in
+    // `labels[e.type]` ("game over", "deck reshuffled") — this is the only
+    // place that label was going. `eliminated` itself is deliberately left
+    // without `text`, so it keeps using the fallback `copy.eliminated` exists for.
+    text: e.type === 'gameOver' || e.type === 'deckReshuffled' ? labels[e.type] : undefined,
   }
 
   if (e.type === 'defended') {

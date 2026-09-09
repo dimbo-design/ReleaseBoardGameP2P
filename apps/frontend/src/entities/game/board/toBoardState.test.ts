@@ -51,6 +51,8 @@ const labels = Object.fromEntries([
   ['placed', 'Played'],
   ['eliminated', 'Eliminated'],
   ['discarded', 'Discarded'],
+  ['gameOver', 'Game over'],
+  ['deckReshuffled', 'Deck reshuffled'],
 ]) as HistoryLabels
 
 describe('toBoardState', () => {
@@ -418,16 +420,31 @@ describe('toBoardState', () => {
     expect(toBoardState(view, log, labels).history[0].target?.player).toBe('bot')
   })
 
+  // Was previously written against `to: 'you'`, asserting `'you'` — which is
+  // both the fixture's `self.id` AND its `self.name`, so the assertion could
+  // not fail even if `nameOf` were removed entirely. Uses p2/bot, like its two
+  // siblings above, so the name and the id actually differ.
   it('names the player a card was handed to', () => {
     const log: Event[] = [
-      { id: 1, type: 'handTransfer', from: 'p2', to: 'you', card: 'attack-bug' },
+      { id: 1, type: 'handTransfer', from: 'you', to: 'p2', card: 'attack-bug' },
     ]
-    expect(toBoardState(view, log, labels).history[0].target?.player).toBe('you')
+    expect(toBoardState(view, log, labels).history[0].target?.player).toBe('bot')
   })
 
   it('leaves an untargeted event without a target', () => {
     const log: Event[] = [{ id: 1, type: 'passed', player: 'you' }]
     expect(toBoardState(view, log, labels).history[0].target).toBeUndefined()
+  })
+
+  // I3 (Important, whole-branch review #136): `who` used to be the raw
+  // `actorOf(e)` id with no pass through `nameOf` — the same map `target`
+  // already resolves through — so a row could read "attack ⚔ bot … p2"
+  // instead of "attack ⚔ bot … Bot" (the mock's own convention).
+  it('names who did it, not just the raw seat id', () => {
+    const log: Event[] = [
+      { id: 1, type: 'attacked', attacker: 'p2', card: 'attack-bug', sudo: false, target: 'you' },
+    ]
+    expect(toBoardState(view, log, labels).history[0].who).toBe('bot')
   })
 
   it('names the attacker a returned card went back to', () => {
@@ -512,6 +529,32 @@ describe('toBoardState', () => {
       { id: 3, type: 'gameOver', winner: 'you', condition: 'release' },
     ] as Event[]
     expect(toBoardState(view, log, labels).history.map((h) => h.system)).toEqual([true, true, true])
+  })
+
+  // C2 (Critical, whole-branch review #136): the kit's system row reads
+  // `e.text ?? `${e.who} ${copy.eliminated}`` — so before this fix a `gameOver`
+  // row (whose `who` is the WINNER, via `actorOf`) rendered as "<winner> is
+  // out", and a `deckReshuffled` row (whose `who` is '', the table did it)
+  // rendered as " is out". `labels[e.type]` was computed into `kind` and then
+  // thrown away, because the system branch never reads `kind`.
+  it('gives a game-over row its own text instead of "is out"', () => {
+    const log: Event[] = [
+      { id: 1, type: 'gameOver', winner: 'you', condition: 'release' },
+    ] as Event[]
+    expect(toBoardState(view, log, labels).history[0].text).toBe(labels.gameOver)
+  })
+
+  it('gives a deck-reshuffle row its own text instead of an unnamed "is out"', () => {
+    const log: Event[] = [{ id: 1, type: 'deckReshuffled', cards: 12 }] as Event[]
+    expect(toBoardState(view, log, labels).history[0].text).toBe(labels.deckReshuffled)
+  })
+
+  // Left unset on purpose: MoveHistory's fallback (`${who} ${copy.eliminated}`)
+  // is what renders the elimination line, and `copy.eliminated` exists
+  // specifically to be that suffix.
+  it('leaves an elimination row without its own text', () => {
+    const log: Event[] = [{ id: 1, type: 'eliminated', player: 'p2' }]
+    expect(toBoardState(view, log, labels).history[0].text).toBeUndefined()
   })
 
   it('does not mark an ordinary move as a system row', () => {
