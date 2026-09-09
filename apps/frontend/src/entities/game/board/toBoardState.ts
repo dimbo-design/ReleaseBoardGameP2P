@@ -124,6 +124,8 @@ function actorOf(e: Event): string | undefined {
 // without re-deriving which field on `e` holds it.
 function cardIdOf(e: Event): string | undefined {
   switch (e.type) {
+    case 'upgradeThrown':
+    case 'upgradeTaken':
     case 'released':
     case 'placed':
     case 'discarded':
@@ -266,6 +268,8 @@ function toHistoryEntry(
   switch (e.type) {
     case 'dealt':
     case 'drawn':
+    case 'upgradeThrown':
+    case 'upgradeTaken':
     case 'released':
     case 'placed':
     case 'discarded':
