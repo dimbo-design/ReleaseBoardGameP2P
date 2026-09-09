@@ -17,6 +17,10 @@ export interface Session {
   engine: Engine
   state: GameState
   seats: Seat[]
+  // Every event this match has emitted, in id order. The referee used to
+  // reduce, fan out and forget — which is precisely why a peer that missed a
+  // batch could never be told what was in it.
+  log: Event[]
 }
 
 // The session is immutable and every entry point returns a new one, so the
@@ -36,12 +40,18 @@ export interface SessionResult {
   outgoing: Outgoing[]
 }
 
-export function syncMessage(session: Session, playerId: PlayerId, events: Event[]): Message {
+export function syncMessage(
+  session: Session,
+  playerId: PlayerId,
+  events: Event[],
+  resync = false,
+): Message {
   return {
     type: 'SYNC',
     payload: {
       view: session.engine.project(session.state, playerId),
       events: forViewer(events, playerId),
+      ...(resync ? { resync: true } : {}),
     },
   }
 }
@@ -74,6 +84,10 @@ export function createSession(args: {
     events: args.events,
   })
 
+  // Computed once and reused for both the log and the wire below, so the two
+  // can never disagree about what the deal was.
+  const dealt = args.engine.setupEvents(state)
+
   const session: Session = {
     gameId: args.gameId,
     keeperId: args.keeperId,
@@ -84,6 +98,10 @@ export function createSession(args: {
       peerId: p.peerId,
       absentSince: null,
     })),
+    // The deal is the first thing that happened in this game, so it is the
+    // first thing in the log too — a peer restoring the match needs it to draw
+    // its own hand.
+    log: dealt,
   }
 
   return {
@@ -99,7 +117,7 @@ export function createSession(args: {
       // The deal is the first thing that happened in this game, so it is the
       // first thing in the feed — the move history opened on a blank without it,
       // and the board's intro reads the deal from here.
-      ...syncAll(session, args.engine.setupEvents(state)),
+      ...syncAll(session, dealt),
     ],
   }
 }
@@ -169,17 +187,35 @@ export function rebind(
   if (turn.player === playerId && turn.deadline !== undefined && now >= turn.deadline) {
     const { state, events } = next.engine.reduce(next.state, { type: 'CLOCK_STARTED', at: now })
     if (state !== next.state) {
-      const restamped: Session = { ...next, state }
+      const restamped: Session = { ...next, state, log: [...next.log, ...events] }
       // The new clock is a state change every seat renders (the dock's ring
       // ticks on it), so it travels to everyone — the rejoiner's catch-up
-      // projection rides in the same fan-out.
-      return { session: restamped, outgoing: syncAll(restamped, events) }
+      // projection rides in the same fan-out. But `seats` was already rebound
+      // above, so the rejoiner is already among `syncAll`'s recipients: left
+      // alone, it would get that ordinary delta AND the marked resend below,
+      // two SYNCs where the resend contract promises exactly one. Excluding it
+      // here and appending its own marked, full-log resend keeps every other
+      // seat's ordinary unmarked delta while giving the rejoiner the one
+      // resync it is owed — built from `restamped.log`, which already carries
+      // this CLOCK_STARTED's own events, rather than `next.log`, which does not.
+      return {
+        session: restamped,
+        outgoing: [
+          ...syncAll(restamped, events).filter((o) => o.to !== peerId),
+          { to: peerId, message: syncMessage(restamped, playerId, restamped.log, true) },
+        ],
+      }
     }
   }
 
-  // Catch-up is one projection, not a replay: a peer's state was never a fold
-  // over deltas it might have missed.
-  return { session: next, outgoing: [{ to: peerId, message: syncMessage(next, playerId, []) }] }
+  // Catch-up is a projection PLUS the whole log this seat is entitled to,
+  // marked as a resend: a peer's state was never a fold over deltas it might
+  // have missed, and the rejoining board must fold this straight into history
+  // without animating it, rather than replay the match as choreography.
+  return {
+    session: next,
+    outgoing: [{ to: peerId, message: syncMessage(next, playerId, next.log, true) }],
+  }
 }
 
 // The engine has no concept of a player who left, so a pending owed by one
@@ -221,7 +257,7 @@ export function driveAbsent(session: Session, now: number): SessionResult {
 
     const { state, events } = session.engine.reduce(session.state, action)
     if (state !== session.state) {
-      const next: Session = { ...session, state }
+      const next: Session = { ...session, state, log: [...session.log, ...events] }
       return { session: next, outgoing: syncAll(next, events) }
     }
 
@@ -247,7 +283,11 @@ export function driveAbsent(session: Session, now: number): SessionResult {
         : { type: 'DRAW', player: seat.playerId, at: now }
       const retried = session.engine.reduce(session.state, fallback)
       if (retried.state !== session.state) {
-        const next: Session = { ...session, state: retried.state }
+        const next: Session = {
+          ...session,
+          state: retried.state,
+          log: [...session.log, ...retried.events],
+        }
         return { session: next, outgoing: syncAll(next, retried.events) }
       }
     }
@@ -323,7 +363,7 @@ export function applyIntent(
     return { session, outgoing: [{ to: fromPeerId, message }] }
   }
 
-  const next: Session = { ...session, state }
+  const next: Session = { ...session, state, log: [...session.log, ...events] }
   return { session: next, outgoing: syncAll(next, events) }
 }
 
@@ -356,12 +396,21 @@ export function handover(session: Session, toPlayerId: PlayerId): SessionResult 
 }
 
 // The successor's side of a handover: it now holds the state it was given.
+// Also the host-reload restore's entry point (`useLobby.ts`'s `restoreHost`),
+// which is why `log` is accepted here rather than always starting fresh: that
+// caller has the match's own log in hand (read back from storage) and passes
+// it through.
 export function adoptSession(args: {
   state: GameState
   gameId: string
   keeperId: PlayerId
   engine: Engine
   seats: Seat[]
+  // Omitted by the handover path above: KEEPER_STATE carries GameState alone,
+  // not the log the predecessor had accumulated, and that message has no
+  // production receiver today — nothing currently adopts a session through it.
+  // Should one arrive, it would start logless, same as this default.
+  log?: Event[]
 }): Session {
   return {
     gameId: args.gameId,
@@ -369,6 +418,7 @@ export function adoptSession(args: {
     engine: args.engine,
     state: args.state,
     seats: args.seats,
+    log: args.log ?? [],
   }
 }
 
@@ -399,7 +449,7 @@ export function tick(session: Session, now: number): SessionResult {
       at: now,
     })
     if (state === session.state) return { session, outgoing: [] }
-    const next: Session = { ...session, state }
+    const next: Session = { ...session, state, log: [...session.log, ...events] }
     return { session: next, outgoing: syncAll(next, events) }
   }
 
@@ -439,7 +489,7 @@ export function tick(session: Session, now: number): SessionResult {
         at: now,
       })
       if (state === session.state) return { session, outgoing: [] }
-      const next: Session = { ...session, state }
+      const next: Session = { ...session, state, log: [...session.log, ...events] }
       return { session: next, outgoing: syncAll(next, events) }
     }
 
@@ -496,7 +546,7 @@ export function tick(session: Session, now: number): SessionResult {
         }
       }
       if (state === session.state) return { session, outgoing: [] }
-      const next: Session = { ...session, state }
+      const next: Session = { ...session, state, log: [...session.log, ...events] }
       return { session: next, outgoing: syncAll(next, events) }
     }
   }

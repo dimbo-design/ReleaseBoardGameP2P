@@ -81,11 +81,12 @@
   inline-size: 100%;
 }
 
-/* under-key caption — directly below the key, FIXED-height slot (empty and
-   filled render identically), so the key never moves between states */
+/* Reserve two lines for longer translations in every state. Swap fills this
+   slot directly: a wrapping hidden sizer must not push the live caption down. */
 .caption {
-  block-size: 14px;
-  margin-block-start: 10px;
+  inline-size: 100%;
+  block-size: 28px;
+  margin-block-start: 8px;
   overflow: hidden;
   line-height: 14px;
   color: var(--white-45);

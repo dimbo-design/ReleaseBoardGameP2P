@@ -1375,6 +1375,12 @@ answering player's own hand-off (`_useNeutralizeStaging.tsx`) and the beat runne
 `pending.methods` — a method not named there simply does not light up; nothing here re-derives
 legality.
 
+AI Crush uses the same staging hook and three gestures. The choice retains `kind: 'crush'`,
+so the engine receives the pending it actually opened. Its revealed AI card stays in the effect
+slot; no Error 503 card or generic method panel is added. `runNeutralized` consumes the staged
+answer, and its existing `homeward` leg returns the AI card to the events deck after resolution.
+Rejected answers return through the same hand/zone paths as Error 503.
+
 **The glow — two mount points, and DOM order is the rule**
 `_Board.tsx` mounts `EdgeGlow` **twice**, never once, because "your own alarm" and "someone else's"
 read differently and the DOM position is what makes that true rather than a z-index guess:
@@ -2691,3 +2697,12 @@ question, not an animation one.
 > and the test goes red until it has one. Two scenes are exempt by name, each with its reason next
 > to it: the audit page describes the modules rather than being one, and the `Animations` catalogue
 > is a preset per form, not a game moment.
+
+### Named-card catalogue on the live board
+
+The `requestCard` catalogue and ConfirmAction share a full-table layer. The catalogue has its
+own scroll area above the bottom confirmation bar, with room for hover enlargement and the
+right rail. ConfirmAction must not be positioned inside a vertically centered catalogue:
+that anchors the bar to the card rows and hides choices (including the final wrapped row).
+Selection only arms the requested card; confirmation sends `requestCard` with its catalogue ID.
+The existing `requested` / `handTransfer` beats handle the public reveal, transfer, and miss.

@@ -256,7 +256,6 @@ export default function TurnDock({
     copy.exposed,
   )
   const labelSizer = longest(copy.draw, copy.push, copy.pass)
-  const captionSizer = longest(copy.locked, copy.canDefend, copy.underAttack, copy.canAttack)
 
   return (
     <HudSurface accent={accent} className={`${styles.dock} ${paused ? styles.paused : ''}`}>
@@ -334,14 +333,7 @@ export default function TurnDock({
             </div>
 
             <div className={styles.caption}>
-              <Swap
-                token={caption ?? '∅'}
-                sizer={
-                  <Typography as="span" base="label-sm" tk="tk-10">
-                    {captionSizer}
-                  </Typography>
-                }
-              >
+              <Swap token={caption ?? '∅'} fill>
                 {caption && (
                   <Typography as="span" base="label-sm" tk="tk-10">
                     {caption}

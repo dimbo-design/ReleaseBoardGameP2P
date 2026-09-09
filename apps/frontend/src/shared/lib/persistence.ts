@@ -1,4 +1,4 @@
-// What survives a reload. Three records, all under a `release:` prefix.
+// What survives a reload. Four records, all under a `release:` prefix.
 //
 // Plain functions rather than a store: the keeper snapshot is written from
 // `referee.ts`, which is a pure module with no React in it — and keeping it
@@ -8,6 +8,7 @@
 const CLIENT_KEY = 'release:clientId'
 const SESSION_KEY = 'release:session'
 const KEEPER_KEY = 'release:keeper'
+const LOG_KEY = 'release:log'
 
 // How long a stored record stays restorable. Long enough to cover a reload, a
 // crash, a closed lid and picking a game back up the same evening; short
@@ -141,6 +142,10 @@ export interface StoredKeeper {
   // seat whose peer is gone. Reconstructing them from the referee's seats is
   // not possible; they were never there.
   lobbySeats: unknown
+  // The match's own event log, so a host reload restores the history as well as
+  // the position. `unknown[]` for the same reason `state` is `unknown`: storage
+  // does not import engine types.
+  log: unknown[]
   savedAt: number
 }
 
@@ -160,4 +165,36 @@ export function writeKeeper(k: StoredKeeper): void {
 
 export function clearKeeper(): void {
   remove(KEEPER_KEY)
+}
+
+// The fourth record: this peer's own move feed. Held as `unknown[]` for the
+// same reason `StoredKeeper.state` is held as `unknown` — storage does not
+// import engine types, and the single caller casts where they are in scope.
+//
+// It carries its own `gameId` because a feed outliving its match is worse than
+// no feed: seat ids repeat between games, so a stale `dealt` would be taken for
+// this game's deal.
+export interface StoredLog {
+  gameId: string
+  events: unknown[]
+  savedAt: number
+}
+
+export function readLog(gameId: string, now: number = Date.now()): unknown[] | null {
+  const stored = readJson<StoredLog>(LOG_KEY)
+  if (!stored) return null
+  if (stored.gameId !== gameId) return null
+  if (now - stored.savedAt > RESTORE_TTL_MS) {
+    remove(LOG_KEY)
+    return null
+  }
+  return stored.events
+}
+
+export function writeLog(l: StoredLog): void {
+  write(LOG_KEY, JSON.stringify(l))
+}
+
+export function clearLog(): void {
+  remove(LOG_KEY)
 }

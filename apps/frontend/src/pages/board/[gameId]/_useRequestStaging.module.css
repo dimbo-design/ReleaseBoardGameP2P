@@ -1,12 +1,23 @@
-/* The catalog band — the middle of the table, between the seats and the fan.
-   Below the flyer layer on purpose: a card taken from an opponent flies over
-   the catalog it was named in, not under it. */
+/* The full-table layer keeps ConfirmAction pinned to the table bottom. Only
+   the catalogue scrolls; its cards must not sit underneath the confirm bar. */
 .requestBand {
   position: absolute;
-  inset-block-start: 50%;
-  inset-inline: 0;
+  inset: 0;
   z-index: 40;
-  display: flex;
-  justify-content: center;
-  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.catalog {
+  position: absolute;
+  inset-block: 160px 170px;
+  inset-inline: 24px 72px;
+  padding: 64px 48px;
+  overflow: auto;
+  pointer-events: auto;
+}
+
+/* CardCatalog normally fills its parent's height. Here its rows determine the
+   scrollable height, with padding around them for the enlarged hover card. */
+.catalog > div {
+  block-size: auto;
 }

@@ -1233,6 +1233,7 @@ function storedKeeperSnapshot(hostPeerId: string, gameId = 'g1'): StoredKeeper {
       { playerId: 'p1', peerId: hostPeerId, clientId: 'client-host', name: 'Dimbo' },
       { playerId: 'p2', peerId: 'old-guest', clientId: 'client-guest', name: 'Bo' },
     ],
+    log: session.log,
     savedAt: Date.now(),
   }
   sessionStorage.setItem(KEEPER_KEY, JSON.stringify(snapshot))
@@ -1293,6 +1294,40 @@ it('restores the host to the match it was keeping, without replaying the deal', 
   // was never handed its table at all.
   expect(result.current.gameSync).not.toBeNull()
   expect(result.current.gameSync?.events).toEqual([])
+})
+
+// From the outside, a session that adopted no log plays identically to one
+// that adopted the real thing — it syncs, it accepts intents, nothing errors.
+// The only way the difference shows is a later commit: whatever `Session.log`
+// held when it was made is what the next keeper write persists, so a restore
+// that dropped the deal on the floor would surface here as a persisted log
+// containing only the new action, with the match's own history gone.
+it('carries the log the match already had forward, not just its position', async () => {
+  vi.useFakeTimers()
+  try {
+    storedHostSession('g1')
+    const snapshot = storedKeeperSnapshot('peer0')
+    // Sanity: there is history here to lose in the first place.
+    expect(snapshot.log.length).toBeGreaterThan(0)
+
+    const { result } = renderHook(() => useLobby())
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    act(() => {
+      result.current.gameLink?.submit({ type: 'DRAW' })
+    })
+    act(() => {
+      vi.advanceTimersByTime(KEEPER_SAVE_MS)
+    })
+
+    const persisted = storedKeeper()
+    expect(persisted?.log.length).toBeGreaterThan(snapshot.log.length)
+    expect(persisted?.log.slice(0, snapshot.log.length)).toEqual(snapshot.log)
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 // A restored session's gameId is `${hostId}-N}`, exactly what startGame itself

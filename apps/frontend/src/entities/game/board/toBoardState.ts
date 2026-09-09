@@ -108,9 +108,10 @@ function actorOf(e: Event): string | undefined {
   }
 }
 
-// The primary card an event is about, resolved to its display name — never
-// the raw id, so an unknown card can't leak an internal string into the UI.
-function cardTextOf(e: Event): string | undefined {
+// The id behind the primary card an event is about — the same events,
+// unresolved, so a row can be coloured by the card's category (`catOf`)
+// without re-deriving which field on `e` holds it.
+function cardIdOf(e: Event): string | undefined {
   switch (e.type) {
     case 'released':
     case 'placed':
@@ -123,24 +124,169 @@ function cardTextOf(e: Event): string | undefined {
     case 'monitoringDestroyed':
     case 'requested':
     case 'revealed':
-      return cardOrPlaceholder(e.card).name
+      return e.card
     case 'drawn':
     case 'handTransfer':
-      return e.card ? cardOrPlaceholder(e.card).name : undefined
+      return e.card
     case 'aiRevealed':
-      return cardOrPlaceholder(e.aiCard).name
+      return e.aiCard
     default:
       return undefined
   }
 }
 
-function toHistoryEntry(e: Event, labels: HistoryLabels): HistoryEntry {
-  return {
+// The primary card an event is about, resolved to its display name — never
+// the raw id, so an unknown card can't leak an internal string into the UI.
+// Total via `cardOrPlaceholder`, unlike `cardIdOf` which stays raw.
+function cardTextOf(e: Event): string | undefined {
+  const id = cardIdOf(e)
+  return id ? cardOrPlaceholder(id).name : undefined
+}
+
+// The row's colour. Deliberately NOT `cardOrPlaceholder(...).category`: the
+// placeholder is an 'attack', so an unrecognised card would render confidently
+// red. `MoveHistory` treats an absent `cat` as "no accent", which is the honest
+// rendering of a card the catalogue cannot name.
+const catOf = (id: string | undefined): string | undefined =>
+  id ? cardById(id)?.category : undefined
+
+// The yellow support alongside a card. Two shapes in the engine, one row: an
+// attack carries `sudo` as a BOOLEAN (the card is implied, so its name comes
+// from the catalogue), a release carries `codeReview` as the card id itself.
+//
+// The catalogue's Sudo card is 'support-sudo' (category 'support') — not
+// 'operation-sudo' as an earlier draft of this spec named it; the engine's own
+// rules tables (cards.ts, conformance.ts) agree it is 'support-sudo'.
+const SUDO_ID = 'support-sudo'
+
+function comboOf(e: Event): HistoryEntry['combo'] {
+  const id =
+    e.type === 'attacked' && e.sudo ? SUDO_ID : e.type === 'released' ? e.codeReview : undefined
+  if (!id) return undefined
+  const card = cardById(id)
+  if (!card) return undefined
+  return { card: card.name, cat: card.category }
+}
+
+// Who the move was aimed at. The PLAYER half only: `attacked` carries a target
+// player and never a card, so the sword pointing at a card has no source in the
+// feed (docs/animations/backlog.md). A row that shows less is correct; one that
+// invents a card target is not.
+function targetIdOf(e: Event): string | undefined {
+  switch (e.type) {
+    case 'attacked':
+    case 'requested':
+      return e.target
+    case 'releaseStolen':
+    case 'handTransfer':
+      return e.to
+    default:
+      return undefined
+  }
+}
+
+// Rollback sends the attacking card back to its owner's hand; Works on my
+// Machine bounces the effect into the attacker. Both name the ATTACKER, and
+// `defended` carries the DEFENDER — so the name is walked up through `parent`.
+//
+// Omitted rather than guessed when the parent is absent or was filtered out for
+// this viewer: `forViewer` can legitimately hand a peer a defence whose attack
+// was secret, and a tail naming the wrong player is worse than no tail.
+function attackerOf(
+  e: Event,
+  byId: Map<number, Event>,
+  nameOf: Map<string, string>,
+): string | undefined {
+  if (e.parent === undefined) return undefined
+  const parent = byId.get(e.parent)
+  if (parent?.type !== 'attacked') return undefined
+  return nameOf.get(parent.attacker) ?? parent.attacker
+}
+
+// One row per event. The switch is exhaustive by construction: the `never`
+// default means a new member of the engine's Event union fails `pnpm typecheck`
+// here rather than rendering as an unlabelled grey line nobody notices.
+function toHistoryEntry(
+  e: Event,
+  labels: HistoryLabels,
+  nameOf: Map<string, string>,
+  byId: Map<number, Event>,
+): HistoryEntry {
+  const targetId = targetIdOf(e)
+  // Falls back to the id only when the seat is not in this projection — better a
+  // raw id than a silently missing target.
+  const target = targetId ? { player: nameOf.get(targetId) ?? targetId } : undefined
+  const actorId = actorOf(e)
+  // Same fallback `target` uses above: a name when the projection has one, the
+  // raw id rather than a silently missing `who` when it does not.
+  const who = actorId ? (nameOf.get(actorId) ?? actorId) : ''
+  const base: HistoryEntry = {
     id: e.id,
-    who: actorOf(e) ?? '',
+    who,
     kind: labels[e.type],
     card: cardTextOf(e),
+    cat: catOf(cardIdOf(e)),
+    combo: comboOf(e),
+    target,
     parent: e.parent,
+    // The table did it, not a seat: nothing to accent, nothing to colour.
+    system: e.type === 'eliminated' || e.type === 'deckReshuffled' || e.type === 'gameOver',
+    // An open draw. A closed one carries no card, and stays a plain row.
+    draw: e.type === 'drawn' && e.card !== undefined,
+    // `MoveHistory`'s system branch reads `e.text ?? `${e.who} ${copy.eliminated}``
+    // — a fallback built specifically for `eliminated`. `gameOver` and
+    // `deckReshuffled` are system rows too, but that fallback reads them wrong:
+    // `who` for a `gameOver` is the WINNER (`actorOf`'s `e.winner`), so the
+    // fallback would tell the player who just won that they are out; `who` for
+    // a `deckReshuffled` is '' (the table did it, not a seat), so the fallback
+    // would read as an unnamed elimination. Both already have a real label in
+    // `labels[e.type]` ("game over", "deck reshuffled") — this is the only
+    // place that label was going. `eliminated` itself is deliberately left
+    // without `text`, so it keeps using the fallback `copy.eliminated` exists for.
+    text: e.type === 'gameOver' || e.type === 'deckReshuffled' ? labels[e.type] : undefined,
+  }
+
+  if (e.type === 'defended') {
+    const attacker = attackerOf(e, byId, nameOf)
+    if (attacker && e.effect === 'return') base.returnCard = attacker
+    if (attacker && e.effect === 'reflect') base.redirect = attacker
+  }
+
+  switch (e.type) {
+    case 'dealt':
+    case 'drawn':
+    case 'released':
+    case 'placed':
+    case 'discarded':
+    case 'windowOpened':
+    case 'windowClosed':
+    case 'passed':
+    case 'unpassed':
+    case 'attacked':
+    case 'defended':
+    case 'tookHit':
+    case 'releaseDestroyed':
+    case 'releaseStolen':
+    case 'releaseReturned':
+    case 'monitoringDestroyed':
+    case 'handTransfer':
+    case 'requested':
+    case 'revealed':
+    case 'aiRevealed':
+    case 'neutralized':
+    case 'eliminated':
+    case 'turnStarted':
+    case 'turnEnded':
+    case 'gameOver':
+    case 'rejected':
+    case 'takenFromDiscard':
+    case 'deckReshuffled':
+    case 'pilesChanged':
+      return base
+    default: {
+      const exhaustive: never = e
+      return exhaustive
+    }
   }
 }
 
@@ -212,6 +358,47 @@ function toDiscardHeap(log: Event[], top: CardData | undefined, count: number): 
   return heap.slice(-Math.min(HEAP_SHOW, count))
 }
 
+/**
+ * The flat rows become the tree `MoveHistory` renders. `parent` is the
+ * engine's own field, and this function only assembles what it already
+ * says — it does not infer a link the engine never emitted.
+ *
+ * `packages/engine/src/events.ts` claims more than the engine's emitters
+ * deliver: "a defence names the attack it answered ... so the history tree
+ * needs no inference" is an aspiration written on `EventBase.parent`, not a
+ * description of current behaviour. What the fake engine actually parents a
+ * `discarded` event to, today, is one of `eliminated`, `defended`, `revealed`,
+ * `neutralized`, `aiRevealed`, `tookHit`, `monitoringDestroyed` or
+ * `releaseReturned` (`packages/engine/src/fake/triggers.ts`, `attacks.ts`,
+ * `handAttacks.ts`) — never an `attacked`. The one link this file's own
+ * `attackerOf` reads for — a `defended` naming the `attacked` it answered — is
+ * not among them: both `defended` emission sites
+ * (`packages/engine/src/fake/attacks.ts:234`, `:352`) call `log.add` with no
+ * parent at all. `attackerOf` therefore always takes its
+ * `parent === undefined` branch in production, so `returnCard` and `redirect`
+ * (Rollback's and Works on my Machine's tails) — and the attack/defence
+ * nesting itself — are unreachable outside a test that hand-writes
+ * `parent: 1`. Tracked in `docs/animations/backlog.md`.
+ *
+ * An entry whose parent is absent, or names an entry filtered out for this
+ * viewer, stays at top level. `MoveHistory` walks only downward from the roots
+ * it is handed, so an orphan re-parented to nothing would not render at all —
+ * promotion is what keeps a partially-visible log complete.
+ */
+export function buildHistoryTree(entries: HistoryEntry[]): HistoryEntry[] {
+  const byId = new Map(entries.map((e) => [e.id, e]))
+  const roots: HistoryEntry[] = []
+  for (const entry of entries) {
+    const parent = entry.parent === undefined ? undefined : byId.get(entry.parent)
+    if (!parent) {
+      roots.push(entry)
+      continue
+    }
+    parent.children = [...(parent.children ?? []), entry]
+  }
+  return roots
+}
+
 // The projection becomes a table: PlayerView + the event log + translated
 // labels -> everything the kit's Table needs to render. Pure — no React, no
 // clock, no randomness. Total — an unknown card id renders a placeholder
@@ -219,7 +406,17 @@ function toDiscardHeap(log: Event[], top: CardData | undefined, count: number): 
 // function never calls `assetUrl` directly).
 export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabels): BoardState {
   const visible = log.filter((e) => !e.visibleTo || e.visibleTo.includes(view.self.id))
-  const history = visible.map((e) => toHistoryEntry(e, labels)).reverse()
+  // Seat id -> display name, for resolving a target (or an attacker, Task 7)
+  // to a name rather than printing the raw id.
+  const nameOf = new Map<string, string>([
+    [view.self.id, view.self.name],
+    ...view.opponents.map((o) => [o.id, o.name] as const),
+  ])
+  // The visible log by id. Only what THIS viewer can see: a tail resolved through
+  // an event `forViewer` filtered out would name a player the reader was never
+  // shown.
+  const byId = new Map(visible.map((e) => [e.id, e]))
+  const history = buildHistoryTree(visible.map((e) => toHistoryEntry(e, labels, nameOf, byId)))
 
   return {
     you: {

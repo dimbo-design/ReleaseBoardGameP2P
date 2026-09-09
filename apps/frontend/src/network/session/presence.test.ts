@@ -153,6 +153,44 @@ it('falls back to DRAW/PUSH when an absent seat holds the turn but its bot sugge
   expect(result.session.state.turn.player).toBe('b')
 })
 
+// Same fixture and the same rejected bot suggestion, but pinning the log
+// append at referee.ts's driveAbsent fallback (~256-267) specifically: the
+// PUSH that resolves the fallback emits its own `turnEnded`/`turnStarted`
+// pair, and this is the only test in the suite reaching that particular
+// `log: [...session.log, ...retried.events]` line. Losing it would leave
+// `result.session.state` changed (the assertions above would still pass)
+// while nothing the fallback actually committed reached the log at all.
+it('logs the fallback PUSH`s events, not just the state it changed', () => {
+  const release: CardInstance = { uid: 'release-frontend#0', id: 'release-frontend' }
+  const created = session()
+  const base = createFakeEngine()
+  const overreporting: Engine = {
+    ...base,
+    project(state, viewer) {
+      const view = base.project(state, viewer)
+      if (viewer !== 'a') return view
+      return { ...view, self: { ...view.self, playable: [release.uid] } }
+    },
+  }
+  const forced: Session = {
+    ...created,
+    engine: overreporting,
+    state: {
+      ...created.state,
+      turn: { ...created.state.turn, player: 'a', drawnFrom: [0] },
+      players: { ...created.state.players, a: { ...created.state.players.a, hand: [release] } },
+    },
+  }
+  const dropped = disconnect(forced, 'peer-a', 1_000).session
+  const before = dropped.log.length
+
+  const result = driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS + 1)
+
+  const grown = result.session.log.slice(before).map((e) => e.type)
+  expect(grown).toContain('turnEnded')
+  expect(grown).toContain('turnStarted')
+})
+
 it('drives the absent seat that owes the action even when an earlier absent seat owes nothing', () => {
   // The turn is placed on 'c' rather than rotated there by play. Rotating meant
   // assuming a's and b's turns each end with a bare draw + push, which is a

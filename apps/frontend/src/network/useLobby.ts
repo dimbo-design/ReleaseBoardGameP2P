@@ -1,4 +1,4 @@
-import type { GameState, PlayerId } from '@release/engine'
+import type { Event, GameState, PlayerId } from '@release/engine'
 import { createFakeEngine, FAKE_DECK, FAKE_EVENTS } from '@release/engine/fake'
 import { DEFAULT_SETUP } from '@release/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -393,6 +393,7 @@ export function useLobby(): UseLobby {
       // whose peer is gone. Taken here rather than at the write, so the seating
       // stored is the one this commit happened under.
       lobbySeats: seatsRef.current,
+      log: session.log,
       savedAt: Date.now(),
     }
     if (keeperSaveTimerRef.current !== null) return
@@ -944,6 +945,10 @@ export function useLobby(): UseLobby {
         keeperId: snapshot.keeperId as PlayerId,
         engine,
         seats: restoredSeats,
+        // A record written by a previous version of the app has no `log` key —
+        // reading `undefined` here would put a non-array into `Session.log`,
+        // and the first `[...session.log, ...events]` spread would throw.
+        log: (snapshot.log ?? []) as Event[],
       })
       const ref: SessionRef = { current: session }
       sessionRef.current = ref

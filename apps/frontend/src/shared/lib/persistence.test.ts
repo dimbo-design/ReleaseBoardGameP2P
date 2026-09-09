@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  clearLog,
   clearSession,
   getClientId,
   RESTORE_TTL_MS,
   readKeeper,
+  readLog,
   readSession,
   writeKeeper,
+  writeLog,
   writeSession,
 } from './persistence'
 
@@ -36,7 +39,15 @@ it('mints a client id once and returns the same one thereafter', () => {
 it('keeps its records out of localStorage, so a second tab is a second peer', () => {
   writeSession(session())
   getClientId()
-  writeKeeper({ gameId: 'g1', keeperId: 'p1', state: {}, seats: [], lobbySeats: [], savedAt: 0 })
+  writeKeeper({
+    gameId: 'g1',
+    keeperId: 'p1',
+    state: {},
+    seats: [],
+    lobbySeats: [],
+    log: [],
+    savedAt: 0,
+  })
 
   // The record is in the tab's own store...
   expect(sessionStorage.getItem('release:session')).not.toBeNull()
@@ -66,10 +77,27 @@ it('discards a keeper snapshot past the TTL', () => {
     state: { a: 1 },
     seats: [],
     lobbySeats: [],
+    log: [],
     savedAt: 0,
   })
   expect(readKeeper(RESTORE_TTL_MS - 1)).not.toBeNull()
   expect(readKeeper(RESTORE_TTL_MS + 1)).toBeNull()
+})
+
+// A host reload restores the position AND how the match got there — the log is
+// what lets a rejoining board render its move history rather than starting
+// blank at whatever state the keeper happened to be in.
+it('restores the match log along with the state', () => {
+  writeKeeper({
+    gameId: 'g1',
+    keeperId: 'p1',
+    state: {},
+    seats: [],
+    lobbySeats: [],
+    log: [{ id: 1 }, { id: 2 }],
+    savedAt: 1_000,
+  })
+  expect(readKeeper(1_000)?.log).toEqual([{ id: 1 }, { id: 2 }])
 })
 
 it('returns null rather than throwing on corrupt JSON', () => {
@@ -94,5 +122,36 @@ describe('when sessionStorage throws (Safari private mode)', () => {
     expect(() => writeSession(session())).not.toThrow()
     expect(readSession(1_000)).toEqual(session())
     vi.restoreAllMocks()
+  })
+})
+
+describe('the move log record', () => {
+  it('round-trips the events it was given', () => {
+    writeLog({ gameId: 'g1', events: [{ id: 1 }, { id: 2 }], savedAt: 1_000 })
+    expect(readLog('g1', 1_000)).toEqual([{ id: 1 }, { id: 2 }])
+  })
+
+  // The persisted form of the guard useGame already runs in memory: seat ids
+  // repeat between games, so another match's feed is not this match's history.
+  it('refuses a log belonging to another game', () => {
+    writeLog({ gameId: 'g1', events: [{ id: 1 }], savedAt: 1_000 })
+    expect(readLog('g2', 1_000)).toBeNull()
+  })
+
+  it('drops a log older than the restore window', () => {
+    writeLog({ gameId: 'g1', events: [{ id: 1 }], savedAt: 0 })
+    expect(readLog('g1', RESTORE_TTL_MS + 1)).toBeNull()
+  })
+
+  it('drops a record it cannot parse rather than failing the same way forever', () => {
+    sessionStorage.setItem('release:log', '{not json')
+    expect(readLog('g1', 1_000)).toBeNull()
+    expect(sessionStorage.getItem('release:log')).toBeNull()
+  })
+
+  it('clears', () => {
+    writeLog({ gameId: 'g1', events: [{ id: 1 }], savedAt: 1_000 })
+    clearLog()
+    expect(readLog('g1', 1_000)).toBeNull()
   })
 })
