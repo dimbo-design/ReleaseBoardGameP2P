@@ -1,7 +1,8 @@
 import type { Event, PlayerView } from '@release/engine'
 import { render } from '@testing-library/react'
 import { useLayoutEffect } from 'react'
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
+import { readLog, writeLog } from '~/shared/lib/persistence'
 import { type Game, useGame } from './useGame'
 
 // The hook reads the session through a provider; the tests drive that provider
@@ -13,6 +14,8 @@ let session: {
 }
 
 vi.mock('~/app/providers/SessionProvider', () => ({ useSession: () => session }))
+
+beforeEach(() => sessionStorage.clear())
 
 const view = (id = 'p1'): PlayerView =>
   ({
@@ -110,4 +113,50 @@ it('reports no projection for a seat that was never dealt to', () => {
   session = { gameLink: null, gameSync: null, gameId: 'g1' }
   render(<Probe seen={seen} />)
   expect(seen).toHaveLength(0)
+})
+
+it('has the restored feed by the first layout effect that sees a projection', () => {
+  writeLog({ gameId: 'g1', events: [dealt('p1'), drawn('p1')], savedAt: Date.now() })
+  session = { gameLink: null, gameSync: { view: view(), events: [] }, gameId: 'g1' }
+  const seen: { events: Event[] }[] = []
+  render(<Probe seen={seen} />)
+  expect(seen[0].events.map((e) => e.id)).toEqual([1, 3])
+})
+
+it('reports the restored feed as already seen, so nothing replays', () => {
+  writeLog({ gameId: 'g1', events: [dealt('p1'), drawn('p1')], savedAt: Date.now() })
+  session = { gameLink: null, gameSync: { view: view(), events: [] }, gameId: 'g1' }
+  let restored = -1
+  function Peek() {
+    restored = useGame().restoredThrough
+    return null
+  }
+  render(<Peek />)
+  expect(restored).toBe(3)
+})
+
+it('merges a sync into the restored feed without duplicating it', () => {
+  writeLog({ gameId: 'g1', events: [dealt('p1')], savedAt: Date.now() })
+  session = {
+    gameLink: null,
+    gameSync: { view: view(), events: [dealt('p1'), drawn('p1')] },
+    gameId: 'g1',
+  }
+  const seen: { events: Event[] }[] = []
+  render(<Probe seen={seen} />)
+  expect(seen.at(-1)?.events.map((e) => e.id)).toEqual([1, 3])
+})
+
+it('refuses a stored feed belonging to another game', () => {
+  writeLog({ gameId: 'other', events: [dealt('p1')], savedAt: Date.now() })
+  session = { gameLink: null, gameSync: { view: view(), events: [] }, gameId: 'g1' }
+  const seen: { events: Event[] }[] = []
+  render(<Probe seen={seen} />)
+  expect(seen[0].events).toEqual([])
+})
+
+it('writes the feed back so the next load can restore it', () => {
+  session = { gameLink: null, gameSync: { view: view(), events: [dealt('p1')] }, gameId: 'g1' }
+  render(<Probe seen={[]} />)
+  expect(readLog('g1', Date.now())).toHaveLength(1)
 })
