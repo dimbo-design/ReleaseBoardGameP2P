@@ -37,6 +37,45 @@ function twoPlayerSession() {
   })
 }
 
+// A bot seat, and a human who is present. The bot is seated FIRST because the
+// engine starts the match on `seating[0]` — so it owes a move immediately,
+// which is the whole thing under test.
+function botFirstSession(seed = 1) {
+  return createSession({
+    gameId: 'g1',
+    keeperId: 'b',
+    engine: createFakeEngine(),
+    seed,
+    players: [
+      { playerId: 'a', peerId: null, name: 'Bot 1', bot: true },
+      { playerId: 'b', peerId: 'peer-b', name: 'Bo' },
+    ],
+    setup: {},
+    deck: FAKE_DECK,
+    events: FAKE_EVENTS,
+  })
+}
+
+it('drives a bot seat at once: there is no absence to wait out', () => {
+  const { session } = botFirstSession()
+  const driven = driveAbsent(session, 1_000)
+  expect(driven.session).not.toBe(session)
+  expect(driven.outgoing.length).toBeGreaterThan(0)
+})
+
+it('still makes a human seat wait out the absence grace', () => {
+  const { session: start } = botFirstSession()
+  // The same table, except seat `a` is a human who dropped rather than a bot.
+  const dropped: Session = {
+    ...start,
+    seats: start.seats.map((s) =>
+      s.playerId === 'a' ? { playerId: 'a', peerId: null, absentSince: 1_000 } : s,
+    ),
+  }
+  expect(driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS - 1).session).toBe(dropped)
+  expect(driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS).session).not.toBe(dropped)
+})
+
 // The referee used to reduce, fan out and forget. That is exactly why a peer
 // which missed a batch could never afterwards be told what was in it.
 it('accumulates every event it has reduced', () => {

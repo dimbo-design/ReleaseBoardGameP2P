@@ -14,10 +14,17 @@ import type { Seat } from './referee'
 // `transport.id` to its own local link rather than over a connection to
 // itself. Null it and the restoring host would sit in front of a table it
 // never receives a projection for.
+//
+// A bot seat is left untouched: it has no absence to restamp and nothing to
+// come back from.
 export function restoreSeats(stored: Seat[], hostPeerId: string, now: number): Seat[] {
-  return stored.map((seat) =>
-    seat.peerId === hostPeerId
+  return stored.map((seat) => {
+    // A bot was never present, so there is no absence to restamp — and
+    // restamping one would freeze every bot for a full grace period after
+    // every reload, which is the opposite of what the restamp is for.
+    if (seat.bot) return seat
+    return seat.peerId === hostPeerId
       ? { ...seat, absentSince: null }
-      : { ...seat, peerId: null, absentSince: now },
-  )
+      : { ...seat, peerId: null, absentSince: now }
+  })
 }

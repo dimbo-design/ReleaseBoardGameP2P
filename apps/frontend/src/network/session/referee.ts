@@ -9,6 +9,10 @@ export interface Seat {
   // why PlayerId is a persisted client id rather than a PeerJS peer id.
   peerId: string | null
   absentSince: number | null
+  // A seat nobody is coming back to. The absence grace below is a rule about
+  // humans who might return; a bot never was one, so it is played from the
+  // first tick instead of after 30 seconds of waiting for nobody.
+  bot?: boolean
 }
 
 export interface Session {
@@ -70,7 +74,7 @@ export function createSession(args: {
   keeperId: PlayerId
   engine: Engine
   seed: number
-  players: { playerId: PlayerId; peerId: string | null; name: string }[]
+  players: { playerId: PlayerId; peerId: string | null; name: string; bot?: boolean }[]
   setup: Setup
   deck: DeckEntry[]
   events: DeckEntry[]
@@ -97,6 +101,7 @@ export function createSession(args: {
       playerId: p.playerId,
       peerId: p.peerId,
       absentSince: null,
+      ...(p.bot ? { bot: true as const } : {}),
     })),
     // The deal is the first thing that happened in this game, so it is the
     // first thing in the log too — a peer restoring the match needs it to draw
@@ -234,15 +239,21 @@ export function driveAbsent(session: Session, now: number): SessionResult {
   // keeper itself is the peer whose seat dropped.
   if (!session.seats.some((s) => s.peerId !== null)) return { session, outgoing: [] }
 
-  const expired = session.seats.filter(
-    (s) => s.peerId === null && s.absentSince !== null && now - s.absentSince >= ABSENT_GRACE_MS,
+  // A seat with nobody behind it: a bot, which never had anybody, or a human
+  // past the grace. Everything below this line treats the two identically —
+  // the difference is only in how long the table waits before giving up on
+  // somebody arriving.
+  const unattended = session.seats.filter(
+    (s) =>
+      s.peerId === null &&
+      (s.bot || (s.absentSince !== null && now - s.absentSince >= ABSENT_GRACE_MS)),
   )
 
   // Scan every expired-absent seat rather than picking the first: an absent
   // seat that currently owes nothing (not its turn, nothing pending on it)
   // must not shadow a later seat that does — with two or more seats gone,
   // the one the game is actually waiting on need not be seated first.
-  for (const seat of expired) {
+  for (const seat of unattended) {
     const action = botAction(session.engine, session.state, seat.playerId, now)
     if (!action) continue
 
