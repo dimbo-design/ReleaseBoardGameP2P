@@ -1541,6 +1541,17 @@ In `useGame.ts`, add `restoredThrough: number` to the `Game` interface, then:
   const restoredThrough = useRef(events.at(-1)?.id ?? 0)
 ```
 
+`seenGame` must also change its initial value — this is not optional, and the brief originally
+missed it:
+
+```ts
+// Initialised to `gameId`, NOT null. The effect below clears the feed whenever
+// this ref disagrees with the current game — and with a null start it disagrees
+// on the very first mount, wiping the feed the lazy initialiser just restored
+// (and the storage it came from) before anything could read it.
+const seenGame = useRef<string | null>(gameId)
+```
+
 In the `gameId` change effect, clear storage too:
 
 ```ts
