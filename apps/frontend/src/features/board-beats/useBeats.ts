@@ -670,7 +670,15 @@ export function useBeats(args: {
   // `running` is set in the layout effect, but staging's catch-up effects also
   // observe this render: showing `live` here would clear an already-landed
   // defense before the queue restores the hand it is animating away from.
-  const unqueued = enabled && !reduced && !running ? events.filter((e) => e.id > seen.current) : []
+  // The watermark the layout effect above settles on, read rather than written:
+  // this runs during RENDER, before that effect raises `seen.current` for this
+  // pass. A live resync raises `restoredThrough` on a render where `enabled` is
+  // already true, so filtering on `seen.current` alone would read the whole
+  // restored batch as fresh and plan it — choreography for moves the projection
+  // has already reflected, which is the exact failure `restoredThrough` exists
+  // to prevent. Forward only, like the effect's own raise: max, never assignment.
+  const settledSeen = Math.max(seen.current, restoredThrough ?? 0)
+  const unqueued = enabled && !reduced && !running ? events.filter((e) => e.id > settledSeen) : []
   // A non-animated batch never starts a runner, so it must show live now;
   // there would be no later queue render to release a preview shadow.
   const awaitingBatch =
