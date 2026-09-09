@@ -154,6 +154,7 @@ function Probe({
   intro,
   shadows,
   alarms,
+  restoredThrough,
 }: {
   live: BoardState
   events: Event[]
@@ -164,8 +165,9 @@ function Probe({
   // a glow that came up and went again inside one beat, which is exactly what a
   // self-answered 503 does.
   alarms?: boolean[]
+  restoredThrough?: number
 }) {
-  const beats = useBeats({ live, events, anchors, enabled: true, intro })
+  const beats = useBeats({ live, events, anchors, enabled: true, intro, restoredThrough })
   const shown = beats.shadow ?? live
   // Every DISTINCT board the SHADOW has shown, in order. A final-state
   // assertion cannot see a rollback: the board can go A → B → A → B and end
@@ -553,6 +555,39 @@ it('hands the planner the discard count the batch left behind', async () => {
   // …the POST-batch count, not the projection the beat animates away from
   expect(args?.[3]).toBe(afterDiscard.decks.discardCount)
   expect(args?.[3]).not.toBe(preDiscard.decks.discardCount)
+})
+
+// ===== the watermark a restore or a resend seeds the queue with (#136, Task
+// 16). `isOpening` reads the PROJECTION, so mid-match `intro` is null and
+// beats are ENABLED from the first frame — without the mark, the whole
+// restored feed is "fresh" and the match replays itself as choreography.
+it('animates nothing that was already in the feed when the board mounted', async () => {
+  motion.reduced = false
+  planned.calls = []
+  render(
+    <Probe
+      live={afterDiscard}
+      events={[discardEvent]}
+      anchors={stub}
+      restoredThrough={discardEvent.id}
+    />,
+  )
+  await flush()
+  expect(planned.calls).toEqual([])
+})
+
+it('still animates what arrives after the restored mark', async () => {
+  motion.reduced = false
+  planned.calls = []
+  const later = { ...discardEvent, id: discardEvent.id + 1 } as Event
+  const { rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} restoredThrough={discardEvent.id} />,
+  )
+  rerender(
+    <Probe live={afterDiscard} events={[later]} anchors={stub} restoredThrough={discardEvent.id} />,
+  )
+  await flush()
+  expect(planned.calls.at(-1)?.[0]).toEqual([later])
 })
 
 // ===== the sweep's alarm (#102) — the wire between planBeats' `gather` flag

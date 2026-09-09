@@ -253,6 +253,7 @@ export default function Board({
     anchors,
     enabled: introOver || intro == null,
     intro: deal.beat,
+    restoredThrough: intro?.restoredThrough,
     staging: handoffRef,
     handLimit: handLimitRef,
     clearPaidCost: clearPaidCostRef,

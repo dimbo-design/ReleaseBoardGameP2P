@@ -124,6 +124,10 @@ export function useBeats(args: {
   anchors: BoardAnchors
   enabled: boolean
   intro?: IntroBeat | null
+  // The highest event id already reflected in the projection the board first
+  // rendered — a restore, or a resend to a seat that rejoined (`Game.restoredThrough`,
+  // Task 15). Seeds the watermark below so none of it is re-planned as a beat.
+  restoredThrough?: number
   // The staging → beat handoff (#100): the page's staged play, read once at
   // the start of `attackPlaced`/`releasePlaced` and cleared through its own
   // `release()` when that play turns out to be the local actor's.
@@ -147,6 +151,7 @@ export function useBeats(args: {
     anchors,
     enabled,
     intro,
+    restoredThrough,
     staging,
     clearPaidCost,
     takeStagedRelease,
@@ -197,7 +202,15 @@ export function useBeats(args: {
   // empty for the whole second match and nothing would ever animate again. This
   // is the same shape as the "once per peer" bug the opening had — a latch that
   // outlived the thing it was latching.
-  const seen = useRef(0)
+  //
+  // Everything at or below `restoredThrough` was already reflected in the
+  // projection this board first rendered — a restore, or a resend to a seat
+  // that rejoined. The `!enabled` branch below does the same job for the
+  // opening; this does it for a board that arrives mid-match, where
+  // `isOpening` is false and beats are therefore ENABLED from the first frame.
+  // `useRef` initialises ONCE, which is exactly right: `restoredThrough` is a
+  // first-render fact and must never move the watermark backwards later.
+  const seen = useRef(restoredThrough ?? 0)
   const queue = useRef<Beat[]>([])
   const draining = useRef(false)
 

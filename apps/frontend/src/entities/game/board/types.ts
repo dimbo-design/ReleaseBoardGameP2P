@@ -359,6 +359,11 @@ export interface BoardProps {
     gameId: string | null
     view: PlayerView | null
     events: Event[]
+    // The highest event id already reflected in the projection this peer
+    // started from (`Game.restoredThrough`) — everything up to it was restored,
+    // not played, so `useBeats` must not plan it as a movement anybody should
+    // watch. Undefined/`0` when nothing was restored.
+    restoredThrough?: number
     onDone: () => void
   }
 }

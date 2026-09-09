@@ -136,6 +136,7 @@ export default function BoardPage() {
                 gameId: session.gameId,
                 view: game.view,
                 events: game.events,
+                restoredThrough: game.restoredThrough,
                 onDone: session.introReady,
               }
             : undefined
