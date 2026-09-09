@@ -1,4 +1,4 @@
-import { type CSSProperties, useLayoutEffect, useRef } from 'react'
+import { type CSSProperties, useEffect, useLayoutEffect, useRef } from 'react'
 import ScrollArea, { type ScrollAreaHandle } from '@/primitives/ScrollArea'
 import Typography from '@/primitives/Typography'
 import { followTail } from './followTail'
@@ -206,11 +206,32 @@ export default function MoveHistory({ entries = [], copy }: MoveHistoryProps) {
 
   // The scrolling element is overlayscrollbars' own viewport, not a div in this
   // file — `ScrollAreaHandle.viewport()` is the only way to reach it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the dependency is a row arriving, not a value read in the body — entries.length is exactly what the follow should re-run after
-  useLayoutEffect(() => {
+  const follow = () => {
     const viewport = area.current?.viewport()
     if (viewport) followTail(viewport)
-  }, [entries.length])
+  }
+
+  // I2 (whole-branch review #136): the mount pass runs in a PASSIVE effect,
+  // deliberately not the layout effect below. `ScrollArea` builds its
+  // OverlayScrollbars instance — and with it, the `viewport()` this reads —
+  // in its own passive effect (`ScrollArea.tsx`), and React flushes every
+  // layout effect in the whole tree before it runs any passive effect. A
+  // layout effect here therefore always saw `viewport()` as `null` on the
+  // very commit that first mounted this panel: opening the history tab on a
+  // restored, long match landed on the OLDEST rows and stayed there —
+  // `scrollTop` sits at 0, which is outside `FOLLOW_SLACK`, so every later
+  // arrival then reads as "the reader scrolled up" too. A passive effect runs
+  // after `ScrollArea`'s own mount effect (children's effects run before
+  // their parent's, within the same phase), so by the time this one fires the
+  // instance — and a real viewport — already exists.
+  useEffect(follow, [])
+
+  // Every arrival AFTER the first: the OverlayScrollbars instance already
+  // exists (built by the mount pass above), so this can run in a layout
+  // effect and land before paint — no visible frame where the new row sits
+  // off the fold before the panel catches up to it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the dependency is a row arriving, not a value read in the body — entries.length is exactly what the follow should re-run after
+  useLayoutEffect(follow, [entries.length])
 
   return (
     <div className={styles.box}>

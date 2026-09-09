@@ -1,6 +1,9 @@
 import { render } from '@testing-library/react'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { followTail } from './followTail'
 import MoveHistory from './MoveHistory'
+
+vi.mock('./followTail', () => ({ followTail: vi.fn() }))
 
 const copy = { draw: 'draw', eliminated: 'is out' }
 
@@ -42,4 +45,25 @@ it("renders a system row's children instead of swallowing them", () => {
   expect(getByText('Bob is out')).toBeTruthy()
   expect(getByText('Bug')).toBeTruthy()
   expect(getByText('DDoS')).toBeTruthy()
+})
+
+// I2 (Important, whole-branch review #136): `ScrollArea` builds its
+// OverlayScrollbars instance in its own PASSIVE effect (a child of this
+// component) — but the follow used to run only in a LAYOUT effect, and React
+// flushes every layout effect in the tree before any passive effect starts.
+// So on the commit that first mounts a restored, non-empty history,
+// `viewport()` was still null and the follow was silently skipped — a reader
+// opening the tab on a long log landed on the OLDEST rows and stayed there
+// (`scrollTop === 0` reads as "the reader scrolled up" from then on).
+it('follows to the tail on the very first mount, not only on later arrivals', () => {
+  render(
+    <MoveHistory
+      copy={copy}
+      entries={[
+        { id: 1, who: 'you', kind: 'Draw', card: 'Bug' },
+        { id: 2, who: 'you', kind: 'Draw', card: 'DDoS' },
+      ]}
+    />,
+  )
+  expect(followTail).toHaveBeenCalled()
 })
