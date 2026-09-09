@@ -1029,6 +1029,82 @@ export function useLobby(): UseLobby {
     }
   }, [onMessage, onError, onDisconnect, commit, applySeats, persistKeeper, surfaceSetupError])
 
+  // The solo half of the mount-time restore. Simpler than `restoreHost` by
+  // exactly the network: there is no peer id to reclaim, so no retry loop and
+  // no epoch guard around an await — this function does not await at all.
+  const restoreSolo = useCallback((): boolean => {
+    const stored = readSession()
+    const snapshot = readKeeper()
+    if (stored?.role !== 'solo' || !snapshot) return false
+    if (!stored.gameId || snapshot.gameId !== stored.gameId) return false
+
+    const t = createLoopbackTransport()
+    transportRef.current = t
+    isHostRef.current = true
+    setIsHost(true)
+    setRoomCode(null)
+
+    const engine = createFakeEngine()
+    const session = adoptSession({
+      state: snapshot.state as GameState,
+      gameId: snapshot.gameId,
+      keeperId: snapshot.keeperId as PlayerId,
+      engine,
+      // Straight from the snapshot, NOT through `restoreSeats`: its restamping
+      // is for humans who were disconnected while nothing kept the table, and
+      // solo's only human is the one doing the restoring. Its bot seats keep
+      // their flag, which is what puts them back under the driver at once.
+      seats: snapshot.seats as RefereeSeat[],
+      log: (snapshot.log ?? []) as Event[],
+    })
+    const ref: SessionRef = { current: session }
+    sessionRef.current = ref
+
+    // No gate: it holds the table until every seat reports INTRO_READY, and
+    // mid-match nobody ever will — one here would deadlock every intent for the
+    // rest of the game. Same reason restoreHost passes none.
+    const keeper = attachKeeper({
+      ref,
+      transport: t,
+      now: () => Date.now(),
+      onCommit: persistKeeper,
+    })
+    keeperRef.current = keeper
+    keeper.link.subscribe(setGameSync)
+    setGameLink(() => keeper.link)
+
+    // The roster is rebuilt from the stored seating rather than stored twice:
+    // `lobbySeats` carries every seat's name and clientId, which is everything
+    // the board needs to render a table.
+    const lobbySeats = snapshot.lobbySeats as LobbySeat[]
+    commit(
+      createLobbyState({
+        selfId: t.id,
+        hostId: t.id,
+        maxPlayers: lobbySeats.length,
+        setup: {},
+        peers: lobbySeats.map((seat, i) => ({
+          id: seat.peerId,
+          clientId: seat.clientId,
+          name: seat.name,
+          role: i === 0 ? 'host' : 'player',
+          ready: true,
+          where: 'game',
+        })),
+      }),
+    )
+    applySeats(lobbySeats)
+    // Empty events, deliberately: a statement of where the game stands, not a
+    // replay of how it got there. Without the call at all the restored player
+    // holds a live session it never receives a projection for.
+    keeper.resync()
+    gameIdRef.current = snapshot.gameId
+    setGameId(snapshot.gameId)
+    matchSeqRef.current = matchSeqAfterRestore(snapshot.gameId)
+    setStatus('in-lobby')
+    return true
+  }, [commit, applySeats, persistKeeper])
+
   const pushReconnectEvent = useCallback((kind: ReconnectEvent['kind'], attempt: number) => {
     setReconnectEvents((prev) => [...prev, { kind, attempt, at: Date.now() }])
   }, [])
@@ -1180,12 +1256,13 @@ export function useLobby(): UseLobby {
     void (async () => {
       const hostRestored = await restoreHost()
       if (hostRestored) return
+      if (restoreSolo()) return
       const stored = readSession()
       if (stored?.role !== 'guest') return
       reconnectSessionRef.current = stored
       await runGuestReconnect()
     })()
-  }, [restoreHost, runGuestReconnect])
+  }, [restoreHost, restoreSolo, runGuestReconnect])
 
   const ready = useCallback(() => {
     const t = transportRef.current
@@ -1364,7 +1441,13 @@ export function useLobby(): UseLobby {
     setGameId(null)
     cancelKeeperSave()
     clearKeeper()
-    rememberGame(null)
+    // A room outlives the match played in it, so walking the record back to
+    // `gameId: null` keeps it restorable. A solo session IS its match: walked
+    // back the same way it would keep `role: 'solo'` with nothing left to
+    // resume, and the start screen would go on offering a button that resolves
+    // to nowhere. So it goes entirely.
+    if (readSession()?.role === 'solo') clearSession()
+    else rememberGame(null)
   }, [cancelKeeperSave, rememberGame])
 
   const setSetup = useCallback(

@@ -2094,3 +2094,49 @@ it("gates the solo table on the human's intro alone, not the bots sitting with i
     vi.useRealTimers()
   }
 })
+
+it('restores a solo match on mount, with no transport to rebuild', async () => {
+  // Fake timers per-test in a try/finally, matching this file's own pattern
+  // (see "cancels the start gate when the session is torn down").
+  vi.useFakeTimers()
+  try {
+    const first = renderHook(() => useLobby())
+    act(() => {
+      first.result.current.startSolo('Ann', ['Bot 1'], {})
+    })
+    const gameId = first.result.current.gameId
+    // The snapshot is written on a trailing edge one ticker cadence wide.
+    act(() => {
+      vi.advanceTimersByTime(KEEPER_SAVE_MS + 1)
+    })
+    first.unmount()
+
+    const second = renderHook(() => useLobby())
+    // The mount effect AWAITS restoreHost's decline before it reaches solo, so
+    // the restore lands a microtask after render rather than during it. Without
+    // this flush every assertion below reads the pre-restore hook.
+    await act(async () => {})
+
+    expect(second.result.current.gameId).toBe(gameId)
+    expect(second.result.current.seats.map((s) => s.playerId)).toEqual(['p1', 'p2'])
+    expect(second.result.current.gameSync?.view).toBeTruthy()
+    expect(createTransport).not.toHaveBeenCalled()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+// The dead-button trap: `leaveGame` blanks a record's gameId, which is right
+// for a room that outlives its match. A solo record walked back that way keeps
+// role 'solo' with nothing left to resume, and the start screen goes on
+// offering it.
+it('forgets a solo session entirely when the match is left', () => {
+  const { result } = renderHook(() => useLobby())
+  act(() => {
+    result.current.startSolo('Ann', ['Bot 1'], {})
+  })
+  act(() => {
+    result.current.leaveGame()
+  })
+  expect(readSession()).toBeNull()
+})
