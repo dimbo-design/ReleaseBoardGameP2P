@@ -190,8 +190,21 @@ export function rebind(
       const restamped: Session = { ...next, state, log: [...next.log, ...events] }
       // The new clock is a state change every seat renders (the dock's ring
       // ticks on it), so it travels to everyone — the rejoiner's catch-up
-      // projection rides in the same fan-out.
-      return { session: restamped, outgoing: syncAll(restamped, events) }
+      // projection rides in the same fan-out. But `seats` was already rebound
+      // above, so the rejoiner is already among `syncAll`'s recipients: left
+      // alone, it would get that ordinary delta AND the marked resend below,
+      // two SYNCs where the resend contract promises exactly one. Excluding it
+      // here and appending its own marked, full-log resend keeps every other
+      // seat's ordinary unmarked delta while giving the rejoiner the one
+      // resync it is owed — built from `restamped.log`, which already carries
+      // this CLOCK_STARTED's own events, rather than `next.log`, which does not.
+      return {
+        session: restamped,
+        outgoing: [
+          ...syncAll(restamped, events).filter((o) => o.to !== peerId),
+          { to: peerId, message: syncMessage(restamped, playerId, restamped.log, true) },
+        ],
+      }
     }
   }
 
