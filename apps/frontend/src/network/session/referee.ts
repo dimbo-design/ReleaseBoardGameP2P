@@ -249,7 +249,7 @@ export function driveUnattended(session: Session, now: number): SessionResult {
       (s.bot || (s.absentSince !== null && now - s.absentSince >= ABSENT_GRACE_MS)),
   )
 
-  // Scan every expired-absent seat rather than picking the first: an absent
+  // Scan every unattended seat rather than picking the first: an unattended
   // seat that currently owes nothing (not its turn, nothing pending on it)
   // must not shadow a later seat that does — with two or more seats gone,
   // the one the game is actually waiting on need not be seated first.
@@ -258,12 +258,13 @@ export function driveUnattended(session: Session, now: number): SessionResult {
     if (!action) continue
 
     // `tick` owns the window deadline, and it is the only thing that owns it.
-    // When the absent seat holds the open window, botAction answers with
+    // When an unattended seat holds the open window, botAction answers with
     // WINDOW_EXPIRED stamped at `Math.max(at, deadline)` (bots.ts) — a forged
     // future time that would close the window for everyone still sitting
-    // there, the moment this seat's grace period runs out. The keeper's clock
-    // is the only clock (spec decision 6), so the suggestion is dropped and
-    // the window expires on its own deadline, through `tick`, or not at all.
+    // there, whether that seat is a bot that was never going to answer or a
+    // human whose grace period just ran out. The keeper's clock is the only
+    // clock (spec decision 6), so the suggestion is dropped and the window
+    // expires on its own deadline, through `tick`, or not at all.
     if (action.type === 'WINDOW_EXPIRED') continue
 
     const { state, events } = session.engine.reduce(session.state, action)
