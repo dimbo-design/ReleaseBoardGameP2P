@@ -135,7 +135,17 @@ it('says nothing about a bot that simply has nothing to do right now', () => {
     state: { ...session.state, turn: { ...session.state.turn, player: 'b' } },
   }
 
-  const result = driveUnattended(idle, 1_000)
+  // Drive the SAME idle session object STALL_WARNING_TICKS times, exactly the
+  // way the sibling test above drives `stuck`. A single call can never carry a
+  // streak past an 8-tick threshold, so one call would pass here for the wrong
+  // reason — too few ticks to have warned yet — even if `seatOwes` were
+  // replaced outright by `return true`. Looping to the threshold is what turns
+  // "the warning never fires" back into a statement about the predicate rather
+  // than about how many times this test happened to call in.
+  let result: SessionResult = { session: idle, outgoing: [] }
+  for (let i = 0; i < STALL_WARNING_TICKS; i += 1) {
+    result = driveUnattended(idle, 1_000)
+  }
 
   expect(result.session).toBe(idle)
   expect(warn).not.toHaveBeenCalled()
