@@ -72,10 +72,11 @@ export function createLocalLink(args: {
   // peer id under a link that outlives it.
   const myPeerId = () => args.ref.current.seats.find((s) => s.playerId === args.me)?.peerId ?? null
 
-  // Bind an unconnected seat to its local address. Solo play and the playground
-  // build sessions whose seats hold no connection at all; a seat that does hold
-  // one (a keeper that is also a player, driving its own seat through a local
-  // link) keeps it.
+  // Bind an unconnected seat to its local address. The playground builds
+  // sessions whose seats hold no connection at all — solo goes through
+  // `attachKeeper` over a loopback transport instead, not this path; a seat
+  // that does hold one (a keeper that is also a player, driving its own seat
+  // through a local link) keeps it.
   if (args.ref.current.seats.some((s) => s.playerId === args.me && s.peerId === null)) {
     // `0` for the clock: this is the startup self-bind, before the table is
     // live — no deadline exists yet, so the re-stamp branch cannot fire, and

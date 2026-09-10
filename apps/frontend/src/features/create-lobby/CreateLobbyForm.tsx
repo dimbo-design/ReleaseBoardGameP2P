@@ -121,7 +121,7 @@ export default function CreateLobbyForm() {
             max={MAX_BOTS}
             onChange={setBots}
           />
-          <Button type="submit" name="intent" value="solo" variant="tech">
+          <Button type="submit" name="intent" value="solo" variant="tech" disabled={connecting}>
             {t('start.soloCta')}
           </Button>
           <Typography variant="footnote" className={styles.note}>

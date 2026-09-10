@@ -1,5 +1,6 @@
 import type { Action, DeckEntry, Engine, Event, GameState, PlayerId, Setup } from '@release/engine'
 import { botAction, drawObligationMet } from '@release/engine/fake'
+import { IS_DEV } from '~/shared/config'
 import type { Intent, Message } from '../types'
 import { forViewer, rejectionsIn } from './audience'
 
@@ -165,6 +166,10 @@ export function rebind(
   const seat = session.seats.find((s) => s.playerId === playerId)
   if (!seat) return { session, outgoing: [] }
 
+  // A seat nobody is coming back to cannot be come back to. Its peerId is null
+  // by construction, which is exactly the shape the guard below admits.
+  if (seat.bot) return { session, outgoing: [] }
+
   // Only an absent seat can be claimed. Nothing authenticates a PlayerId — it
   // is a uuid the client persists and announces — so a peer naming someone
   // else's would otherwise take a seat that is still connected: the fan-out
@@ -237,6 +242,21 @@ function seatOwes(state: GameState, playerId: PlayerId): boolean {
   if (state.pending) return owed === playerId
   return state.turn.player === playerId
 }
+
+// How many consecutive ticks the same stalled seat/pending has to be observed
+// before the dev warning below actually fires, keyed on the `session` object's
+// own identity. Every commit in this file hands back a freshly built session
+// the moment anything actually changes (`{ ...session, state, log: [...] }`),
+// and the identical reference otherwise — the `state === session.state` checks
+// throughout are exactly that convention. So a genuine stall calls in with the
+// SAME session tick after tick, and the count below resets to zero on its own
+// the instant anything moves, with nothing here to clean up. 8 ticks is 2
+// seconds at the ticker's 250ms interval: comfortably longer than a bot's
+// whole ordinary turn (roughly three quarters of a second end to end, design
+// spec §6), so a merely slow beat can never trip it, while a real stall is
+// still named within a couple of seconds rather than piling up warnings.
+export const STALL_WARNING_TICKS = 8
+const stallStreaks = new WeakMap<Session, number>()
 
 // The engine has no concept of a player who left, so a pending owed by one
 // would stall the game permanently. Past the grace period the keeper plays that
@@ -331,10 +351,16 @@ export function driveUnattended(session: Session, now: number): SessionResult {
     // publishes on the pending view, so its answer is legal by construction —
     // an option list the engine still refuses is an engine bug to fix rather
     // than something to paper over here.
-    if (import.meta.env.DEV && seatOwes(session.state, seat.playerId)) {
-      console.warn(
-        `[referee] ${seat.playerId} owes ${session.state.pending?.kind ?? 'a move'} and its policy has no answer — the table cannot advance`,
-      )
+    if (IS_DEV && seatOwes(session.state, seat.playerId)) {
+      const streak = (stallStreaks.get(session) ?? 0) + 1
+      stallStreaks.set(session, streak)
+      // Fires once, on the tick the streak first crosses the threshold — not on
+      // every tick after, which is exactly the flood this guard exists to stop.
+      if (streak === STALL_WARNING_TICKS) {
+        console.warn(
+          `[referee] ${seat.playerId} owes ${session.state.pending?.kind ?? 'a move'} and its policy has no answer — the table cannot advance`,
+        )
+      }
     }
   }
 

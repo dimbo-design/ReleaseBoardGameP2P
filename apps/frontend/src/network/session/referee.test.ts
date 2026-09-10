@@ -10,6 +10,7 @@ import {
   rebind,
   type Session,
   type SessionResult,
+  STALL_WARNING_TICKS,
   tick,
 } from './referee'
 
@@ -66,8 +67,12 @@ it('drives a bot seat at once: there is no absence to wait out', () => {
 })
 
 // Not a recovery — a name. A stall that says nothing costs an hour to find; one
-// that says which seat and which pending costs a minute.
-it('complains when an unattended seat cannot answer the pending it owes', () => {
+// that says which seat and which pending costs a minute. But it has to say its
+// piece once, not on every one of the ticker's four-times-a-second ticks —
+// design spec §6 asks for the warning only once the same pending has stood
+// unchanged across N ticks, so this drives the exact same session object
+// through `driveUnattended` repeatedly, the way the real ticker would.
+it('complains once an unattended seat`s stall has stood for the threshold', () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   const { session } = botFirstSession()
   // A pending owed by the bot that its policy has no answer for: with the
@@ -92,8 +97,26 @@ it('complains when an unattended seat cannot answer the pending it owes', () => 
       },
     } as GameState,
   }
+
+  // The same `stuck` object every time, exactly as the ticker would hand it
+  // back when nothing about the stall has moved: `driveUnattended` returns the
+  // untouched input session when nothing changes, so this reproduces "the same
+  // pending across N ticks" rather than N unrelated calls.
+  for (let i = 0; i < STALL_WARNING_TICKS - 1; i += 1) {
+    driveUnattended(stuck, 1_000)
+  }
+  expect(warn).not.toHaveBeenCalled()
+
   driveUnattended(stuck, 1_000)
+  expect(warn).toHaveBeenCalledTimes(1)
   expect(warn).toHaveBeenCalledWith(expect.stringContaining('pickFromDiscard'))
+
+  // And it does not repeat on every tick thereafter — the flood this task exists
+  // to stop.
+  driveUnattended(stuck, 1_000)
+  driveUnattended(stuck, 1_000)
+  expect(warn).toHaveBeenCalledTimes(1)
+
   warn.mockRestore()
 })
 
@@ -117,6 +140,19 @@ it('says nothing about a bot that simply has nothing to do right now', () => {
   expect(result.session).toBe(idle)
   expect(warn).not.toHaveBeenCalled()
   warn.mockRestore()
+})
+
+// A bot seat's `peerId` is null by construction — exactly the shape `rebind`'s
+// existing "only an absent seat can be claimed" guard admits. Nothing calls
+// `rebind` with a bot seat today, but the spec names bots in a networked lobby
+// as the next design, so the refusal has to live in the code rather than in
+// the accident of no caller reaching it yet.
+it('refuses to hand a bot seat out through rebind', () => {
+  const { session } = botFirstSession()
+  const result = rebind(session, 'a', 'peer-new', 1_000)
+
+  expect(result.session).toBe(session)
+  expect(result.outgoing).toEqual([])
 })
 
 it('still makes a human seat wait out the absence grace', () => {

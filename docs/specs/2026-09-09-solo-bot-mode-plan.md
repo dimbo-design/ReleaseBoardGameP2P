@@ -19,6 +19,21 @@ workspaces, Biome + Stylelint.
 
 **Spec:** [`docs/specs/2026-09-09-solo-bot-mode-design.md`](./2026-09-09-solo-bot-mode-design.md)
 
+> **Amendment (2026-09-10):** two steps below were deliberately superseded during execution and are
+> left as written rather than rewritten, so this remains a record of what was planned — see
+> `.superpowers/sdd/2026-09-09-solo-bot-mode-plan/progress.md` for the full rulings.
+> - **Task 4**'s step shows the match-wiring snippet inlined into both `startGame` and `startSolo`.
+>   It shipped instead as one shared `attachNewMatch` helper both call: the design spec states solo
+>   "diverges from networked play at exactly one point" (which transport the keeper is handed), and
+>   thirty duplicated lines of wiring would have contradicted that.
+> - **Task 8**'s step homes the stall warning on `if (!action) continue`. `botAction` does not
+>   return `null` for an unanswerable pending — it returns a suggestion `reduce` rejects — so `action`
+>   is truthy and that branch never runs for the case this task exists to name. The warning lives
+>   after the fallback net instead, at the point where nothing above has moved the table forward.
+>
+> Both are confirmed in the shipped `apps/frontend/src/network/session/referee.ts` and
+> `apps/frontend/src/network/useLobby.ts` — read those, not this note, for the current shape.
+
 ## Global Constraints
 
 - **Comments in English.** Root `CLAUDE.md`. Existing Russian comments are legacy; do not add more.
