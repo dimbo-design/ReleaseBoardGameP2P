@@ -1,7 +1,7 @@
 import { useTranslation } from '@release/translation'
 import { Stats, type StatsCopy } from '@release/ui'
 import { useEffect } from 'react'
-import { useGoToLobby } from '~/app/lib/lobbyNavigation'
+import { useLeaveMatch } from '~/app/lib/lobbyNavigation'
 import { useSession } from '~/app/providers/SessionProvider'
 import { seatsFor } from '~/entities/game/seats'
 import { toStatPlayers } from '~/entities/game/stats'
@@ -12,7 +12,7 @@ export default function StatsPage() {
   const { t, i18n } = useTranslation()
   const session = useSession()
   const game = useGame()
-  const goToLobby = useGoToLobby()
+  const leaveMatch = useLeaveMatch()
 
   // Tell the table where this peer went, so everyone else's results table can
   // say so. Announced once per mount; the host ignores a repeat of what it
@@ -107,7 +107,15 @@ export default function StatsPage() {
           // Order matters: clearing the match first means the follower sees no
           // game to send this peer back to.
           session.leaveGame()
-          if (session.roomCode) goToLobby(session.roomCode)
+          // With a room to return to, that is where this goes — the session
+          // outlives the match, so the lobby still has everyone in it and the
+          // host can start the next one straight away.
+          //
+          // Without one there is nothing to return TO: a reload on this route
+          // loses the session, and the screen is already empty because the
+          // projection went with it. Falling back to the start screen is the
+          // difference between a way out and a button that does nothing at all.
+          leaveMatch(session.roomCode)
         }}
       />
     </div>

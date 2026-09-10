@@ -386,6 +386,12 @@ function realCardUids(state: GameState): string[] {
   // game, so a stream that simply ends while one is open must not read as a
   // loss — that is a snapshot artefact, not a leaked card.
   if (state.pending?.kind === 'defend') uids.push(state.pending.attack)
+  // The alarm while its answer is being chosen — same mid-air state as a thrown
+  // attack above, and the same reason a stream ending here must not read as a
+  // lost card. Null for the ai-error-503 mimic, which holds no card here.
+  if (state.pending?.kind === 'neutralize503' && state.pending.card) {
+    uids.push(state.pending.card.uid)
+  }
   return uids.sort()
 }
 

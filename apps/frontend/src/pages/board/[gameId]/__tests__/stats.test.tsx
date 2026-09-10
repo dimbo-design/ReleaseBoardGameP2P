@@ -21,7 +21,7 @@ vi.mock('@release/translation', () => ({
     i18n: { resolvedLanguage: 'en', changeLanguage: () => Promise.resolve() },
   }),
 }))
-vi.mock('~/app/lib/lobbyNavigation', () => ({ useGoToLobby: () => goToLobby }))
+vi.mock('~/app/lib/lobbyNavigation', () => ({ useLeaveMatch: () => goToLobby }))
 vi.mock('~/app/providers/SessionProvider', () => ({
   useSession: () => ({
     state: { selfId, peers, hostId: 'peer-a' },
@@ -43,12 +43,26 @@ beforeEach(() => {
   setWhere.mockClear()
   selfId = 'peer-a'
   peers = {
-    'peer-a': { id: 'peer-a', name: 'Ann', role: 'host', ready: true, where: 'stats' },
-    'peer-b': { id: 'peer-b', name: 'Bo', role: 'player', ready: true, where: 'lobby' },
+    'peer-a': {
+      id: 'peer-a',
+      clientId: 'client-a',
+      name: 'Ann',
+      role: 'host',
+      ready: true,
+      where: 'stats',
+    },
+    'peer-b': {
+      id: 'peer-b',
+      clientId: 'client-b',
+      name: 'Bo',
+      role: 'player',
+      ready: true,
+      where: 'lobby',
+    },
   }
   seats = [
-    { playerId: 'p1', peerId: 'peer-a', name: 'Ann' },
-    { playerId: 'p2', peerId: 'peer-b', name: 'Bo' },
+    { playerId: 'p1', peerId: 'peer-a', clientId: 'client-a', name: 'Ann' },
+    { playerId: 'p2', peerId: 'peer-b', clientId: 'client-b', name: 'Bo' },
   ]
   view = {
     over: { winner: 'p1', condition: 'release' },
@@ -70,13 +84,27 @@ it('reads the seating the match was dealt with, not the roster still connected',
   // seat p3 unresolved so the winner block would not render at all.
   selfId = 'aaa'
   seats = [
-    { playerId: 'p1', peerId: 'aaa', name: 'Ann' },
-    { playerId: 'p2', peerId: 'bbb', name: 'Bo' },
-    { playerId: 'p3', peerId: 'ccc', name: 'Cid' },
+    { playerId: 'p1', peerId: 'aaa', clientId: 'client-aaa', name: 'Ann' },
+    { playerId: 'p2', peerId: 'bbb', clientId: 'client-bbb', name: 'Bo' },
+    { playerId: 'p3', peerId: 'ccc', clientId: 'client-ccc', name: 'Cid' },
   ]
   peers = {
-    aaa: { id: 'aaa', name: 'Ann', role: 'host', ready: true, where: 'stats' },
-    ccc: { id: 'ccc', name: 'Cid', role: 'player', ready: true, where: 'stats' },
+    aaa: {
+      id: 'aaa',
+      clientId: 'client-aaa',
+      name: 'Ann',
+      role: 'host',
+      ready: true,
+      where: 'stats',
+    },
+    ccc: {
+      id: 'ccc',
+      clientId: 'client-ccc',
+      name: 'Cid',
+      role: 'player',
+      ready: true,
+      where: 'stats',
+    },
   }
   view = {
     over: { winner: 'p3', condition: 'release' },

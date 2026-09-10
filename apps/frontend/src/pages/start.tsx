@@ -1,7 +1,9 @@
 import { useTranslation } from '@release/translation'
 import { Menu, MenuButton, MenuGroup, VideoPlayer } from '@release/ui'
+import { useNavigate } from 'react-router'
 import { useGoToLobby } from '~/app/lib/lobbyNavigation'
 import { useSession } from '~/app/providers/SessionProvider'
+import { readSession } from '~/shared/lib/persistence'
 import { useModalRoute } from '~/shared/ui/ModalRouter'
 import ScreenShell from '~/shared/ui/ScreenShell'
 import styles from './start.module.css'
@@ -14,7 +16,24 @@ export default function StartPage() {
   const handleMenuClick = useModalRoute()
   const session = useSession()
   const goToLobby = useGoToLobby()
-  const hasSession = session.status === 'in-lobby' && !!session.state
+  const navigate = useNavigate()
+
+  // A live session OR one this browser stored before the tab went away. Read
+  // once per render rather than held in state: nothing here mutates it, and a
+  // stale copy would keep offering a match the player has since left.
+  const stored = readSession()
+  const hasSession = (session.status === 'in-lobby' && !!session.state) || !!stored
+
+  const resume = () => {
+    const code = session.roomCode ?? stored?.roomCode
+    if (!code) return
+    // A stored match goes back to the board; a stored lobby goes to the lobby.
+    if (stored?.gameId && !session.state) {
+      void navigate(`/board/${stored.gameId}`)
+      return
+    }
+    void goToLobby(code)
+  }
 
   return (
     <ScreenShell
@@ -44,7 +63,7 @@ export default function StartPage() {
             aria-hidden={!hasSession}
             disabled={!hasSession}
             className={hasSession ? undefined : styles.hiddenSlot}
-            onClick={() => session.roomCode && goToLobby(session.roomCode)}
+            onClick={resume}
           >
             {t('start.continueSession')}
           </MenuButton>

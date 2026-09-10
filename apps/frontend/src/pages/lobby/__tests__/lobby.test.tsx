@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { vi } from 'vitest'
-import type { UseLobby } from '~/entities/lobby'
+import { MAX_RECONNECT_ATTEMPTS, type UseLobby } from '~/entities/lobby'
 import LobbyView from '../_LobbyView'
 import LobbyPage from '../[lobbyId]'
 
@@ -38,6 +38,14 @@ function base(): UseLobby {
   return {
     state: null,
     status: 'idle',
+    restoring: false,
+    reconnect: {
+      attempt: 0,
+      maxAttempts: MAX_RECONNECT_ATTEMPTS,
+      status: 'idle',
+      events: [],
+      retry: vi.fn(),
+    },
     roomCode: null,
     isHost: false,
     canStart: false,
@@ -125,8 +133,22 @@ function inSession(): UseLobby {
         gitBranch: 'base',
       },
       peers: {
-        h: { id: 'h', name: 'Host', role: 'host', ready: true, where: 'lobby' },
-        p1: { id: 'p1', name: 'Pat', role: 'player', ready: false, where: 'lobby' },
+        h: {
+          id: 'h',
+          clientId: 'client-h',
+          name: 'Host',
+          role: 'host',
+          ready: true,
+          where: 'lobby',
+        },
+        p1: {
+          id: 'p1',
+          clientId: 'client-p1',
+          name: 'Pat',
+          role: 'player',
+          ready: false,
+          where: 'lobby',
+        },
       },
     },
   }
@@ -200,8 +222,22 @@ it('LobbyView renders spectator section when guests present', () => {
         gitBranch: 'base',
       },
       peers: {
-        h: { id: 'h', name: 'Host', role: 'host', ready: true, where: 'lobby' },
-        g1: { id: 'g1', name: 'Gus', role: 'guest', ready: false, where: 'lobby' },
+        h: {
+          id: 'h',
+          clientId: 'client-h',
+          name: 'Host',
+          role: 'host',
+          ready: true,
+          where: 'lobby',
+        },
+        g1: {
+          id: 'g1',
+          clientId: 'client-g1',
+          name: 'Gus',
+          role: 'guest',
+          ready: false,
+          where: 'lobby',
+        },
       },
     },
   }
@@ -271,4 +307,48 @@ it('skips the interstitial when resumed=true', () => {
   )
   expect(screen.queryByText('lobby.activeSession')).toBeNull()
   expect(screen.getByText('ABC-23D')).toBeTruthy()
+})
+
+it('walking back from the results screen shows the lobby with everyone still in it', () => {
+  // The state the "to lobby" button actually leaves behind: the room is alive
+  // and its roster intact, the match id is gone (leaveGame), and the seating the
+  // finished match was dealt with is still held. The lobby must show the room,
+  // not the join form, and must still list every player.
+  sessionValue = {
+    ...inSession(),
+    gameId: null,
+    seats: [
+      { playerId: 'p1', peerId: 'h', clientId: 'client-h', name: 'Host' },
+      { playerId: 'p2', peerId: 'p1', clientId: 'client-p1', name: 'Pat' },
+    ],
+  }
+
+  render(
+    <MemoryRouter initialEntries={[{ pathname: '/lobby/ABC-23D', state: { resumed: true } }]}>
+      <LobbyPage />
+    </MemoryRouter>,
+  )
+
+  // Not the join form, and not the Continue/Leave interstitial.
+  expect(screen.queryByText('invite.formTitle')).toBeNull()
+  expect(screen.queryByText('lobby.activeSession')).toBeNull()
+  // The room, with its code and both players.
+  expect(screen.getByText('ABC-23D')).toBeTruthy()
+  expect(screen.getByText('Host')).toBeTruthy()
+  expect(screen.getByText('Pat')).toBeTruthy()
+})
+
+it('announces the lobby as its whereabouts when arriving back from a match', () => {
+  const setWhere = vi.fn()
+  sessionValue = { ...inSession(), gameId: null, setWhere }
+
+  render(
+    <MemoryRouter initialEntries={[{ pathname: '/lobby/ABC-23D', state: { resumed: true } }]}>
+      <LobbyPage />
+    </MemoryRouter>,
+  )
+
+  // Otherwise everyone else's results table would still show this peer on the
+  // results screen after they had left it.
+  expect(setWhere).toHaveBeenCalledWith('lobby')
 })

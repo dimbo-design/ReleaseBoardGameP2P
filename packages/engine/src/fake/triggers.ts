@@ -121,13 +121,38 @@ export function fireTrigger(
 ): GameState {
   if (card.id === 'trigger-error-503') {
     const revealedId = log.add({ type: 'revealed', player, card: card.id })
-    log.add({ type: 'discarded', player, card: card.id, reason: 'trigger' }, revealedId)
-    const discarded = discard(state, [card])
-    const methods = neutralizeOptions(discarded, player)
-    if (methods.length === 0) return eliminate(discarded, log, player)
+    const methods = neutralizeOptions(state, player)
+    // No way out: nothing is asked, so nothing stands. The card is banked here
+    // and the elimination follows in the same batch — unchanged from before.
+    if (methods.length === 0) {
+      log.add({ type: 'discarded', player, card: card.id, reason: 'trigger' }, revealedId)
+      return eliminate(discard(state, [card]), log, player)
+    }
+    // A standing Monitoring makes the 503 "игнорируются" (cards.md, the
+    // Monitoring entry): nothing is asked, so nothing stands. It is answered
+    // inside the very draw that turned it up — one batch, no decision, and the
+    // Monitoring stays where it is.
+    //
+    // The Error 503 entry lists Monitoring as one of three способов the player
+    // CHOOSES, which is the competing reading, and the two disagree about a
+    // real case: whether a player holding both may burn a Debugger instead.
+    // docs/rules/backlog.md carries both, and cards.md carries the marker —
+    // this branch is the reading the game runs on, not the one it settles.
+    if (state.players[player].release.monitoring) {
+      const neutralizedId = log.add({ type: 'neutralized', player, method: 'monitoring' })
+      // Parented to the method that banked it, exactly as `bankAlarm` does on
+      // every chosen answer — the causal trail does not change shape just
+      // because nobody was asked.
+      log.add({ type: 'discarded', player, card: card.id, reason: 'trigger' }, neutralizedId)
+      return { ...discard(state, [card]), eventSeq: log.seq }
+    }
+    // …otherwise the alarm STANDS. It waits on the pending until an answer is
+    // chosen, and the two go to the discard together (resolution.md's own
+    // destinations table). Holding it is also what lets the board cover it:
+    // a card already in the heap cannot be answered on the table.
     return {
-      ...discarded,
-      pending: { kind: 'neutralize503', player, methods },
+      ...state,
+      pending: { kind: 'neutralize503', player, card, methods },
       eventSeq: log.seq,
     }
   }
@@ -158,6 +183,61 @@ export function fireTrigger(
   }
 }
 
+// The alarm leaves WITH the answer, never before it — one moment for both
+// cards (docs/rules/resolution.md's destinations table). Banked FIRST of the
+// two, because the discard event ids are what give the exchange its layering
+// on the board (the alarm underneath, the answer on top) and each card lands
+// on the scatter its own id produces.
+//
+// `card` is null for a `crush`, which raises the same three methods with no
+// card of its own standing anywhere — the AI event card is not on the table.
+function bankAlarm(
+  state: GameState,
+  log: Log,
+  player: PlayerId,
+  card: CardInstance | null,
+  parent: number,
+): GameState {
+  if (!card) return { ...state, eventSeq: log.seq }
+  log.add({ type: 'discarded', player, card: card.id, reason: 'trigger' }, parent)
+  return { ...discard(state, [card]), eventSeq: log.seq }
+}
+
+// Declining the 503: the player CAN answer and will not. The card's own text
+// makes elimination the consequence of not neutralizing — "игрок выбывает, если
+// не нейтрализует карту одним из трёх способов" — and names no duty to spend a
+// способ merely because you hold one, so this is the same outcome the
+// defenceless path already reaches, by choice instead of by force.
+//
+// The reading is an inference and is written down as one: docs/rules/backlog.md
+// carries it, and the marker sits at the paragraph in docs/rules/cards.md it
+// came from. Reachable only through the alarm the player owns — a `crush`
+// shares `onNeutralize` but not this: declining one destroys a slot rather than
+// its owner, which is a different rule and not one this task settled.
+export function onDecline503(state: GameState, action: Action & { type: 'PASS' }): Reduction {
+  const pending = state.pending
+  if (pending?.kind !== 'neutralize503') return reject(state, action, 'no 503 is owed by you')
+  if (pending.player !== action.player) return reject(state, action, 'not your decision')
+
+  const log = createLog(state.eventSeq)
+  // The alarm is banked exactly as every other route out of a 503 banks it, and
+  // BEFORE the elimination, so the card that caused it reads as leaving first.
+  // No parent: the reveal that would have been one belongs to an earlier batch.
+  // `card` is typed nullable because `crush` shares the pending's shape and
+  // holds none. A 503 always has one; the guard is what makes that a fact the
+  // types agree with rather than one this function assumes.
+  const alarm = pending.card
+  let banked = state
+  if (alarm) {
+    log.add({ type: 'discarded', player: action.player, card: alarm.id, reason: 'trigger' })
+    banked = discard(state, [alarm])
+  }
+  return {
+    state: eliminate({ ...banked, pending: null, eventSeq: log.seq }, log, action.player),
+    events: log.events,
+  }
+}
+
 // Routes both trigger decisions: neutralize503 and crush share the same set of
 // methods and the same resolution machinery, differing only in what happens
 // on the corresponding "no answer" path (elimination vs. destroying a slot).
@@ -176,31 +256,35 @@ export function onNeutralize(state: GameState, action: Action & { type: 'RESOLVE
   const log = createLog(state.eventSeq)
   const player = action.player
   const hand = state.players[player].hand
+  // Only the 503 holds a card; `crush` shares this reducer and holds none.
+  const alarm = pending.kind === 'neutralize503' ? pending.card : null
 
   if (choice.method === 'debugger') {
     const dbg = hand.find((c) => c.id === 'protection-debugger')
     if (!dbg) return reject(state, action, 'you do not hold a Debugger')
     const neutralizedId = log.add({ type: 'neutralized', player, method: 'debugger' })
+    const withAlarm = bankAlarm(state, log, player, alarm, neutralizedId)
     log.add({ type: 'discarded', player, card: dbg.id, reason: 'neutralized' }, neutralizedId)
     const withoutDbg = setHand(
-      state,
+      withAlarm,
       player,
       hand.filter((c) => c.uid !== dbg.uid),
     )
-    const banked: GameState = {
-      ...withoutDbg,
-      decks: { ...withoutDbg.decks, discard: [...withoutDbg.decks.discard, dbg] },
-      pending: null,
-      eventSeq: log.seq,
+    return {
+      // `discard` rather than appending to `decks.discard` by hand, matching
+      // every other bank in this file. Identical for a Debugger, which is
+      // never an events-deck card, and correct if that ever changes.
+      state: { ...discard(withoutDbg, [dbg]), pending: null, eventSeq: log.seq },
+      events: log.events,
     }
-    return { state: banked, events: log.events }
   }
 
   if (choice.method === 'monitoring') {
     const mon = state.players[player].release.monitoring
     if (!mon) return reject(state, action, 'you do not have a Monitoring')
-    log.add({ type: 'neutralized', player, method: 'monitoring' })
-    return { state: { ...state, pending: null, eventSeq: log.seq }, events: log.events }
+    const neutralizedId = log.add({ type: 'neutralized', player, method: 'monitoring' })
+    const withAlarm = bankAlarm(state, log, player, alarm, neutralizedId)
+    return { state: { ...withAlarm, pending: null, eventSeq: log.seq }, events: log.events }
   }
 
   // sacrifice
@@ -208,7 +292,8 @@ export function onNeutralize(state: GameState, action: Action & { type: 'RESOLVE
   const slot = SLOTS.find((s) => state.players[player].release[s]?.card.uid === choice.card)
   if (!slot) return reject(state, action, 'you do not hold that release')
   const neutralizedId = log.add({ type: 'neutralized', player, method: 'sacrifice' })
-  const destroyed = destroySlot(state, log, player, slot, 'neutralized', neutralizedId)
+  const withAlarm = bankAlarm(state, log, player, alarm, neutralizedId)
+  const destroyed = destroySlot(withAlarm, log, player, slot, 'neutralized', neutralizedId)
   return { state: { ...destroyed, pending: null, eventSeq: log.seq }, events: log.events }
 }
 
@@ -232,7 +317,11 @@ export function resolveAiEvent(
       if (!state.players[player].release[slot]) return { ...state, eventSeq: log.seq }
       const methods = neutralizeOptions(state, player)
       if (methods.length === 0) return destroySlot(state, log, player, slot)
-      return { ...state, pending: { kind: 'crush', player, slot, methods }, eventSeq: log.seq }
+      return {
+        ...state,
+        pending: { kind: 'crush', player, slot, methods, source: event.id },
+        eventSeq: log.seq,
+      }
     }
 
     case 'ai-release-frontend':
@@ -327,7 +416,7 @@ export function resolveAiEvent(
       // consequence: `endsTurn` false keeps the seat with its owner.
       return {
         ...state,
-        pending: { kind: 'handLimit', player, excess: 1, endsTurn: false },
+        pending: { kind: 'handLimit', player, excess: 1, endsTurn: false, source: event.id },
         eventSeq: log.seq,
       }
 
@@ -338,7 +427,15 @@ export function resolveAiEvent(
       log.add({ type: 'revealed', player, card: event.id })
       const methods = neutralizeOptions(state, player)
       if (methods.length === 0) return eliminate(state, log, player)
-      return { ...state, pending: { kind: 'neutralize503', player, methods }, eventSeq: log.seq }
+      // The event card is already back in the events deck by this point (the
+      // trigger-ai branch above appends it once resolveAiEvent returns) — it
+      // never touches the discard, so there is no card standing here for a
+      // neutralize answer to bank alongside it (general.md §6.4).
+      return {
+        ...state,
+        pending: { kind: 'neutralize503', player, card: null, methods, source: event.id },
+        eventSeq: log.seq,
+      }
     }
 
     case 'ai-inside': {

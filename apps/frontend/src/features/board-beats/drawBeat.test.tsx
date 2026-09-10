@@ -18,6 +18,12 @@ const arrivals = vi.hoisted(() => ({
 }))
 // What the discard exit step actually received — not just that it was called.
 const exits = vi.hoisted(() => ({ items: [] as Leaving[] }))
+// The ORDER of two calls that both leave no trace of it in `published`/`exits`
+// alone: the shadow publish (this beat's `c.publish(next)`) and the carrier's
+// release (`drop('draw')`). Both are wrapped below so the standing-trigger
+// test can assert the publish happened first — the whole point of I2's
+// "publish first, drop second" comment in drawBeat.tsx.
+const order = vi.hoisted(() => ({ log: [] as string[] }))
 vi.mock('@release/ui/animations', async (importOriginal) => {
   const real = await importOriginal<typeof import('@release/ui/animations')>()
   return {
@@ -46,6 +52,18 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
       reset: () => {},
       FLIGHT_MS: 420,
     }),
+    // `useFlyer` stays real — `drop` is wrapped only to log WHEN the carrier
+    // for 'draw' actually let go, alongside the publish it must follow.
+    useFlyer: (...args: Parameters<typeof real.useFlyer>) => {
+      const step = real.useFlyer(...args)
+      return {
+        ...step,
+        drop: (key?: string) => {
+          if (key === 'draw') order.log.push('drop:draw')
+          return step.drop(key)
+        },
+      }
+    },
     // The fan itself stays real — the probe's whole point is measuring it —
     // but `arrive` is wrapped to record the `handLength` it was called with,
     // per call, so the I8 test can assert on the SEQUENCE rather than only
@@ -114,7 +132,13 @@ function run(draws: PlannedDraw[]) {
         { kind: 'draw', key: 'draw:4', draws },
         {
           base,
-          publish: (s) => published.push(s),
+          publish: (s) => {
+            published.push(s)
+            // A pending-carrying publish is the one shadow this beat commits
+            // before it drops the carrier — that's the moment the ordering
+            // test cares about, not every publish a run makes.
+            if (s.pending) order.log.push('publish:pending')
+          },
         },
       )
     return <>{beat.overlay}</>
@@ -223,4 +247,27 @@ it('reveals a trigger at the centre and files it in the discard itself', async (
   // I7: the flight lands on the SAME scatter the heap will rest it on, so the
   // handover changes nothing on screen.
   expect(exits.items[0].scatter).toEqual(scatterAt(6))
+})
+
+it('leaves a standing trigger at the centre and publishes the pending behind it', async () => {
+  played.names = []
+  exits.items = []
+  order.log = []
+  const { published, go } = run([draw({ card: undefined, reveal: { card: 'trigger-error-503' } })])
+  await go()
+  // it did NOT leave for the heap
+  expect(exits.items).toEqual([])
+  // …and the shadow it published carries the alarm, so the static render is
+  // already up when the carrier lets go
+  expect(published.at(-1)?.pending).toEqual({
+    kind: 'neutralize503',
+    player: 'p1',
+    card: 'trigger-error-503',
+    methods: [],
+  })
+  // The ordering itself, made observable: the pending-carrying publish must
+  // land BEFORE the carrier is dropped. Reversed, a paint can land between
+  // the two with the flyer gone and the alarm not yet rendered — a blank
+  // centre slot for a frame, the exact defect this beat exists to prevent.
+  expect(order.log).toEqual(['publish:pending', 'drop:draw'])
 })

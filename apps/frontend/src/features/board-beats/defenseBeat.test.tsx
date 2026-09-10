@@ -5,7 +5,7 @@ import { act, render } from '@testing-library/react'
 import type { RefObject } from 'react'
 import { expect, it, vi } from 'vitest'
 import type { BeatRun, BoardAnchors, BoardState, StagedHandoff } from '~/entities/game/board'
-import { COVER_POSE } from '~/entities/game/board'
+import { ATTACK_POSE, COVER_POSE } from '~/entities/game/board'
 import { useDefenseBeat } from './defenseBeat'
 import type { BeatPlan } from './planBeats'
 
@@ -129,6 +129,16 @@ const base = {
 
 const node = () => document.createElement('div')
 
+// A node whose rect is distinctive rather than jsdom's default all-zeros —
+// needed only where a test has to tell two anchors' boxes apart (the road
+// home's `from`/`to`).
+function nodeAt(rect: { left: number; top: number; width: number; height: number }) {
+  const el = node()
+  el.getBoundingClientRect = () =>
+    ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height }) as DOMRect
+  return el
+}
+
 // biome-ignore lint/style/noNonNullAssertion: a known catalogue entry
 const hotfix = cardById('defense-hotfix')!
 
@@ -144,6 +154,10 @@ function harness(handSlot: HTMLElement | null = null) {
   const sudoNode = node()
   const stage = node()
   const cost = node()
+  // Distinctive rects — the road home's own test tells `effect`'s box apart
+  // from `eventsBox`'s by these.
+  const effect = nodeAt({ left: 450, top: 300, width: 150, height: 210 })
+  const eventsBox = nodeAt({ left: 20, top: 20, width: 150, height: 210 })
   const anchors = {
     hand: { current: node() },
     centre: { current: centre },
@@ -151,6 +165,8 @@ function harness(handSlot: HTMLElement | null = null) {
     cost: { current: cost },
     sudo: { current: sudoNode },
     cover: { current: cover },
+    effect: { current: effect },
+    eventsBox: { current: eventsBox },
     discardBox: { current: node() },
     pileBox: () => null,
     // Only OPPONENTS' seats are bound on the real board — `_Board.tsx` renders
@@ -236,6 +252,37 @@ const rollbackPlan = (
 })
 
 // ===== covered =====
+
+// The same fact `runNeutralized` had to learn (#103 testing, problem 1): a beat
+// that publishes nothing hands its own base on untouched, so the shadow held the
+// pre-batch board — the `defend` pending included — for the whole run. The
+// answered attack went on rendering at the centre under its own flyer, the dock
+// stayed in its reaction state, and the beat behind this one animated against
+// that same stale board.
+it('lets go of the answered attack as the exchange takes off', async () => {
+  exits.items.length = 0
+  const { api, Probe } = harness()
+  render(<Probe />)
+  const published: BoardState[] = []
+  const withAttack = {
+    ...base,
+    pending: {
+      kind: 'defend',
+      player: 'p1',
+      attacker: 'p2',
+      attackCard: 'attack-bug',
+      sudo: false,
+    },
+  } as unknown as BoardState
+  await drive(() =>
+    api.beat?.runCovered(cancelPlan(), {
+      base: withAttack,
+      publish: (st) => published.push(st),
+    }),
+  )
+  expect(published.length).toBeGreaterThan(0)
+  expect(published.at(-1)?.pending).toBeNull()
+})
 
 it('lays the defence over the attack and sends the whole exchange out together', async () => {
   played.names = []
@@ -685,4 +732,338 @@ it('reads a release stolen into our own zone in full, never as LOD', async () =>
   )
   expect(played.names).toContain('playToCenter')
   expect(patched.lod).toBeUndefined()
+})
+
+// ===== neutralized — the answered Error 503 leaves as one exchange (#102) =====
+
+const debuggerPlan = (): Extract<BeatPlan, { kind: 'neutralized' }> => ({
+  kind: 'neutralized',
+  key: 'neutralized:10',
+  eventId: 10,
+  player: 'p2',
+  method: 'debugger',
+  alarm: { eventId: 11, card: 'trigger-error-503' },
+  spent: [{ eventId: 12, card: 'protection-debugger' }],
+})
+
+// The answer is given, so the alarm is ANSWERED — and the board has to say so
+// while the exchange is still in the air. The beat published nothing at all
+// before this, so `beats.shadow` held the pre-batch board — pending and all —
+// for the whole run: the red glow burned until the queue drained, the answered
+// 503 went on rendering at the centre under its own flyer, and the beat handed
+// that same stale board on to the draw behind it, which is why a resumed draw
+// landed its card while the alarm was still up (#103 testing, problem 1).
+//
+// Published at TAKEOFF, the same moment (and for the same reason) `discardBeat`
+// publishes `withoutFlown`: the cards are in the air, so the table must not
+// still be holding them.
+it('lets go of the answered alarm as the exchange takes off', async () => {
+  exits.items.length = 0
+  const { api, Probe } = harness()
+  render(<Probe />)
+  const published: (BoardState | null)[] = []
+  // `send` is what puts the pair in the air, so what the board had published by
+  // THEN is the question — not what it ends on.
+  const withAlarm = {
+    ...base,
+    pending: {
+      kind: 'neutralize503',
+      player: 'p2',
+      card: 'trigger-error-503',
+      methods: ['debugger'],
+    },
+  } as unknown as BoardState
+  await drive(() =>
+    api.beat?.runNeutralized(debuggerPlan(), {
+      base: withAlarm,
+      publish: (s) => published.push(s),
+    }),
+  )
+  expect(published.length).toBeGreaterThan(0)
+  expect(published.at(-1)?.pending).toBeNull()
+})
+
+it('covers the alarm and takes both away as one exchange', async () => {
+  exits.items.length = 0
+  played.calls.length = 0
+  const { api, Probe } = harness()
+  render(<Probe />)
+  await drive(() => api.beat?.runNeutralized(debuggerPlan(), ctx))
+
+  // the answer flew to the cover slot at the cover's own tilt
+  expect(played.calls.some((c) => c.name === 'playToCenter')).toBe(true)
+  expect(played.calls.find((c) => c.name === 'playToCenter')?.params).toMatchObject({
+    rotate: COVER_POSE.rot,
+    dx: COVER_POSE.dx,
+    dy: COVER_POSE.dy,
+  })
+  // ONE send, two cards, the alarm underneath
+  expect(exits.items).toHaveLength(2)
+  expect(exits.items.map((i) => i.layer)).toEqual([0, 1])
+  expect(exits.items[0].card.id).toBe('trigger-error-503')
+  expect(exits.items[1].card.id).toBe('protection-debugger')
+  // each lands on its own discard event's scatter (I7)
+  expect(exits.items[0].scatter).toEqual(scatterAt(11))
+  expect(exits.items[1].scatter).toEqual(scatterAt(12))
+  // and each starts from the tilt it was resting at (I6/I9)
+  expect(exits.items[0].pose).toEqual(ATTACK_POSE)
+  expect(exits.items[1].pose).toEqual(COVER_POSE)
+})
+
+it('sends the alarm alone when Monitoring answered, and flies nothing', async () => {
+  exits.items.length = 0
+  played.calls.length = 0
+  const { api, Probe } = harness()
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.runNeutralized({ ...debuggerPlan(), method: 'monitoring', spent: [] }, ctx),
+  )
+  expect(played.calls.filter((c) => c.name === 'playToCenter')).toEqual([])
+  expect(exits.items).toHaveLength(1)
+  expect(exits.items[0].card.id).toBe('trigger-error-503')
+  expect(exits.items[0].layer).toBe(0)
+})
+
+// The crux of the whole task: a `neutralize503` pending with no card standing
+// anywhere at all — a `crush` (the AI threat card was never on the table), or
+// the `ai-error-503` mimic, whose card has already gone back to its own deck
+// (`fake/triggers.ts` builds this pending with `card: null`). Both reach the
+// board with `plan.alarm` absent. `exchange` reads layer off array POSITION
+// after filtering `null`s out — so with no alarm half at all, the answer is
+// the only entry and must land at layer 0, not be silently promoted to some
+// other slot in the heap.
+it('sends only the answer at layer 0 when there is no alarm to take away', async () => {
+  exits.items.length = 0
+  played.calls.length = 0
+  const { api, Probe } = harness()
+  render(<Probe />)
+  await drive(() => api.beat?.runNeutralized({ ...debuggerPlan(), alarm: undefined }, ctx))
+  expect(exits.items).toHaveLength(1)
+  expect(exits.items[0].card.id).toBe('protection-debugger')
+  expect(exits.items[0].layer).toBe(0)
+})
+
+it('flies a sacrificed release out of its own zone slot', async () => {
+  exits.items.length = 0
+  played.calls.length = 0
+  const { api, Probe, anchors } = harness()
+  const slotNode = document.createElement('div')
+  vi.spyOn(anchors, 'releaseSlot').mockReturnValue(slotNode)
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.runNeutralized(
+      {
+        ...debuggerPlan(),
+        method: 'sacrifice',
+        slot: 'frontend',
+        spent: [
+          { eventId: 12, card: 'release-frontend' },
+          { eventId: 13, card: 'support-code-review' },
+        ],
+      },
+      ctx,
+    ),
+  )
+  expect(anchors.releaseSlot).toHaveBeenCalledWith('p2', 'frontend')
+  // the release carries its Code Review as the pair's aux, each on its own scatter
+  expect(exits.items[1].aux?.id).toBe('support-code-review')
+  expect(exits.items[1].auxScatter).toEqual(scatterAt(13))
+})
+
+// The crux of #106's fix: a sacrificed release that IS an events-deck card
+// has already been claimed home by `bankToDiscard` the instant it left the
+// zone — the discard exit is not where it goes, no matter what this
+// resolution's own `discarded(reason: 'neutralized')` says
+// (docs/animations/backlog.md:1062).
+it('sends a sacrificed AI release home instead of into the heap it never really reaches', async () => {
+  exits.items.length = 0
+  played.names = []
+  played.calls = []
+  const { api, Probe, anchors } = harness()
+  const slotNode = document.createElement('div')
+  vi.spyOn(anchors, 'releaseSlot').mockReturnValue(slotNode)
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.runNeutralized(
+      {
+        ...debuggerPlan(),
+        method: 'sacrifice',
+        slot: 'frontend',
+        destination: 'events',
+        spent: [
+          { eventId: 12, card: 'release-frontend' },
+          { eventId: 13, card: 'support-code-review' },
+        ],
+      },
+      ctx,
+    ),
+  )
+  // the release took the road home
+  expect(played.names).toContain('returnToDeck')
+  // …not the discard exit — never among what left for the heap
+  expect(exits.items.map((i) => i.card.id)).not.toContain('release-frontend')
+  // its Code Review is never an events-deck card, so it still takes the
+  // ordinary road — alone now, since the pair it used to leave paired with
+  // is bound for two different places
+  const codeReview = exits.items.find((i) => i.card.id === 'support-code-review')
+  expect(codeReview).toBeDefined()
+  expect(codeReview?.aux).toBeFalsy()
+})
+
+// Fix round 1: the split above sends the Code Review as a STANDALONE item,
+// which drops the one thing `useDiscardExit`'s own `expand()` used to give it
+// for free — its true tucked position, measured off `[data-aux]` inside
+// `a.cover.current`. That DOM only ever holds a static `CardPair` for OUR OWN
+// staged sacrifice (`_Board.tsx`'s `stagedNeutralize`), so this is the one
+// scenario the fallback (`coverBox` — the release's own box) was silently
+// wrong for.
+it('starts a locally staged Code Review from its own tucked position, not the release’s box', async () => {
+  exits.items.length = 0
+  played.names = []
+  played.calls = []
+  const { api, Probe, cover } = harness()
+  // mimic `_Board.tsx`'s own static render for our staged sacrifice: the
+  // release's own box (`coverBox`), and the Code Review tucked under it at
+  // its own rotated rect (`CardPair`'s `[data-aux]`) — distinct from the
+  // release's box, the same way a real tilted, offset tuck would be.
+  cover.getBoundingClientRect = () =>
+    ({ left: 300, top: 300, width: 150, height: 210, right: 450, bottom: 510 }) as DOMRect
+  const auxNode = document.createElement('div')
+  auxNode.setAttribute('data-aux', '')
+  auxNode.getBoundingClientRect = () =>
+    ({ left: 310, top: 250, width: 170, height: 160, right: 480, bottom: 410 }) as DOMRect
+  cover.appendChild(auxNode)
+  const release = vi.fn()
+  const staging = {
+    current: { mainUid: 'u9', el: document.createElement('div'), release },
+  } as unknown as RefObject<StagedHandoff | null>
+  render(<Probe staging={staging} />)
+  await drive(() =>
+    api.beat?.runNeutralized(
+      {
+        ...debuggerPlan(),
+        player: 'p1', // base.selfId — this IS our own staged sacrifice
+        method: 'sacrifice',
+        slot: 'frontend',
+        destination: 'events',
+        spent: [
+          { eventId: 12, card: 'release-frontend' },
+          { eventId: 13, card: 'support-code-review' },
+        ],
+      },
+      ctx,
+    ),
+  )
+  const codeReview = exits.items.find((i) => i.card.id === 'support-code-review')
+  expect(codeReview).toBeDefined()
+  // trimmed from the aux's own rotated bounding rect, centred on it —
+  // `cardBoxIn({left:310,top:250,width:170,height:160}, 150)` — not the
+  // release's own coverBox ({left:300,top:300,...})
+  expect(codeReview?.from).toEqual({ left: 320, top: 225, width: 150, height: 210 })
+})
+
+// Minor gap (fix round 1): `sacrificedHome` gates only on `plan.spent[0]`,
+// so a sacrifice with no Code Review at all was correct by trace but
+// exercised by nothing.
+it('sends a sacrificed AI release home even with no Code Review to split off', async () => {
+  exits.items.length = 0
+  played.names = []
+  played.calls = []
+  const { api, Probe, anchors } = harness()
+  vi.spyOn(anchors, 'releaseSlot').mockReturnValue(document.createElement('div'))
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.runNeutralized(
+      {
+        ...debuggerPlan(),
+        method: 'sacrifice',
+        slot: 'frontend',
+        destination: 'events',
+        spent: [{ eventId: 12, card: 'release-frontend' }],
+      },
+      ctx,
+    ),
+  )
+  expect(played.names).toContain('returnToDeck')
+  // only the alarm is left to the heap — no Code Review to split off, and
+  // the release itself already took the road home
+  expect(exits.items.map((i) => i.card.id)).toEqual(['trigger-error-503'])
+})
+
+it('leaves a sacrificed release that is NOT an events-deck card to the ordinary discard road', async () => {
+  exits.items.length = 0
+  played.names = []
+  played.calls = []
+  const { api, Probe, anchors } = harness()
+  vi.spyOn(anchors, 'releaseSlot').mockReturnValue(document.createElement('div'))
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.runNeutralized(
+      {
+        ...debuggerPlan(),
+        method: 'sacrifice',
+        slot: 'frontend',
+        destination: 'discard',
+        spent: [
+          { eventId: 12, card: 'release-frontend' },
+          { eventId: 13, card: 'support-code-review' },
+        ],
+      },
+      ctx,
+    ),
+  )
+  expect(played.names).not.toContain('returnToDeck')
+  // the pair leaves together, exactly as it always has
+  expect(exits.items.map((i) => i.card.id)).toContain('release-frontend')
+  expect(exits.items.find((i) => i.card.id === 'release-frontend')?.aux?.id).toBe(
+    'support-code-review',
+  )
+})
+
+// The road home (#106): the AI card standing behind this prompt
+// (`_Board.tsx`'s `aiStanding`, off `pending.source`) leaves for the events
+// deck on the very batch that answers the prompt it explains.
+it('sends the AI card standing behind the prompt home once this batch answers it', async () => {
+  exits.items.length = 0
+  played.names = []
+  played.calls = []
+  const { api, Probe, anchors } = harness()
+  render(<Probe />)
+  await drive(() =>
+    api.beat?.runNeutralized({ ...debuggerPlan(), homeward: 'ai-crush-frontend' }, ctx),
+  )
+  const home = played.calls.filter((c) => c.name === 'returnToDeck')
+  expect(home).toHaveLength(1)
+  const effectBox = anchors.effect.current?.getBoundingClientRect()
+  const eventsBox = anchors.eventsBox.current?.getBoundingClientRect()
+  expect(home[0].params).toMatchObject({
+    from: { left: effectBox?.left, top: effectBox?.top },
+    to: { left: eventsBox?.left, top: eventsBox?.top },
+  })
+})
+
+it('adds no road home when the batch answered nobody’s AI card', async () => {
+  played.names = []
+  played.calls = []
+  const { api, Probe } = harness()
+  render(<Probe />)
+  await drive(() => api.beat?.runNeutralized(debuggerPlan(), ctx))
+  expect(played.names).not.toContain('returnToDeck')
+})
+
+it('leaves our own staged answer alone and only releases the handoff', async () => {
+  exits.items.length = 0
+  played.calls.length = 0
+  const { api, Probe } = harness()
+  const release = vi.fn()
+  const staging = {
+    current: { mainUid: 'u9', el: document.createElement('div'), release },
+  } as unknown as RefObject<StagedHandoff | null>
+  render(<Probe staging={staging} />)
+  await drive(() => api.beat?.runNeutralized({ ...debuggerPlan(), player: 'p1' }, ctx))
+  // ours is already standing at the cover slot — the beat must not fly a second
+  // copy of it in from the fan (#101, Fix D rounds 3 and 4, same defect class)
+  expect(played.calls.filter((c) => c.name === 'playToCenter')).toEqual([])
+  expect(release).toHaveBeenCalledTimes(1)
+  expect(exits.items).toHaveLength(2)
 })

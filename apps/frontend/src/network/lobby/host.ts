@@ -1,4 +1,4 @@
-import type { Message, PeerInfo, Where } from '../types'
+import type { Message, PeerInfo, Role, Seat, Where } from '../types'
 import {
   applyConfig,
   applyPeerJoined,
@@ -22,11 +22,38 @@ function peerList(state: LobbyState): PeerInfo[] {
   return Object.values(state.peers)
 }
 
-export function handleJoinRequest(state: LobbyState, fromId: string, name: string): Result {
-  const role = assignRole(state)
-  // The lobby is the only place to join from, so a joiner always starts there.
-  const peer: PeerInfo = { id: fromId, name, role, ready: false, where: 'lobby' }
+export function handleJoinRequest(
+  state: LobbyState,
+  fromId: string,
+  name: string,
+  clientId: string,
+  // The frozen seating, when a match is running. Absent in the lobby, where
+  // there are no seats to come back to and every join is a first one.
+  seats?: Seat[],
+): Result {
+  // A return, not a join: this browser already owns a seat at the table. The
+  // host pruned its old peer id the instant the channel dropped, so it arrives
+  // looking exactly like a newcomer — the clientId is the only thing that says
+  // otherwise.
+  const seat = seats?.find((s) => s.clientId === clientId)
+
+  // Role comes from the seat, never from assignRole. A returning player whose
+  // room filled up behind them would otherwise be handed 'guest' and silently
+  // demoted out of a match they are still seated in.
+  const role: Role = seat ? (fromId === state.hostId ? 'host' : 'player') : assignRole(state)
+
+  const peer: PeerInfo = {
+    id: fromId,
+    clientId,
+    name,
+    role,
+    // A returner is mid-match, so it is past readiness; the lobby is the only
+    // place to join from, so a newcomer starts there and is not ready.
+    ready: Boolean(seat),
+    where: seat ? 'game' : 'lobby',
+  }
   const next = applyPeerJoined(state, peer)
+
   return {
     state: next,
     outgoing: [
@@ -48,9 +75,21 @@ export function handleJoinRequest(state: LobbyState, fromId: string, name: strin
         to: 'broadcast',
         message: {
           type: 'PEER_JOINED',
-          payload: { id: fromId, name, role, ready: false, where: 'lobby' },
+          payload: { id: fromId, clientId, name, role, ready: peer.ready, where: peer.where },
         },
       },
+      // Everyone else holds the seating with this seat's dead peer id in it.
+      ...(seat
+        ? [
+            {
+              to: 'broadcast' as const,
+              message: {
+                type: 'SEAT_REBOUND' as const,
+                payload: { playerId: seat.playerId, peerId: fromId },
+              },
+            },
+          ]
+        : []),
     ],
   }
 }
@@ -71,6 +110,7 @@ export function handleReady(state: LobbyState, fromId: string): Result {
           type: 'PEER_JOINED',
           payload: {
             id: updated.id,
+            clientId: updated.clientId,
             name: updated.name,
             role: updated.role,
             ready: updated.ready,
@@ -101,6 +141,7 @@ export function handleWhereabouts(state: LobbyState, fromId: string, where: Wher
           type: 'PEER_JOINED',
           payload: {
             id: updated.id,
+            clientId: updated.clientId,
             name: updated.name,
             role: updated.role,
             ready: updated.ready,
@@ -162,6 +203,7 @@ export function setMaxPlayers(state: LobbyState, maxPlayers: number): Result {
           type: 'PEER_JOINED' as const,
           payload: {
             id: peer.id,
+            clientId: peer.clientId,
             name: peer.name,
             role: peer.role,
             ready: peer.ready,

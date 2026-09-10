@@ -44,21 +44,48 @@ export default function BoardPage() {
     setWhere('game')
   }, [setWhere])
 
-  // The roster is a room fact, not a game fact — the engine's projection has no
-  // concept of a spectator — so it comes from the session, split by role exactly
-  // as the lobby splits it.
-  const peers = Object.values(session.state?.peers ?? {})
-  const participants = peers.filter((p) => p.role === 'host' || p.role === 'player')
-  const spectators = peers.filter((p) => p.role === 'guest')
+  // Frozen at the deal, not recomputed here: the roster loses a peer the moment
+  // its channel drops, and seats derived from it mid-match renumber whoever is
+  // left — so a dropped player's seat would vanish, and a winner overlay could
+  // end up naming the wrong peer. The fallback covers a session with no seating
+  // held (a reload).
+  const frozenSeats = session.seats
+  const seats = frozenSeats.length > 0 ? frozenSeats : seatsFor(session.state?.peers ?? {})
 
-  // Whether this peer holds a seat — the same split, asked about ourselves.
-  // Only a seated peer is ever projected to, so only a seated peer gets the
-  // opening: a spectator's `game.view` is null for the whole match, the intro
-  // could never report done, and the board would sit behind its entering state
-  // (every block at opacity 0) for good. The question has to be asked HERE and
-  // not inside the board off `view`: a seated peer's first frame has no
-  // projection either, and unhiding on that would flash the table open and shut
-  // at every real game start.
+  // Built from the seating rather than the live roster, exactly as the results
+  // screen builds its rows (entities/game/stats/toStatPlayers.ts): a peer that
+  // has left the roster still holds a seat at this table, and `applyPeerLeft`
+  // prunes it the instant its channel drops. Read from `peers` alone, a dropped
+  // player's seat would vanish mid-match and there would be nothing left to
+  // mark as offline.
+  const peerMap = session.state?.peers ?? {}
+  const participants = seats.map((seat) => {
+    const live = peerMap[seat.peerId]
+    return {
+      id: seat.peerId,
+      // The roster's name is the live one; the seat's is what the match was
+      // played under, and the only one left once a peer is gone.
+      name: live?.name ?? seat.name,
+      connected: Boolean(live),
+    }
+  })
+
+  // Absence IS the offline signal — the same rule the results screen uses.
+  // In the engine's own id space (`seat.playerId`, p1..pN): the Seat this
+  // marks offline is read off `state.opponents`, which the engine (and
+  // toBoardState) name that way, not by peer id.
+  const disconnected = seats.filter((s) => !peerMap[s.peerId]).map((s) => s.playerId)
+
+  const spectators = Object.values(peerMap).filter((p) => p.role === 'guest')
+
+  // Whether this peer holds a seat — asked about ourselves the same way a
+  // participant is identified above. Only a seated peer is ever projected to,
+  // so only a seated peer gets the opening: a spectator's `game.view` is null
+  // for the whole match, the intro could never report done, and the board
+  // would sit behind its entering state (every block at opacity 0) for good.
+  // The question has to be asked HERE and not inside the board off `view`: a
+  // seated peer's first frame has no projection either, and unhiding on that
+  // would flash the table open and shut at every real game start.
   const seated = participants.some((p) => p.id === session.state?.selfId)
 
   // `toTableOver` renames the engine's `over.winner` — a playerId minted as
@@ -73,13 +100,6 @@ export default function BoardPage() {
   // back to the playerId there would restore the very defect above, and just as
   // quietly, so a miss yields no id at all and says so where a developer will
   // see it. The complaint is what catches the next id crossing too.
-  //
-  // Frozen at the deal, not recomputed here: the roster loses a peer the moment
-  // its channel drops, and seats derived from it mid-match renumber whoever is
-  // left — so the overlay would name the wrong peer as winner. The fallback
-  // covers a session with no seating held (a reload).
-  const frozenSeats = session.seats
-  const seats = frozenSeats.length > 0 ? frozenSeats : seatsFor(session.state?.peers ?? {})
   const engineOver = game.view ? toBoardOver(game.view) : null
   const winnerSeat = engineOver ? seats.find((s) => s.playerId === engineOver.winnerId) : undefined
   if (engineOver && !winnerSeat && import.meta.env.DEV) {
@@ -116,6 +136,7 @@ export default function BoardPage() {
                 gameId: session.gameId,
                 view: game.view,
                 events: game.events,
+                restoredThrough: game.restoredThrough,
                 onDone: session.introReady,
               }
             : undefined
@@ -125,6 +146,27 @@ export default function BoardPage() {
           code: session.roomCode ?? undefined,
           participants,
           spectators,
+          disconnected,
+          // The overlay covers both ways a peer can be off the table: a guest
+          // dialing its way back, and a host rebuilding the match it was
+          // keeping. `restoring` is the host's half — without it the host
+          // stares at an empty board for the length of the restore with
+          // nothing saying why. `reconnect.status` stays 'failed' (not
+          // 'idle') once every attempt is spent, so the overlay must keep
+          // showing then too — 'trying' alone would drop it the moment the
+          // dial gives up, right when the player needs the retry/leave choice.
+          connection:
+            session.restoring || session.reconnect.status !== 'idle' ? 'reconnecting' : 'online',
+          reconnect: {
+            attempt: session.reconnect.attempt,
+            maxAttempts: session.reconnect.maxAttempts,
+            status: session.reconnect.status === 'failed' ? 'failed' : 'trying',
+          },
+          onReconnectRetry: session.reconnect.retry,
+          onReconnectLeave: () => {
+            session.leaveSession()
+            void navigate('/start')
+          },
           onKickSpectator: session.kick,
           lang: i18n.resolvedLanguage === 'ru' ? 'ru' : 'en',
           onLangChange: (lang) => {

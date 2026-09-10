@@ -18,9 +18,9 @@ import StatsPage from '../stats'
 // between two RTCPeerConnections inside a single page.
 
 const SEATS: Seat[] = [
-  { playerId: 'p1', peerId: 'peer-a', name: 'Ann' },
-  { playerId: 'p2', peerId: 'peer-b', name: 'Bo' },
-  { playerId: 'p3', peerId: 'peer-c', name: 'Cy' },
+  { playerId: 'p1', peerId: 'peer-a', clientId: 'client-a', name: 'Ann' },
+  { playerId: 'p2', peerId: 'peer-b', clientId: 'client-b', name: 'Bo' },
+  { playerId: 'p3', peerId: 'peer-c', clientId: 'client-c', name: 'Cy' },
 ]
 
 let view: ReturnType<ReturnType<typeof createFakeEngine>['project']> | null
@@ -34,7 +34,7 @@ vi.mock('@release/translation', () => ({
     i18n: { resolvedLanguage: 'en', changeLanguage: () => Promise.resolve() },
   }),
 }))
-vi.mock('~/app/lib/lobbyNavigation', () => ({ useGoToLobby: () => vi.fn() }))
+vi.mock('~/app/lib/lobbyNavigation', () => ({ useLeaveMatch: () => vi.fn() }))
 vi.mock('~/app/providers/SessionProvider', () => ({
   useSession: () => ({
     state: { selfId, peers, hostId: 'peer-a' },
@@ -48,6 +48,7 @@ vi.mock('~/features/play-game/useGame', () => ({ useGame: () => ({ view, events:
 
 const peer = (id: string, name: string, where: PeerInfo['where']): PeerInfo => ({
   id,
+  clientId: `client-${id}`,
   name,
   role: id === 'peer-a' ? 'host' : 'player',
   ready: true,

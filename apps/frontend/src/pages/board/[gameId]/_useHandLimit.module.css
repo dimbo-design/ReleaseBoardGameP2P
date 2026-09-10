@@ -1,0 +1,7 @@
+/* the card being carried back out of the grid — rides above everything at the
+   cursor, and never catches the pointer it is following */
+.backFlyer {
+  position: fixed;
+  z-index: var(--z-flight);
+  pointer-events: none;
+}

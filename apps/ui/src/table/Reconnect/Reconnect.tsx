@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Button from '@/primitives/Button'
 import Overlay from '@/primitives/Overlay'
 import Typography from '@/primitives/Typography'
@@ -18,76 +18,48 @@ export interface ReconnectCopy {
 
 interface ReconnectProps {
   copy: ReconnectCopy
-  // Room address (host peer id) shown in the header. PROTOTYPE: the stream and
-  // this default are mocked until the session feeds the real code + attempt state.
-  host?: string
-  maxAttempts?: number
+  // The room being dialed — the host peer id, shown in the header.
+  host: string
+  attempt: number
+  maxAttempts: number
+  status: 'trying' | 'failed'
+  onRetry(): void
+  onLeave(): void
 }
 
-// One line plus the pause (ms) before it appears. A real terminal emits in bursts
-// with pauses, and stalls where the client is actually waiting.
-interface Beat {
-  text: string
-  wait: number
-}
-
-// Jitter so no two runs (or attempts) tick identically.
-function r(min: number, max: number): number {
-  return Math.round(min + Math.random() * (max - min))
-}
-
-// One reconnect run as paced command lines — mocked, but shaped like the real
-// process: re-dial the host, open a datachannel, await a handshake, fail, back
-// off, retry, give up. Bursts (tiny waits) + stalls (handshake timeout, back-off)
-// give the cadence of a live terminal.
-function buildScript(host: string, maxAttempts: number): Beat[] {
-  const seq: Beat[] = [
-    { text: '$ link to host lost', wait: r(80, 160) },
-    { text: `$ target ${host}`, wait: r(10, 40) },
-    { text: '', wait: r(140, 260) },
-  ]
-  for (let n = 1; n <= maxAttempts; n++) {
-    seq.push({ text: `> attempt ${n}/${maxAttempts} · dialing ${host}`, wait: r(200, 420) })
-    seq.push({ text: '  · opening datachannel', wait: r(8, 30) })
-    seq.push({ text: '  · awaiting handshake', wait: r(8, 40) })
-    seq.push({ text: '  × no answer — peer-unavailable', wait: r(650, 1050) })
-    if (n < maxAttempts) {
-      seq.push({ text: '> backing off…', wait: r(120, 240) })
-      seq.push({ text: '', wait: r(900, 1500) })
-    }
+// The log is technical CLI output (generated, English) and is intentionally
+// not translated; the human-facing labels come through `copy`. Derived from
+// the attempt state rather than scripted: the pacing is the session's real
+// dial cadence, so there is no artificial reveal left to slow down under
+// prefers-reduced-motion.
+function lines(host: string, attempt: number, maxAttempts: number, failed: boolean): string[] {
+  const out = ['$ link to host lost', `$ target ${host}`, '']
+  for (let n = 1; n <= attempt; n++) {
+    out.push(`> attempt ${n}/${maxAttempts} · dialing ${host}`)
+    out.push('  · opening datachannel')
+    out.push('  · awaiting handshake')
+    if (n < attempt || failed) out.push('  × no answer — peer-unavailable')
+    if (n < attempt) out.push('> backing off…', '')
   }
-  seq.push({ text: '', wait: r(240, 420) })
-  seq.push({ text: '× reconnect failed — host unreachable', wait: r(260, 460) })
-  return seq
+  if (failed) out.push('', '× reconnect failed — host unreachable')
+  return out
 }
 
 // Reconnect window over the table: a fixed-size terminal that streams the live
 // reconnection process. It exists ONLY while the link is broken — there is no
 // "connected" state here; success dismisses it (Table stops rendering it).
-export default function Reconnect({ copy, host = 'ABC-DEF', maxAttempts = 5 }: ReconnectProps) {
-  const [run, setRun] = useState(0)
-  const [lines, setLines] = useState<{ id: number; text: string }[]>([])
-  const [failed, setFailed] = useState(false)
+export default function Reconnect({
+  copy,
+  host,
+  attempt,
+  maxAttempts,
+  status,
+  onRetry,
+  onLeave,
+}: ReconnectProps) {
   const [confirmLeave, setConfirmLeave] = useState(false)
-
-  // Reveal the log line-by-line so the window reads as a live process. Restarts
-  // whenever `run` changes (a manual reconnect press).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `run` is the restart trigger, used only as a dependency
-  useEffect(() => {
-    const script = buildScript(host, maxAttempts)
-    setLines([])
-    setFailed(false)
-    let shown = 0
-    let timer: ReturnType<typeof setTimeout>
-    const step = () => {
-      shown += 1
-      setLines(script.slice(0, shown).map((b, idx) => ({ id: idx, text: b.text })))
-      if (shown < script.length) timer = setTimeout(step, script[shown].wait)
-      else setFailed(true)
-    }
-    timer = setTimeout(step, script[0].wait)
-    return () => clearTimeout(timer)
-  }, [host, maxAttempts, run])
+  const failed = status === 'failed'
+  const log = lines(host, attempt, maxAttempts, failed)
 
   return (
     <Overlay className={styles.over}>
@@ -103,8 +75,9 @@ export default function Reconnect({ copy, host = 'ABC-DEF', maxAttempts = 5 }: R
         </div>
 
         <div className={styles.log}>
-          {lines.map(({ id, text }) => (
+          {log.map((text, id) => (
             <Typography
+              // biome-ignore lint/suspicious/noArrayIndexKey: `log` is derived fresh from attempt/status on every render — no stable identity exists for a line to key by other than its position
               key={id}
               base="mono-md"
               tk="tk-10"
@@ -127,7 +100,7 @@ export default function Reconnect({ copy, host = 'ABC-DEF', maxAttempts = 5 }: R
               {copy.abortPrompt}
             </Typography>
             <div className={styles.actions}>
-              <Button variant="primary" onClick={() => setConfirmLeave(false)}>
+              <Button variant="primary" onClick={onLeave}>
                 {copy.confirmLeave}
               </Button>
               <Button variant="primary" onClick={() => setConfirmLeave(false)}>
@@ -138,7 +111,7 @@ export default function Reconnect({ copy, host = 'ABC-DEF', maxAttempts = 5 }: R
         ) : (
           <div className={styles.foot}>
             <div className={styles.actions}>
-              <Button variant="primary" onClick={() => setRun((n) => n + 1)}>
+              <Button variant="primary" onClick={onRetry}>
                 {copy.retry}
               </Button>
               <Button variant="primary" onClick={() => setConfirmLeave(true)}>

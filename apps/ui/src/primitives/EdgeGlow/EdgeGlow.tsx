@@ -6,9 +6,10 @@ interface EdgeGlowProps {
   visible?: boolean
   // сила свечения (стол игрока — strong; место соперника — weak)
   intensity?: 'strong' | 'weak'
-  // цвет свечения (по умолчанию красный — алерт)
+  // цвет свечения (по умолчанию — токен тревоги стола)
   color?: string
   className?: string
+  'data-testid'?: string
 }
 
 // Краевое свечение области: мягко светит от краёв контейнера внутрь.
@@ -17,14 +18,16 @@ interface EdgeGlowProps {
 export default function EdgeGlow({
   visible = true,
   intensity = 'strong',
-  color = '#ff3344',
+  color = 'var(--alarm-glow)',
   className = '',
+  'data-testid': dataTestId,
 }: EdgeGlowProps) {
   return (
     <div
       aria-hidden="true"
       className={`${styles.glow} ${styles[intensity]} ${visible ? styles.on : ''} ${className}`}
       style={{ '--glow': color } as CSSProperties}
+      data-testid={dataTestId}
     />
   )
 }

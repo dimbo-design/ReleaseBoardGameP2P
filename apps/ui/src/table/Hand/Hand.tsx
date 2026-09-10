@@ -199,6 +199,11 @@ export default function Hand({
   const zoomHide = useRef<number | null>(null)
 
   const n = items.length
+  // Whether a card carried elsewhere should also close THIS drag mode is the
+  // consumer's call, not the fan's: some scenes gate onPlay/onReorder while
+  // carrying (the board does, for the hand-limit discard), others need the
+  // hand to stay live. So `carrying` does not touch dragEnabled — only the
+  // presentational reactions below (hover, zoom preview) suppress on it.
   const dragEnabled = Boolean(onPlay ?? onReorder)
   // ховер подавлен во время перетаскивания — своего или чужого (carrying)
   const hovered = drag || carrying ? null : hoveredUid

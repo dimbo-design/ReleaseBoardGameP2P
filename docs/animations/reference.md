@@ -22,6 +22,17 @@ Fill: `forwards` everywhere except `shake` (none — it returns to the origin by
 `rollIn` / `hudIn` (**`both`**, so a `delay` holds the element invisible until its turn instead of
 letting it flash in place first).
 
+> **A persisted end state must not leave a transform behind.** Fill `forwards`/`both` means the last
+> keyframe stays on the element for good — and any transform value other than `none` makes that
+> element a permanent **stacking context**, which traps its children's `z-index` inside it however
+> high they set it. That is invisible until something outside the block flies past: a pile's counter
+> sits at `calc(var(--z-flight) + 40)` precisely so a card passes UNDER the badge, and
+> `Pile.module.css`'s own comment says it works "only while the consumer's placement is not a
+> stacking context". `hudIn` ends on `transform: 'none'` for this reason — `translate(0, 0)` looks
+> identical and is not. Found on the board as a counter that blinked behind every card leaving a
+> pile (PR #132); pinned by `apps/ui/src/animations/presets.test.ts`. **A new block preset should
+> end on `none` too.**
+
 | Preset | Duration | Easing | Fade | Params | Purpose |
 |---|---|---|---|---|---|
 | `flipCard` | 420 | EASE | — | `{ faceDown }` | flip face ↔ back (used by `Card` itself) |
@@ -33,6 +44,7 @@ letting it flash in place first).
 | `absorbToDeck` | `duration` ?? **520** | EASE | **yes** | `{ from, to, duration? }` | a deck flies into another and dissolves (merge) |
 | `drawToCenter` | `duration` ?? **480** | EASE | — | `{ from, to, duration? }` | a card leaves the draw deck to the center |
 | `dealToSeat` | `duration` ?? **460** | EASE | **yes** | `{ from, to, duration? }` | a card goes center → a player seat and dissolves |
+| `takeFromSeat` | `duration` ?? **460** | EASE | — | `{ from, to, duration? }` | a card comes out of a player seat to the center (pair of `dealToSeat`) |
 | `returnToDeck` | `duration` ?? **480** | EASE | — | `{ from, to, duration? }` | a card returns center → deck (pair of `drawToCenter`) |
 | `foldIntoPair` | `dur` ?? **620** | EASE, **LAND** with `snap` | — | `{ from, box, pose?, dur?, snap? }` | one HALF of a pair travels into its pose inside the pair. Called once per half; the pair itself does not move |
 | `landInPose` | `dur` ?? **480** | EASE, **LAND** with `snap` | — | `{ from, box, pose?, dur?, snap? }` | a card ARRIVES ON THE TABLE and lands already in its rest pose — the tilt travels with it rather than appearing a frame after it stops. Same FLIP math as `foldIntoPair` (the element is already in place; its entry is what moves), different move: `pose` here is the card's own pose on the table, not a half's pose inside a pair |
@@ -193,10 +205,14 @@ runner lifted out of `useBeats` unchanged, `drawBeat.tsx` and `deckBeat.tsx` are
 | `discard` | `features/board-beats/discardBeat.tsx` | `discarded`, coalesced per batch | the discard-exit step |
 | `reshuffle` | `features/board-beats/deckBeat.tsx` (`runReshuffle`) | `deckReshuffled` | `gatherToDeck`, `flipCard` (via `patch`) |
 | `piles` | `features/board-beats/deckBeat.tsx` (`runPiles`/`step`) | `pilesChanged`, classified by `classifyPiles` (`planBeats.ts`) against the running pile counts — the event itself names neither the operation nor the split index | `flyFrom` (split), `absorbToDeck` (merge), `gatherToDeck` (fromDiscard) |
+| `transfer` | `features/board-beats/transferBeat.tsx` (`runRequested`/`runTransfer`) | `requested` — public, whole; `handTransfer` — with `role` off `selfId`, `named` off `base.pending`, and `card` only if the event carried one | `popIn`, `shake`, `takeFromSeat`, `playToCenter`, `dealToSeat`, `flipCard` (via `patch`), the hand-arrival step |
+| `ai` | `features/board-beats/aiBeat.tsx` (`run`/`runTaken`) | `aiEvent` — the trigger off its own pile to `cause`, the card the events deck gives up to `effect`, both held `TABLE_HOLD` (doubled, `HALLUCINATION_HOLD`, for `ai-hallucination`), then one of `AiTail`'s six endings (`zone`/`crush`/`turnEnded`/`alarm`/`standing`/`none`) read off what follows in the batch, never re-derived from the card's own id; the plan behind it reads two facts outside its own batch — `releaseEventsOf` (a crush's destination, events deck or discard) and `owed` (the live pending, to tell a standing prompt from an unanswered mimic). `takenFromDiscard` — `ai-inside`'s answer, shown open at the centre for the whole table before it splits by `mine` | `drawToCenter` (×2, via `toSlot`), `flipCard` (via `patch`), `playToReleaseZone`, `returnToDeck`, `dealToSeat`, the discard-exit step |
 
-See [`recipes.md`](./recipes.md#a-card-is-drawn-live-board) and
-[`recipes.md`](./recipes.md#the-deck-is-rebuilt-split-merged-live-board) for the sequences; the
-classification table for `piles` is written out there, not repeated here.
+See [`recipes.md`](./recipes.md#a-card-is-drawn-live-board),
+[`recipes.md`](./recipes.md#the-deck-is-rebuilt-split-merged-live-board),
+[`recipes.md`](./recipes.md#a-card-changes-hands-live-board--taker-victim-watcher-and-the-ask-before-them) and
+[`recipes.md`](./recipes.md#an-ai-trigger-resolves-live-board--cause-effect-one-of-six-endings)
+for the sequences; the classification table for `piles` is written out there, not repeated here.
 
 **One scatter, two readers.** A discard flies on `scatterAt(eventId)` and the heap
 (`toBoardState.toDiscardHeap`) rests it on `scatterAt(eventId)` — the same call on the same id, which
@@ -306,6 +322,34 @@ one from a key, so every peer sees the same heap and a card lands exactly where 
 place that dictated a pose would collapse that into one angle for everyone — and drop a card that
 already computed its own into a different one on its last frame. What a situation records is the
 character alone, answering "who put the card there" (**I11**), never "how many degrees".
+
+## Discard grid — the hand-limit's grid at the centre
+
+`apps/ui/src/table/TableCentre/discardGrid.ts`
+
+The hand limit's excess does not trickle into the heap one card at a time; it builds an open **grid**
+at the centre, sized upfront from the known count. Same folder and same reason as `centre.ts` above —
+geometry written in a CSS module can be neither reused by a flight nor asked about by a test — but a
+different shape: a set is a handful of named places a scene declared, a grid's cells are a function of
+a count nobody can list in advance. Quoted verbatim from the playground's `HandLimitStory` (the
+approved visual source); both the board's gesture and its beat, and the story itself, read it from
+here rather than keeping their own copy.
+
+| Name | Signature | What it does |
+|---|---|---|
+| `GRID_TOP` | `44` | the grid's row, in % of the table's height |
+| `GRID_GAP` | `12` | px between neighbouring cells |
+| `GRID_CARD_W` | `[150, 132, 116]` | card width by row count (1/2/3 rows) |
+| `gridOf` | `gridOf(n)` → `{ cols, rows }` | the shape for `n` cards, chosen upfront from the known excess: ≤4 one row, ≤6 two rows of 3, ≤8 two of 4, ≤10 two of 5, past that three rows |
+| `gridCardW` | `gridCardW(rows)` → `number` | `GRID_CARD_W` for that row count |
+| `gridCells` | `gridCells(n)` → `GridCell[]` | every cell of an `n`-card grid, as `{ dx, dy, w, h }` offsets from the grid's own centre point |
+
+**No CSS `gap` on the consumer's side.** `gridCells` already folds `GRID_GAP` into each cell's `dx`/`dy`,
+so a caller positions every cell absolutely (`GRID_TOP` for the row, the offset for the rest) and never
+declares a gap of its own — the board's grid cell (`pages/board/[gameId]/_Board.tsx`) does exactly
+that, inline, because a CSS module cannot import a TS constant.
+
+*Live reference:* `Hand limit` (Cards group) — see the recipe for the full sequence.
 
 ## Card preview — reading a card that stands on the table
 

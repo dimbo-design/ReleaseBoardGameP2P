@@ -82,6 +82,12 @@ export default function TableStory() {
   // host switch: the action clocks for the whole table
   const [timers, setTimers] = useState(true)
   const [ready, setReady] = useState<Set<string>>(() => new Set())
+  // The reconnect overlay's own dial state — only meaningful while the
+  // `youDisconnect` view is selected. `trying`/`failed` are both worth
+  // demonstrating (design source-of-truth for the terminal's two tones), so
+  // this is a switch of its own rather than folded into a state that already
+  // means something else.
+  const [reconnectFailed, setReconnectFailed] = useState(false)
   // Anchor for the reaction demo states' sweep, reset each time either is
   // (re-)selected so switching back into it restarts the countdown. Keyed on
   // `dock` rather than on the boolean: `reaction` → `reaction503` leaves a
@@ -254,6 +260,18 @@ export default function TableStory() {
           options={DOCK_STATES.map((d) => ({ value: d.id, label: d.label[lang] }))}
           onChange={(v) => setDock(v as DockDemo)}
         />
+
+        {view === 'youDisconnect' && (
+          <TechSwitch
+            label={pick(lang, { ru: 'дозвон', en: 'dial' })}
+            options={[
+              { value: 'trying', label: pick(lang, { ru: 'идёт', en: 'trying' }) },
+              { value: 'failed', label: pick(lang, { ru: 'провален', en: 'failed' }) },
+            ]}
+            value={reconnectFailed ? 'failed' : 'trying'}
+            onChange={(v) => setReconnectFailed(v === 'failed')}
+          />
+        )}
       </TechBar>
       <div className={styles.stage}>
         <Table
@@ -279,6 +297,16 @@ export default function TableStory() {
             pauseHostId,
             onPauseToggleReady: toggleSelfReady,
             connection: view === 'youDisconnect' ? 'reconnecting' : 'online',
+            reconnect:
+              view === 'youDisconnect'
+                ? {
+                    attempt: reconnectFailed ? 5 : 2,
+                    maxAttempts: 5,
+                    status: reconnectFailed ? 'failed' : 'trying',
+                  }
+                : undefined,
+            onReconnectRetry: () => setReconnectFailed(false),
+            onReconnectLeave: () => setView(null),
             disconnected,
           }}
           copy={{

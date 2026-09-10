@@ -27,6 +27,10 @@ export type Where = 'game' | 'stats' | 'lobby'
 
 export interface PeerInfo {
   id: string
+  // Stable across a reload, unlike `id` — a PeerJS peer id dies with the tab.
+  // This is what lets the host recognise a returning player and hand back the
+  // seat it kept for them (shared/lib/persistence.ts).
+  clientId: string
   name: string
   role: Role
   ready: boolean
@@ -41,17 +45,28 @@ export interface PeerInfo {
 export interface Seat {
   playerId: PlayerId
   peerId: string
+  // The seat's durable owner. `peerId` is whichever tab currently holds this
+  // seat and is rewritten by every rebind; `clientId` is who that tab belongs
+  // to and never changes for the life of the match.
+  clientId: string
   name: string
 }
 
 // Discriminated union of every protocol message ({ type, payload }).
 export type Message =
   // --- Lobby ---
-  | { type: 'JOIN_REQUEST'; payload: { name: string } }
-  | { type: 'PEER_LIST'; payload: { peers: PeerInfo[]; yourRole: 'player' | 'guest' } }
+  | { type: 'JOIN_REQUEST'; payload: { name: string; clientId: string } }
+  | { type: 'PEER_LIST'; payload: { peers: PeerInfo[]; yourRole: Role } }
   | {
       type: 'PEER_JOINED'
-      payload: { id: string; name: string; role: Role; ready: boolean; where: Where }
+      payload: {
+        id: string
+        clientId: string
+        name: string
+        role: Role
+        ready: boolean
+        where: Where
+      }
     }
   | { type: 'PLAYER_READY'; payload: Record<string, never> }
   // A peer announcing which screen it is on, so the results table can say where
@@ -73,6 +88,12 @@ export type Message =
   // mid-match as readily as in the lobby — so a seat derived from it at read
   // time renumbers the survivors and hands one player another's counters.
   | { type: 'GAME_STARTING'; payload: { gameId: string; seats: Seat[] } }
+  // One seat has changed hands: the player who held it reloaded and came back
+  // on a new peer id. Every peer holds the frozen seating from GAME_STARTING,
+  // so without this patch their winner lookup and results rows keep naming a
+  // peer id that no longer exists. The returning peer does not need it — it
+  // was sent the whole seating.
+  | { type: 'SEAT_REBOUND'; payload: { playerId: PlayerId; peerId: string } }
   // --- Game ---
   | { type: 'GAME_STARTED'; payload: { gameId: string; keeperId: PlayerId } }
   // A seat has finished its opening animation and is ready for the game to
@@ -81,7 +102,11 @@ export type Message =
   | { type: 'INTRO_READY'; payload: { gameId: string } }
   | { type: 'INTENT'; payload: { intent: Intent } }
   // Private, per recipient — one projection plus that viewer's events. Never broadcast.
-  | { type: 'SYNC'; payload: { view: PlayerView; events: Event[] } }
+  // `resync` marks a REPLAY of what this seat already ought to know — the full
+  // visible log, handed to a peer that rejoined. It is folded into history and
+  // the discard heap, and it is NOT animated: a reconnect drops straight to the
+  // live board, exactly as `isOpening` already says it must.
+  | { type: 'SYNC'; payload: { view: PlayerView; events: Event[]; resync?: boolean } }
   // The only message carrying GameState, and only to a handover successor.
   | { type: 'KEEPER_STATE'; payload: { state: GameState } }
   // null is the death notice: the keeper is gone and the game cannot continue.

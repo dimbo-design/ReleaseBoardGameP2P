@@ -38,6 +38,10 @@ function session(peers: Record<string, unknown> = {}): UseLobby {
     // takes the page's degraded path, which is seatsFor(peers) — what this
     // fixture has always exercised.
     seats: [],
+    // Both halves of the reconnect overlay (#110) — idle/false here, since
+    // this fixture is about a session already settled, not one reconnecting.
+    restoring: false,
+    reconnect: { attempt: 0, maxAttempts: 5, status: 'idle', events: [], retry: vi.fn() },
     kick: vi.fn(),
     setWhere: vi.fn(),
     leaveGame: vi.fn(),
@@ -166,15 +170,14 @@ it('renders the pending prompt from the real catalog when a decision is owed', a
   const projected = engine.project(state, 'p1')
   const view = {
     ...projected,
-    // `discardForRelease` used to be this test's own example — #101 (Task 8)
-    // gives it its own table gesture instead (the fan pays the cost directly)
-    // and suppresses the generic panel for that one kind, so it can no longer
-    // stand in here. `handLimit` exercises the same binding just as plainly.
+    // `discardForRelease`, `handLimit` and `pickFromDiscard` now have their
+    // own table gestures (#101, #104, #106) and suppress the generic panel,
+    // so none of them can stand in here. `requestCard` still exercises the
+    // binding directly.
     pending: {
-      kind: 'handLimit' as const,
+      kind: 'requestCard' as const,
       player: 'p1',
-      excess: 1,
-      options: projected.self.hand.map((c) => c.uid),
+      target: 'p2',
     },
   }
   sessionValue = { ...session(), gameSync: { view, events: [] } } as unknown as UseLobby
@@ -187,13 +190,15 @@ it('renders the pending prompt from the real catalog when a decision is owed', a
   // Asserted on the heading, which PendingPrompt renders as plain text from
   // `kindCopy.prompt`; `copy.confirm` is a ConfirmAction label and reaching it
   // would test that component's affordance rather than this binding.
-  const heading = await screen.findByText(
-    /^(your hand is over the limit|на руке слишком много карт)$/i,
-  )
+  const heading = await screen.findByText(/^(name the card you demand|назовите нужную карту)$/i)
   expect(heading).toBeTruthy()
 })
 
-it('renders the discard picker from the real catalog', async () => {
+it('renders the row that takes a card out of the discard from the real catalog', async () => {
+  // `pickFromDiscard` has its own table gesture now (#106) — the row on the
+  // table, not the generic panel — so this asserts on ITS caption
+  // (`table.insidePrompt`), the same way `_useRequestStaging`'s own binding
+  // is asserted on above rather than on `PendingPromptCopy`'s.
   const engine = createFakeEngine()
   const state = engine.createGame({
     gameId: 'g1',
@@ -212,19 +217,24 @@ it('renders the discard picker from the real catalog', async () => {
     pending: {
       kind: 'pickFromDiscard' as const,
       player: 'p1',
-      options: [{ uid: 'attack-bug#d0', id: 'attack-bug' }],
+      options: [
+        { uid: 'release-frontend#d0', id: 'release-frontend' },
+        { uid: 'release-backend#d1', id: 'release-backend' },
+      ],
       picks: 1 as const,
-      source: 'operation-git-cherry-pick',
+      source: 'ai-inside',
     },
   }
   sessionValue = { ...session(), gameSync: { view, events: [] } } as unknown as UseLobby
 
   renderBoard()
 
-  const heading = await screen.findByText(
-    /^(take a card from the discard|возьмите карту из сброса)$/i,
+  expect(await screen.findByTestId('board-inside-row')).toBeTruthy()
+  expect(screen.queryByTestId('pending-prompt')).toBeNull()
+  const caption = await screen.findByText(
+    /^(pick a release from the discard|выберите релиз из сброса)$/i,
   )
-  expect(heading).toBeTruthy()
+  expect(caption).toBeTruthy()
 })
 
 it('shows the winner overlay when the projection says the game is over', async () => {

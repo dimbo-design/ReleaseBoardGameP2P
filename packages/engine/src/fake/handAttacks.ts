@@ -89,7 +89,20 @@ export function resolveDdos(
   if (target.kind === 'monitoring') {
     const mon = state.players[target.player].release.monitoring
     if (!mon) return { ...state, eventSeq: log.seq }
-    log.add({ type: 'monitoringDestroyed', player: target.player, card: mon.id })
+    const destroyedId = log.add({
+      type: 'monitoringDestroyed',
+      player: target.player,
+      card: mon.id,
+    })
+    // The Monitoring goes to the discard, and the feed has to say so. It used
+    // to be banked by a direct write, which left everything derived from the
+    // feed a card behind the projection's discardCount — the board's heap had
+    // a stand-in for exactly this. Parented to the destruction, the way
+    // triggers.ts parents a destroyed release's spoils.
+    log.add(
+      { type: 'discarded', player: target.player, card: mon.id, reason: 'destroyed' },
+      destroyedId,
+    )
     const zone = { ...state.players[target.player].release }
     delete zone.monitoring
     return {
@@ -111,7 +124,7 @@ export function resolveDdos(
   const released = state.players[target.player].release[target.slot]
   if (!released) return { ...state, eventSeq: log.seq }
 
-  log.add({
+  const returnedId = log.add({
     type: 'releaseReturned',
     player: target.player,
     slot: target.slot,
@@ -131,6 +144,20 @@ export function resolveDdos(
         frozen: [...owner.frozen, released.card.uid],
       },
     },
+  }
+  // The release itself bounces to hand, but a Code Review under it does not
+  // follow it there — it goes to the discard, and that was the second card
+  // this function banked in silence.
+  if (released.codeReview) {
+    log.add(
+      {
+        type: 'discarded',
+        player: target.player,
+        card: released.codeReview.id,
+        reason: 'destroyed',
+      },
+      returnedId,
+    )
   }
   const cleaned = released.codeReview ? discard(bounced, [released.codeReview]) : bounced
   return { ...cleaned, eventSeq: log.seq }

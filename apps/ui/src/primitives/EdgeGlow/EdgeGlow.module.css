@@ -13,6 +13,15 @@
   opacity: 1;
 }
 
+/* The alarm still APPEARS under reduce — it is information, not decoration.
+   Only the fade goes. Nothing global covers this: apps/frontend/src/app/index.css
+   resets view transitions and nothing else. */
+@media (prefers-reduced-motion: reduce) {
+  .glow {
+    transition: none;
+  }
+}
+
 /* сильное — для стола игрока (от первого лица) */
 .strong {
   --blur: 150px;

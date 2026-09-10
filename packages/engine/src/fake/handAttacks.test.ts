@@ -334,6 +334,20 @@ it('destroys a Monitoring with DDoS', () => {
   })
   expect(r.state.players.p2.release.monitoring).toBeUndefined()
   expect(r.state.decks.discard.map((c) => c.uid)).toContain(MON.uid)
+  // And the feed says so. It used to be banked by a direct write, so everything
+  // built from the feed ran a card behind the projection's discardCount — the
+  // board's discard heap carried a stand-in for exactly this. Parented to the
+  // destruction, the way triggers.ts parents a destroyed release's spoils.
+  const destroyed = r.events.find((e) => e.type === 'monitoringDestroyed')
+  expect(r.events).toContainEqual(
+    expect.objectContaining({
+      type: 'discarded',
+      player: 'p2',
+      card: MON.id,
+      reason: 'destroyed',
+      parent: destroyed?.id,
+    }),
+  )
 })
 
 it('returns a protected release to hand and freezes it', () => {
@@ -357,6 +371,19 @@ it('returns a protected release to hand and freezes it', () => {
   expect(r.state.players.p2.frozen).toEqual([FE.uid])
   // Code Review is discarded rather than returned with it.
   expect(r.state.decks.discard.map((c) => c.uid)).toContain(CR.uid)
+  // The release bounces to hand, so it gets no discard — but the Code Review
+  // does, and that was the second card this path banked in silence.
+  const returned = r.events.find((e) => e.type === 'releaseReturned')
+  expect(r.events).toContainEqual(
+    expect.objectContaining({
+      type: 'discarded',
+      player: 'p2',
+      card: CR.id,
+      reason: 'destroyed',
+      parent: returned?.id,
+    }),
+  )
+  expect(r.events.some((e) => e.type === 'discarded' && e.card === FE.id)).toBe(false)
 })
 
 it('thaws a frozen card when its owner’s next turn ends', () => {

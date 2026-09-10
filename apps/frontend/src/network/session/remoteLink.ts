@@ -10,6 +10,7 @@ import {
   handover,
   type Outgoing,
   rebind,
+  type Session,
   type SessionRef,
   seatOfPeer,
   syncAll,
@@ -131,6 +132,11 @@ export function attachKeeper(args: {
   // Absent, the keeper answers immediately — which is what solo play, the
   // playground and every test that predates the intro want.
   gate?: StartGate
+  // Called after every state change this keeper commits. The keeper's own
+  // commits are the only ones worth persisting — a local link's are solo play
+  // and the playground, which have no session to come back to. Optional so
+  // every existing caller and test is unaffected.
+  onCommit?: (session: Session) => void
 }): KeeperHandle {
   const ticker = args.ticker ?? intervalTicker()
   const listeners = new Set<(sync: Sync) => void>()
@@ -157,6 +163,14 @@ export function attachKeeper(args: {
     args.transport.send(outgoing.to, outgoing.message)
   }
 
+  // Every internal commit goes through here rather than calling `commit`
+  // directly, so persistence cannot be forgotten at one of the several call
+  // sites below.
+  const save = (result: Parameters<typeof commit>[1]) => {
+    commit(args.ref, result, deliver)
+    args.onCommit?.(args.ref.current)
+  }
+
   // Intents that arrived before the gate opened. Buffered rather than rejected:
   // every peer's input is dead during its own intro, so an intent here can only
   // come from a peer that skipped ahead — and a rejection would surface to that
@@ -164,7 +178,7 @@ export function attachKeeper(args: {
   const early: { peerId: string; intent: unknown }[] = []
 
   const applyNow = (peerId: string, intent: unknown) => {
-    commit(args.ref, applyIntent(args.ref.current, peerId, intent, args.now()), deliver)
+    save(applyIntent(args.ref.current, peerId, intent, args.now()))
   }
 
   // Stamped at release, not at arrival: the game begins when the gate opens, so
@@ -192,8 +206,8 @@ export function attachKeeper(args: {
     // mid-animation is the move nobody at the table could see coming.
     if (gated()) return
     const now = args.now()
-    commit(args.ref, tick(args.ref.current, now), deliver)
-    commit(args.ref, driveAbsent(args.ref.current, now), deliver)
+    save(tick(args.ref.current, now))
+    save(driveAbsent(args.ref.current, now))
   })
 
   // One rule for host and guest: the seat comes from the connection, never from
@@ -226,11 +240,7 @@ export function attachKeeper(args: {
       // Empty by default: a statement of where the game stands, not a replay of
       // how it got there. A caller starting a game passes the opening deal, which
       // is the one moment the two are the same thing.
-      commit(
-        args.ref,
-        { session: args.ref.current, outgoing: syncAll(args.ref.current, events) },
-        deliver,
-      )
+      save({ session: args.ref.current, outgoing: syncAll(args.ref.current, events) })
     },
     handleMessage(frame) {
       if (!keeping) return
@@ -248,17 +258,17 @@ export function attachKeeper(args: {
     },
     peerLeft(peerId) {
       if (!keeping) return
-      commit(args.ref, disconnect(args.ref.current, peerId, args.now()), deliver)
+      save(disconnect(args.ref.current, peerId, args.now()))
     },
     peerReturned(playerId, peerId) {
       if (!keeping) return
-      commit(args.ref, rebind(args.ref.current, playerId, peerId, args.now()), deliver)
+      save(rebind(args.ref.current, playerId, peerId, args.now()))
     },
     handover(toPlayerId) {
       if (!keeping) return
       const result = handover(args.ref.current, toPlayerId)
       if (result.session === args.ref.current) return
-      commit(args.ref, result, deliver)
+      save(result)
       // The session it holds is no longer the one being played: from here the
       // successor reduces, so this keeper stops stamping clocks onto a state
       // nobody will receive and stops answering the intents still in flight

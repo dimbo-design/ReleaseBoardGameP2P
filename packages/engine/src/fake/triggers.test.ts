@@ -1,7 +1,7 @@
 import type { GameConfig } from '../engine'
 import type { CardInstance, GameState, Setup } from '../state'
 import { createFakeEngine, FAKE_DECK, FAKE_EVENTS } from './index'
-import { playableFor } from './project'
+import { playableFor, project } from './project'
 import { reduce } from './reduce'
 
 const engine = createFakeEngine()
@@ -46,7 +46,193 @@ it('reveals Error 503 to everyone and demands neutralization', () => {
   const revealed = r.events.find((e) => e.type === 'revealed')
   expect(revealed).toBeDefined()
   expect(revealed?.visibleTo).toBeUndefined()
-  expect(r.state.pending).toEqual({ kind: 'neutralize503', player: 'p1', methods: ['debugger'] })
+  expect(r.state.pending).toEqual({
+    kind: 'neutralize503',
+    player: 'p1',
+    card: E503,
+    methods: ['debugger'],
+  })
+})
+
+it('holds the alarm on the pending instead of banking it at the reveal', () => {
+  const r = reduce(withTop(E503, [DBG]), { type: 'DRAW', player: 'p1', at: 1000 })
+  // by the rules it reaches the discard only once it has been neutralized
+  expect(r.state.decks.discard.map((c) => c.uid)).not.toContain(E503.uid)
+  expect(r.events.filter((e) => e.type === 'discarded')).toEqual([])
+})
+
+it('banks the alarm with the Debugger that answered it, alarm first', () => {
+  const drawn = reduce(withTop(E503, [DBG]), { type: 'DRAW', player: 'p1', at: 1000 })
+  const r = reduce(drawn.state, {
+    type: 'RESOLVE',
+    player: 'p1',
+    choice: { kind: 'neutralize503', method: 'debugger' },
+    at: 1001,
+  })
+  expect(r.events.map((e) => e.type)).toEqual(['neutralized', 'discarded', 'discarded'])
+  const discards = r.events.filter((e) => e.type === 'discarded')
+  // alarm first: the discard event ids are what give the exchange its layering
+  // on the board, and each card lands on the scatter its own id produces (I7)
+  expect(discards.map((e) => (e.type === 'discarded' ? e.card : null))).toEqual([
+    'trigger-error-503',
+    'protection-debugger',
+  ])
+  expect(discards.map((e) => (e.type === 'discarded' ? e.reason : null))).toEqual([
+    'trigger',
+    'neutralized',
+  ])
+  // both hang off the `neutralized` that caused them
+  const cause = r.events.find((e) => e.type === 'neutralized')
+  expect(discards.every((e) => e.parent === cause?.id)).toBe(true)
+  expect(r.state.pending).toBeNull()
+})
+
+// "Пока стоит — trigger-error-503 ... игнорируются": nothing is asked, so
+// nothing stands. The 503 is answered inside the draw that turned it up, in one
+// batch, and Monitoring stays (#103 testing, problem 2). The competing reading —
+// that Monitoring is one of three methods the player CHOOSES — is in
+// docs/rules/backlog.md rather than settled here.
+it('answers a 503 by itself when Monitoring stands, and Monitoring stays', () => {
+  const s = withTop(E503, [])
+  const guarded: GameState = {
+    ...s,
+    players: { ...s.players, p1: { ...s.players.p1, release: { monitoring: MON } } },
+  }
+  const r = reduce(guarded, { type: 'DRAW', player: 'p1', at: 1000 })
+
+  expect(r.state.pending).toBeNull()
+  expect(r.state.players.p1.release.monitoring).toEqual(MON)
+  expect(r.state.decks.discard.map((c) => c.uid)).toEqual([E503.uid])
+  // the causal order every other answer keeps: the method, then what it banked
+  expect(r.events.map((e) => e.type)).toEqual(['drawn', 'revealed', 'neutralized', 'discarded'])
+})
+
+// A Debugger cannot be spent on a threat that was never a threat: with
+// Monitoring standing there is no decision to offer it to.
+it('never offers to burn a Debugger while Monitoring stands', () => {
+  const s = withTop(E503, [DBG])
+  const guarded: GameState = {
+    ...s,
+    players: { ...s.players, p1: { ...s.players.p1, release: { monitoring: MON } } },
+  }
+  const r = reduce(guarded, { type: 'DRAW', player: 'p1', at: 1000 })
+  expect(r.state.pending).toBeNull()
+  expect(r.state.players.p1.hand.map((c) => c.uid)).toContain(DBG.uid)
+})
+
+it('banks the alarm when a release is sacrificed for it', () => {
+  const s = withTop(E503, [])
+  const holding: GameState = {
+    ...s,
+    players: { ...s.players, p1: { ...s.players.p1, release: { frontend: { card: FE } } } },
+  }
+  const drawn = reduce(holding, { type: 'DRAW', player: 'p1', at: 1000 })
+  const r = reduce(drawn.state, {
+    type: 'RESOLVE',
+    player: 'p1',
+    choice: { kind: 'neutralize503', method: 'sacrifice', card: FE.uid },
+    at: 1001,
+  })
+  expect(r.events.map((e) => e.type)).toEqual([
+    'neutralized',
+    'discarded', // the alarm
+    'releaseDestroyed',
+    'discarded', // the release that paid for it
+  ])
+  expect(r.state.decks.discard.map((c) => c.uid)).toEqual([E503.uid, FE.uid])
+  expect(r.state.players.p1.release.frontend).toBeUndefined()
+})
+
+it('still banks the alarm at once when there is no way out', () => {
+  // the defenceless path is unchanged: nothing stands, because nothing is asked
+  const r = reduce(withTop(E503, []), { type: 'DRAW', player: 'p1', at: 1000 })
+  expect(r.state.pending).toBeNull()
+  expect(r.state.decks.discard.map((c) => c.uid)).toContain(E503.uid)
+  expect(r.state.eliminated).toEqual(['p1'])
+})
+
+it('projects the alarm card to everyone at the table', () => {
+  const drawn = reduce(withTop(E503, [DBG]), { type: 'DRAW', player: 'p1', at: 1000 })
+  // the rules make the reveal mandatory, so the card is public — not gated on
+  // `mine` the way an owner-only option list is
+  for (const viewer of ['p1', 'p2'] as const) {
+    const view = project(drawn.state, viewer)
+    expect(view.pending).toMatchObject({ kind: 'neutralize503', card: 'trigger-error-503' })
+  }
+})
+
+// Stacks `trigger-ai` as the next draw and shrinks the events deck to a
+// single entry, so which event fires is not the shuffle's decision — same
+// pattern eventCards.test.ts and aiEvents.test.ts use to drive one specific
+// AI event.
+const withAiEvent = (event: CardInstance, hand: CardInstance[] = []): GameState => {
+  // A non-colliding uid suffix: the real deck already carries its own
+  // `trigger-ai#0..N`, unremoved elsewhere in the pile, so reusing `#0` here
+  // would plant a genuine duplicate uid for the conservation check below to
+  // trip over. Same fix eventCards.test.ts's own `AI` fixture uses (`#ai0`).
+  const ai: CardInstance = { uid: 'trigger-ai#ai0', id: 'trigger-ai' }
+  const s = engine.createGame(config())
+  return {
+    ...s,
+    players: { ...s.players, p1: { ...s.players.p1, hand } },
+    decks: { ...s.decks, main: [[ai, ...s.decks.main[0]]], events: [event] },
+  }
+}
+
+it('sends the ai-error-503 mimic home to the events deck, never to the discard', () => {
+  // `resolveAiEvent`'s `ai-error-503` branch sets `card: null` on the
+  // `neutralize503` pending it raises: `fireTrigger`'s `trigger-ai` branch has
+  // already returned this event card to `decks.events` by the time the
+  // pending exists, so there is no card standing anywhere for a neutralize
+  // answer to bank alongside it. A regression that gave the pending the real
+  // card would make `bankAlarm` discard it — landing the same uid in both
+  // `decks.events` and `decks.discard` at once.
+  const event: CardInstance = { uid: 'ai-error-503#e0', id: 'ai-error-503' }
+  const drawn = reduce(withAiEvent(event, [DBG]), { type: 'DRAW', player: 'p1', at: 1000 })
+  // A Debugger in hand means a `neutralize503` pending is actually raised,
+  // not an immediate elimination — and its card is null from the start.
+  // `source` names the AI card this prompt belongs to (resolveAiEvent's
+  // ai-error-503 branch) — driven through the real trigger resolution, not a
+  // state literal, so a regression that drops the field here is caught.
+  expect(drawn.state.pending).toMatchObject({
+    kind: 'neutralize503',
+    card: null,
+    source: 'ai-error-503',
+  })
+
+  const r = reduce(drawn.state, {
+    type: 'RESOLVE',
+    player: 'p1',
+    choice: { kind: 'neutralize503', method: 'debugger' },
+    at: 1001,
+  })
+
+  expect(r.state.decks.events.map((c) => c.uid)).toContain(event.uid)
+  expect(r.state.decks.discard.map((c) => c.uid)).not.toContain(event.uid)
+
+  // Conservation invariant for this card specifically: one uid, one place.
+  // Scoped to `event.uid` rather than a whole-state uniqueness scan — this
+  // file's fixtures (DBG, E503, …) already reuse `#0`-suffixed uids for hand
+  // overrides without regard to what the real deck dealt elsewhere, so a
+  // blanket scan would flag pre-existing fixture noise unrelated to this fix.
+  // `conformance.ts`'s own realCardUids sweep (mirrored here) is what makes
+  // this the same accounting; the regression this guards against is this
+  // exact uid landing in two zones (`decks.events` and `decks.discard`) at
+  // once, which is precisely what counting its occurrences catches.
+  const allCards = [
+    ...r.state.decks.main.flat(),
+    ...r.state.decks.discard,
+    ...r.state.decks.events,
+    ...Object.values(r.state.players).flatMap((p) => [
+      ...p.hand,
+      ...(['frontend', 'backend', 'database'] as const).flatMap((slot) => {
+        const rel = p.release[slot]
+        return rel ? [rel.card, ...(rel.codeReview ? [rel.codeReview] : [])] : []
+      }),
+      ...(p.release.monitoring ? [p.release.monitoring] : []),
+    ]),
+  ]
+  expect(allCards.filter((c) => c.uid === event.uid)).toHaveLength(1)
 })
 
 it('spends a Debugger to neutralize', () => {
@@ -70,14 +256,8 @@ it('lets Monitoring absorb it and survive', () => {
     ...s,
     players: { ...s.players, p1: { ...s.players.p1, release: { monitoring: MON } } },
   }
-  const drawn = reduce(guarded, { type: 'DRAW', player: 'p1', at: 1000 })
-  expect(drawn.state.pending).toMatchObject({ methods: ['monitoring'] })
-  const r = reduce(drawn.state, {
-    type: 'RESOLVE',
-    player: 'p1',
-    choice: { kind: 'neutralize503', method: 'monitoring' },
-    at: 1001,
-  })
+  const r = reduce(guarded, { type: 'DRAW', player: 'p1', at: 1000 })
+  expect(r.state.pending).toBeNull()
   expect(r.state.players.p1.release.monitoring).toEqual(MON)
   expect(r.state.decks.discard.map((c) => c.uid)).toContain(E503.uid)
 })
@@ -135,8 +315,10 @@ it('reveals an AI trigger together with the event it pulls', () => {
 
 // --- Review findings: discarded events on every trigger-caused discard ---
 
-it('discards the revealed Error 503 itself, parented to the reveal', () => {
-  const r = reduce(withTop(E503, [DBG]), { type: 'DRAW', player: 'p1', at: 1000 })
+it('discards the revealed Error 503 itself, parented to the reveal, when there is no way out', () => {
+  // Unlike the with-a-neutralize-option case above, nothing is asked here, so
+  // there is nothing to hold: the alarm is banked at once, same as before.
+  const r = reduce(withTop(E503, []), { type: 'DRAW', player: 'p1', at: 1000 })
   const revealed = r.events.find((e) => e.type === 'revealed')
   const discarded = r.events.find((e) => e.type === 'discarded' && e.card === 'trigger-error-503')
   expect(revealed).toBeDefined()
@@ -284,4 +466,51 @@ it('keeps an AI-placed release playable after a DDoS bounce and thaw', () => {
   const backToP1 = reduce(p2Done2, { type: 'PUSH', player: 'p2', at: 1005 })
   expect(backToP1.state.turn.player).toBe('p1')
   expect(playableFor(backToP1.state, 'p1')).toContain(placedUid)
+})
+
+// ===== declining a 503 (#103 testing, problem 4) =====
+//
+// The card says the player выбывает "если не нейтрализует карту одним из трёх
+// способов" — it names no obligation to use a способ you happen to hold, so a
+// player who can answer and would rather not is declining, not cheating. The
+// board has always offered the key for it (`deriveDock` shows PASS through a
+// pending of your own) and every press was rejected in silence, because no
+// action behind it existed. See docs/rules/backlog.md — the reading is written
+// down there rather than settled here.
+it('lets a player who will not neutralize decline, and eliminates them for it', () => {
+  const drawn = reduce(withTop(E503, [DBG]), { type: 'DRAW', player: 'p1', at: 1000 })
+  expect(drawn.state.pending).toMatchObject({ kind: 'neutralize503' })
+
+  const r = reduce(drawn.state, { type: 'PASS', player: 'p1', at: 1001 })
+
+  expect(r.state.pending).toBeNull()
+  expect(r.state.eliminated).toEqual(['p1'])
+  // the alarm is banked exactly as it is on every other route out of a 503
+  expect(r.state.decks.discard.map((c) => c.uid)).toContain(E503.uid)
+  expect(r.events.map((e) => e.type)).toEqual(expect.arrayContaining(['discarded', 'eliminated']))
+})
+
+it('takes the declining player’s whole table with them, hand and zone', () => {
+  const holding = withTop(E503, [DBG])
+  const withZone: GameState = {
+    ...holding,
+    players: {
+      ...holding.players,
+      p1: { ...holding.players.p1, release: { frontend: { card: FE } } },
+    },
+  }
+  const drawn = reduce(withZone, { type: 'DRAW', player: 'p1', at: 1000 })
+  const r = reduce(drawn.state, { type: 'PASS', player: 'p1', at: 1001 })
+
+  expect(r.state.players.p1.hand).toEqual([])
+  expect(r.state.players.p1.release.frontend).toBeUndefined()
+  // the Debugger they declined to spend goes with the rest of the hand
+  expect(r.state.decks.discard.map((c) => c.uid)).toContain(DBG.uid)
+})
+
+it('refuses a decline from anyone but the player the decision is owed by', () => {
+  const drawn = reduce(withTop(E503, [DBG]), { type: 'DRAW', player: 'p1', at: 1000 })
+  const r = reduce(drawn.state, { type: 'PASS', player: 'p2', at: 1001 })
+  expect(r.state.eliminated).toEqual([])
+  expect(r.events.some((e) => e.type === 'rejected')).toBe(true)
 })

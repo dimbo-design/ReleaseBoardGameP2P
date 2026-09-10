@@ -243,8 +243,9 @@ the discard on its own.
    - **`d.card` absent, no `d.reveal`** → somebody else's, closed. Straight from the centre:
      `play('dealToSeat', { from: centre, to: cardBoxIn(seatBox(d.player), CARD_W * SEAT_SHRINK) })`,
      no flip, `drop('draw')`, and the shadow's `handCount` for that opponent is bumped and published.
-   - **`d.reveal` present** → a trigger, turned up for the whole table. `wait(BEFORE_FLIP)` →
-     `patch('draw', { faceDown: false })` → `wait(AFTER_FLIP)` → `wait(REVEAL_HOLD)` → the flyer
+   - **`d.reveal` present** → a trigger, turned up for the whole table (an AI trigger is claimed
+     whole by its own beat and never reaches this branch — see the AI recipe below). `wait(BEFORE_FLIP)`
+     → `patch('draw', { faceDown: false })` → `wait(AFTER_FLIP)` → `wait(TABLE_HOLD)` → the flyer
      itself (not a copy) is handed to `useDiscardExit.send`, with `node: elOf('draw')` and
      `scatter: scatterAt(d.reveal.discardId)` — the same scatter the heap rests the card on (**I7**)
      — then `drop('draw')`.
@@ -257,7 +258,7 @@ the discard on its own.
 | pile → centre | `drawToCenter` | 480 ms |
 | stand before flipping | `wait(BEFORE_FLIP)` | 220 ms |
 | flip settle | `wait(AFTER_FLIP)` | 560 ms |
-| a trigger's stand at the centre | `wait(REVEAL_HOLD)` | 900 ms on the board — **not the approved value.** The source is the `AI cards` scene, whose subject the behaviour of AI cards at the centre is: `TABLE_HOLD = 2600` (twice that for Hallucination), and the trigger stands beside the AI card for exactly that hold before both leave. `Draw card`'s `AI_HOLD = 4000` is another scene's number — its subject is the draw piles. The board edit is what is left (`docs/animations/backlog.md`) |
+| a trigger's stand at the centre | `wait(TABLE_HOLD)` | 2600 ms — imported from `features/board-beats/toCentre.ts`, the same constant the AI recipe below holds its own pair on (there doubled, `HALLUCINATION_HOLD`, for `ai-hallucination`; this branch never sees that card, so it never doubles) |
 | own card → hand | `useHandArrival` | `FLIGHT_MS = 480` |
 | trigger → discard | `useDiscardExit` | `FLIGHT_MS = 420`, on `scatterAt(discardId)` |
 | opponent's card → seat | `dealToSeat` | 460 ms, `to = cardBoxIn(seat, CARD_W * 0.7)` |
@@ -1115,54 +1116,74 @@ spot, flips back-up, and the new deck appears there.
 
 ---
 
-## Taking an opponent's card — deal grid, flip the pick, settle into the hand
+## Taking an opponent's card at random — their fan comes down, one back turns over, into your hand
 
 **When to call**
-Player triggers "take a random opponent card" → `deal()`. Phases `idle → deal → resolve`.
+Player triggers "take a random opponent card" → `deal()`. Phases `idle → present → reveal`.
 
 **Visual result**
-Face-down cards fan out from an origin point into a centered grid (staggered); clicking one slides it
-forward and flips it face up; after a pause the chosen card flies into the player's hand while the rest
-shrink back to the origin.
+The opponent's hand — the same `Hand`, backs up, turned 180° so its arc bows toward you — slides down
+from the top of the stage and is held out. Clicking a back sends the rest of the fan back up off the
+top while that card travels to the centre, turning upright on the way; there it flips face up, stands
+for a hold, and drops into your own fan.
 
 **Elements / refs**
-- `slotRefs[i]` — the deal-grid slots (each a face-down `Card`). `handRef` — the player fan (`useHandArrival`).
-- State: `phase`, `pool: PoolCard[]`, `chosen: number | null`, `dealt: boolean`, `hand`.
+- `.topHand` — the offered fan's wrapper, which owns the slide; `.topHandInner` inside it owns the
+  `rotate(180deg)`. The fan itself is `<Hand items={oppHand} faceDown onCardClick={pickCard}>`, so the
+  slots are `Hand`'s own children and the scene keeps no slot registry of its own.
+- `revealRef` — the flying card (`position: fixed`). `handRef` — your fan (`useHandArrival`).
+- State: `phase`, `oppHand: PoolCard[]`, `handIn` (the slide toggle), `chosen: string | null` (a uid),
+  `reveal: { card, from, to } | null`, `centered`, `flipped`, `hand`.
 
 **Sequence**
-1. `deal()`: `setPool(sampleBase(count))`; `setChosen(null)`; `setDealt(false)`; `setPhase('deal')`; then a
-   **double-rAF** → `setDealt(true)` (mount slots at `ORIGIN`, then transition to the grid).
-2. Slot layout is CSS-transition driven by `slotStyle(i)`:
-   - `!dealt` → `transform: ORIGIN` (`translate(-50%, -CARD_H/2 - 20) scale(0.35)`), `opacity: 0`.
-   - dealt, phase `deal` → grid `translate(calc(-50% + pos.x), pos.y - CARD_H/2)`; unchosen slots stagger via
-     `transitionDelay: i*45ms` (while `chosen === null`).
-3. `pickCard(i)` (only in `deal`, `chosen === null`): `setChosen(i)` → the chosen `Card` flips face up
-   (`faceDown={chosen !== i}`) and slides forward (`scale(1.12)`, `z 40`); `window.setTimeout(() => resolve(i), REVEAL_HOLD = 820)`.
-4. `resolve(i)`: measure `slotRefs[i]` rect; `arrive([{ key: uid, card: pool[i].card, from: rect }], hand.length)` (the `useHandArrival` hook
-   flies it into the fan); `setPhase('resolve')`. In `resolve`, `slotStyle` sends the chosen slot to `opacity:0`
-   (the hook owns the flight) and the rest back to `ORIGIN` (`opacity:0`).
-5. `useHandArrival` `onLanded(gap, landed)`: splice into `hand` at `gap`; `setPhase('idle')`; clear `chosen/dealt/pool`.
+1. `deal()`: `setOppHand(sampleBase(count)…)`; `setPhase('present')`; `handIn = false` → **double-rAF**
+   → `handIn = true`. `.topHand` transitions from `translateY(-160%)` to `0`: the fan is mounted off
+   the top edge and paints there before it is asked to come down (like **I2**, and for its reason).
+2. `pickCard(i, el)` (only in `present`, `chosen === null`): measure the clicked slot; compute the
+   delta to the **viewport** centre (`window.innerWidth / 2` — this scene has no stage inset to
+   correct for, unlike its two siblings); `setChosen(uid)`; `setPhase('reveal')`; `handIn = false` (the
+   rest of the fan slides back up and off); build `reveal` with the slot's rect as `from` and, as `to`,
+   `translate(dx, dy) scale(REVEAL_W / r.width) rotate(0deg)`; **double-rAF** → `centered = true`.
+   The chosen slot's `renderFace` returns `null` from here on, so the card is never on screen twice.
+3. The flyer starts at `rotate(180deg)` — the orientation it had inside the opponent's fan — and the
+   CSS transition on `.reveal` carries it all the way to `to`, so it turns upright over the flight
+   rather than snapping at either end.
+4. `onRevealEnd` (transform end, `centered && !flipped`): `flipped = true`, so `Card` plays its own
+   `flipCard`; then `setTimeout(fall, REVEAL_HOLD)`.
+5. `fall()`: measure the reveal node; `arrive([{ key: nextHandUid(), card, from: rect }], hand.length)`
+   — the shared `useHandArrival` flies it into your fan; `setReveal(null)`.
+6. `onLanded(gap, landed)`: splice into `hand` at `gap`, then clear the round — `phase` to `idle`, and
+   `oppHand` / `chosen` / `reveal` / `centered` / `flipped` / `handIn` reset.
 
 **Params & timings**
-| Step | Mechanism | Duration |
+| Step | Mechanism | Value |
 |---|---|---|
-| deal-in / return | CSS transition on the slot (`ORIGIN ↔ grid`), staggered `i*45ms` | (CSS) |
-| flip the pick | `Card` `flipCard` on `faceDown` change | 420 ms |
-| reveal hold before flight | `setTimeout(REVEAL_HOLD)` | 820 ms |
+| the fan comes down / goes back up | CSS transition on `.topHand` (`transform`), `--ease-soft` | 520 ms |
+| slot → centre | CSS transition on `.reveal` (`transform`), `--ease-soft` | 460 ms |
+| flip the pick | `Card`'s own `flipCard` on the `faceDown` change | 420 ms |
+| centre hold before the drop | `setTimeout(REVEAL_HOLD)` | 820 ms |
 | chosen → hand | `useHandArrival` | `FLIGHT_MS = 480` |
+| the width it reaches at the centre | `REVEAL_W` | 220 px |
+| how big a hand is offered / your own | `count` (slider) / `INITIAL_HAND` | 2…16, default 8 / 5 |
 
 **Invariants**
-- The deal / reveal / return are **CSS transitions** on the slots (not `play()` presets); the flip is the
-  `Card`'s own `flipCard`. Only the final hand insert uses a module (`useHandArrival`).
-- Local: the double-rAF (like **I2**) lets slots paint at `ORIGIN` before transitioning to the grid; the
-  reveal→flight gap is `REVEAL_HOLD`.
+- The slide, the flight and the return are **CSS transitions** on nodes the scene owns; the flip is
+  the `Card`'s own `flipCard`. Only the final hand insert is a module (`useHandArrival`).
+- The chosen slot renders `null` while the flyer carries the card — one card, one node.
+- Local: the double-rAF (like **I2**) is used twice, once so the fan paints off the top edge before it
+  comes down, once so the flyer paints at its slot rect before it leaves it.
+- Nothing here decides WHICH card is taken — the player clicks a back and learns what it was only at
+  the centre. The pick is a **reveal**, and that is the half of this scene the board keeps when the
+  engine's RNG does the choosing (see the board recipe below).
 
 **End state & cleanup**
-- Chosen card inserted into the hand at `gap`; pool cleared; `phase` back to `idle` (via the hook callback).
+The chosen card is spliced into your hand at `gap`, `oppHand` is cleared and `phase` is back to `idle`
+— all of it from the hook's `onLanded`. `restart` clears the hold timer, resets the arrival and
+rebuilds your hand.
 
 **Building blocks**
-[`useHandArrival`](./reference.md#hand-arrival--cards-arrive-in-the-hand) · `Card` `flipCard` (auto). Grid geometry: `gridPositions`
-(uses `DEAL_CARD_W`, `CARD_H`, `GAP_X/Y`, `COLS_MAX`); the `ORIGIN` transform.
+[`useHandArrival`](./reference.md#hand-arrival--cards-arrive-in-the-hand) · `Hand` (`faceDown`,
+`onCardClick`, `renderFace`) · `Card` `flipCard` (auto) · CSS transitions on `.topHand` / `.reveal`.
 
 **Live reference**
 `Random opponent card` — `apps/playground/stories/interactive/PickOpponentCardStory.tsx`.
@@ -1280,24 +1301,28 @@ player is out, and a full-screen elimination video plays for everyone.
 1. `drawFlow()`: `setFlyer(503, faceDown)`, `nextFrames`, position at `cardAreaOf(deckRect)` →
    `play('drawToCenter', {from, to: centerRect})`; on finish cancel + pin (**I3/I4**); `wait(180)` → flip up;
    `wait(560)` → `setCenterCard(503)`, clear flyer.
-2. **Monitoring present** → `setDock('push')`, `wait(750)`, `setCenterCard(null)`, `sweep([503], gather=false)`;
-   no glow, Monitoring stays.
+2. **Monitoring present** → `setDock('push')`, `wait(COVER_HOLD)`, `setCenterCard(null)`, `sweep([503],
+   gather=false)`; no glow, Monitoring stays. Held for the SAME `COVER_HOLD` every other answer stands open for
+   — not a shorter beat of its own.
 3. **No Monitoring** → `setAlert(true)`, `setPending(true)`, `setDock('reaction')`. `canDefend = Debugger in hand
    || rel.frontend || rel.backend`. If not → `wait(2500)` → `eliminate(false)`. Else hand off to the player.
 4. **Defence drag** (`beginDrag`): capture the grab fraction, source centre and `startW`; one rAF loop eases
-   `startW → CARD_W` over `ResizeMs = 200` while keeping the grab point under the cursor. On `mouseup`, hit-test
-   the centre with `DROP_PAD`: inside → `resolveDefense`, outside → `returnDrag`. The Debugger uses the canonical
-   `Hand.onPlay` (`handPlay`), accepted only for the Debugger dropped on the 503.
+   `startW → CARD_W` over `ResizeMs = 200` while keeping the grab point under the cursor. On `mouseup`,
+   `onTable(x, y)`: the WHOLE table accepts the drop; only the player's own area (the release zone + the fan,
+   measured via `youRef`) gives it back — inside → `resolveDefense`, outside (over `you`) → `returnDrag`. There
+   is no drop-target hint and no radius around the 503 itself; hitting "the table" is hitting anywhere that is
+   not your own area. The Debugger uses the canonical `Hand.onPlay` (`handPlay`), accepted only for the Debugger
+   dropped on the 503.
 5. `resolveDefense`: cover the 503 (transition `left/top/width` 240 ms to `centerRect`/`CARD_W`), `wait(300)`;
-   read each card's actual rect via `[data-main]`/`[data-aux]` anchors (nothing rotated → bbox = card, **no
-   teleport**); remove the played card from its source; `sweep(items, gather=false)` in stack order **503, Code
-   Review, Release**; `setDock('push')`.
+   `wait(COVER_HOLD)`; read each card's actual rect via `[data-main]`/`[data-aux]` anchors (nothing rotated →
+   bbox = card, **no teleport**); remove the played card from its source; `sweep(items, gather=false)` in stack
+   order **503, Code Review, Release**; `setDock('push')`.
 6. `returnDrag`: transition back to the source slot (240 ms), shrink to `startW`, `wait(260)`, clear drag.
 7. `eliminate(includeRelease)`: collect the hand's per-slot rects (`handSlotRects()`) + (on PASS) the release
    slots; clear hand/zone/centre; `sweep(items, gather=true)`; `setEliminated(true)`, `setDock('waiting')`;
    `playEliminationGif()`.
 8. `sweep(items, gather)`: mount `outs`, position at source rects; if `gather` glide all to `centerRect` (300 ms)
-   + `wait(560)`; then per card `play('centerToDiscard', toDiscardParams(from, cardAreaOf(discardRect),
+   + `wait(GATHER_HOLD)`; then per card `play('centerToDiscard', toDiscardParams(from, cardAreaOf(discardRect),
    jitter()))` (**I7**), append to `discard` with the same scatter.
 9. Elimination video: `playEliminationGif` picks a random bundled `./eliminate/*.mp4` and loops; `onGifEnded`
    replays until `ELIM_MIN_MS`, then fades out (360 ms) and resolves.
@@ -1306,20 +1331,22 @@ player is out, and a full-screen elimination video plays for everyone.
 | Step | Duration |
 |---|---|
 | draw flip / hold | `wait(180)`, then `wait(560)` |
-| Monitoring auto-neutralise hold | `wait(750)` |
+| every answer's open hold (Monitoring included) | `wait(COVER_HOLD)` = `1200` |
 | defenceless beat before KO | `wait(2500)` |
 | drag resize ease | `ResizeMs = 200` (cubic) |
-| cover / return glide | 240 ms + `wait(300)` / `wait(260)` |
-| gather glide (elimination) | 300 ms + `wait(560)` |
+| cover glide (drop) | 240 ms + `wait(300)` + `wait(COVER_HOLD)` |
+| return glide (off-target) | 240 ms + `wait(260)` |
+| gather hold (elimination) | glide 300 ms + `wait(GATHER_HOLD)` = `1500` |
 | discard flight | `play('centerToDiscard')` (move 420) |
 | elimination video | ≥ `ELIM_MIN_MS = 5000`, fade 360 ms |
-| drop forgiveness | `DROP_PAD = 48` px |
+| the cover's own offset | `COVER_DX = 16`, `COVER_DY = -12` (so alarm and answer both read) |
+| GIF entrance beat | `GIF_DELAY = 400`, after the table has emptied |
 
 **Invariants**
 - **Nothing rotates at the centre** (flat cover, flat `RelStack`): a rotated pair's bbox ≠ the card, which
   teleports the cards on the discard hand-off. Flat → bbox = card → the flight continues from where they lie.
-- Defence is a **drag with invisible hit areas** (no drop-target hints), hit-tested with `DROP_PAD` forgiveness —
-  never a click/arrow.
+- Defence is a **drag accepted by the whole table**, refused only by the player's own area (`onTable`) — no
+  drop-target hints, no radius carved around the 503 — never a click/arrow.
 - A Release drags **with its attached Code Review** (bound by position via `[data-main]`/`[data-aux]`, not
   "grouped").
 - The edge glow lives in `.glowBounds`, offset by the measured tech-bar height (screen edge ≠ table edge).
@@ -1335,6 +1362,223 @@ player is out, and a full-screen elimination video plays for everyone.
 
 **Live reference**
 `Error 503` — `apps/playground/stories/interactive/Error503Story.tsx`.
+
+---
+
+## Error 503 on the board — the alarm from `pending`, three gestures, one exchange
+
+**When it fires**
+There is no `drawFlow()` on the board — the 503 is not staged by a click. `neutralize503` is a
+projected `pending`: the moment the engine raises it, the alarm stands at the centre and the
+answering player's own hand-off (`_useNeutralizeStaging.tsx`) and the beat runner
+(`defenseBeat.runNeutralized`) both key off it. The three gestures are read live off
+`pending.methods` — a method not named there simply does not light up; nothing here re-derives
+legality.
+
+AI Crush uses the same staging hook and three gestures. The choice retains `kind: 'crush'`,
+so the engine receives the pending it actually opened. Its revealed AI card stays in the effect
+slot; no Error 503 card or generic method panel is added. `runNeutralized` consumes the staged
+answer, and its existing `homeward` leg returns the AI card to the events deck after resolution.
+Rejected answers return through the same hand/zone paths as Error 503.
+
+**The glow — two mount points, and DOM order is the rule**
+`_Board.tsx` mounts `EdgeGlow` **twice**, never once, because "your own alarm" and "someone else's"
+read differently and the DOM position is what makes that true rather than a z-index guess:
+- **Ours** — `intensity="strong"`, mounted **BEFORE** the hand, so it glows *under* it. `glowStrong =
+  (pendingAlarm && alarmMine) || beats.alarm` — the second half is the defenceless sweep's own
+  alarm, which raises no `pending` at all (the elimination lands in the same batch), so the running
+  beat's own `alarm` flag is what keeps the glow lit through it.
+- **Someone else's** — `intensity="weak"`, mounted **AFTER** the hand, so it lies *over* it.
+  `EdgeGlow` is already `pointer-events: none` at both intensities, so the fan's hover keeps working
+  underneath.
+
+Neither reaches for the playground's `.glowBounds` offset math — the table's own zone is already
+`position: relative; overflow: hidden; isolation: isolate`, so it supplies its own bounds and there
+is nothing to measure (the playground's story is deliberately not the reference here, Page Shell
+Rule).
+
+**The three gestures**
+All three read `pending.methods`; a slot or fan card the method set does not name never lights.
+- **Debugger** (`onHandPlay`) — pulled from the fan like any other hand play, accepted only when
+  `methods.includes('debugger')` and the card is the Debugger, dropped on the table (`onTable`: the
+  zone + fan is the player's own area, everywhere else on screen is the table — same rule the
+  playground story's `onTable` uses, measured off `anchors.zone`/`anchors.hand` rather than one
+  `youRef`).
+- **Sacrifice** (`onSlotDown` → `useZonePull`) — a release is dragged out of its slot (`_useZonePull`
+  owns the drag state and knows nothing about the game; `accepts: onTable`, `onDrop` commits the
+  choice); its own Code Review, if any, travels with it by position, not by "grouping".
+- **Monitoring** — a **press**, not a drag: `onSlotDown` dispatches `RESOLVE` straight from the
+  handler when the key is `monitoring`. Nothing is staged, nothing flies — the finding this leaves
+  open (no designed movement for an answer that does not leave the table) is recorded in
+  `backlog.md` and the audit register, not re-invented here.
+
+**The exchange**
+`commit()` sends the `RESOLVE` synchronously, in the same commit that hands the card to the flyer
+(the no-duplicate rule `_useDefenseStaging` also keeps) — never the other order. `runNeutralized`
+plays the answer's cover exactly the way `runCovered` plays a defence: `play('playToCenter')` to the
+cover slot at `COVER_POSE` (`{ rot: 6, dx: 16, dy: -12 }`), skipped entirely for Monitoring (no card)
+and for the answering player's OWN play (`!(mine && handoff)` — the gesture has already delivered it,
+asking whether the play was *staged* rather than whether its node exists yet is what keeps a second
+copy from flying in). Both stand open for `SHOW_HOLD = 1200`ms, then leave as **one send**: the alarm
+(layer 0) and the answer plus its aux (layer 1) — `useDiscardExit`'s `Leaving[]`, each card carrying
+its own `scatter` off its own `discarded` event id (**I7**, **I9**).
+
+**The gather leg — a defenceless player's whole table**
+When nobody answers, the sweep is `discardBeat`'s `plan.gather` branch (ported from the playground's
+own `sweep(items, gather)`), not a separate module: every card the eliminated player owned is raised
+at its own rect, glided to a scattered heap at the centre (the same `scatterAt` model the discard
+uses), held open for `GATHER_HOLD = 1500`ms so the table can read what happened, then handed to the
+discard exit with the heap's own boxes and poses. `Beat.alarm` (the running beat's own field, not a
+plan field — see Task 10) is what keeps the strong glow lit for the length of this sweep, since no
+`pending` stands to key `glowStrong` off.
+
+**Params & timings (board)**
+| Step | Value |
+|---|---|
+| answer's open hold before the exchange leaves | `SHOW_HOLD = 1200` |
+| the cover's own offset | `COVER_POSE = { rot: 6, dx: 16, dy: -12 }` |
+| the alarm's own rest tilt | `ATTACK_POSE = { rot: -4, dx: 0, dy: 0 }` |
+| gather hold before the defenceless sweep scatters | `GATHER_HOLD = 1500` |
+
+**Building blocks**
+[`play('playToCenter')`](./reference.md) · `useDiscardExit` (`Leaving[]`, `scatterAt`) · `useFlyer` ·
+`useZonePull` (`_useZonePull.ts`) · `EdgeGlow` (two mounts) · `Beat.alarm` (`useBeats.ts`).
+
+**Live reference**
+`apps/frontend/src/pages/board/[gameId]/_Board.tsx`, `_useNeutralizeStaging.tsx`,
+`features/board-beats/defenseBeat.tsx` (`runNeutralized`), `features/board-beats/discardBeat.tsx`
+(the `gather` branch), `features/board-beats/planBeats.ts` (the `neutralized` plan).
+
+---
+
+## Elimination on the board — the clip over a table that has already settled
+
+**When it fires**
+On the engine's own `eliminated` event, and on nothing else. It is NOT a leg of the sweep: the
+sweep is a `discard` plan with `gather`, and elimination is reachable with nothing to sweep at all
+(`lastStanding` is a win condition), where that plan is dropped for having no cards. So `planBeats`
+gives the elimination a plan of its own — pushed inside `flush()`, **after** the discard run it
+opened, because the `eliminated` event arrives BEFORE the discards it marks and the clip has to
+play over an emptied table rather than under one.
+
+**Visual result**
+The board settles into its eliminated state — the seat zeroed, the local player's zone and fan
+replaced by the "you are out" badge — and the clip comes up over the whole stage a beat later. It
+loops until `ELIM_MIN_MS`, finishes the loop it is in, and is gone at once. What it uncovers is the
+state that was already there.
+
+**The state under it is the projection's, not the beat's**
+The beat **publishes nothing**. `eliminated` is folded by the engine's own projection
+(`fake/project.ts` → `toBoardState`), so the seat, the hand and the zone read as out because the
+board says so — which is what keeps them out for the rest of the match once the clip has gone. The
+beat is `exclusive`, and that is load-bearing twice over: input is dead under a full-screen video,
+and an exclusive beat publishes no shadow, so what lies under the clip is the LIVE board. A
+non-exclusive beat here would hold the pre-batch shadow up instead and empty the table at the
+moment the clip lifted — the video would be covering the elimination rather than following it.
+
+**One clip for the whole table**
+`ELIMINATION_CLIPS[plan.eventId % ELIMINATION_CLIPS.length]` — derived, never `Math.random()`.
+Every peer already holds the elimination's event id, so one elimination is one clip on every
+screen, at no cost on the wire and with no new event field. The list is globbed from
+`./eliminate/*.mp4` and **sorted by path**: the pick is an index, and glob order is Vite's to
+change.
+
+**Bundled, not fetched**
+The clips are imported (`import.meta.glob`, `query: '?url'`), so Vite emits each as its own hashed
+asset — they are not in the JS bundle and nothing is fetched until the overlay mounts. There is no
+backend and no CDN to fetch them from (Architecture Rule), and a build-time import means a renamed
+clip breaks the build instead of 404-ing on somebody's board.
+
+**Fetched before anybody needs one**
+`useEliminationPreload` fetches all four at browser idle, once the match is running — mounted from
+`_Board.tsx` on `!deal.active`. Not at app start: initial load does not pay for these today, and a
+clip that may never be needed should not change that. All four, because which one comes up is known
+only at the elimination itself. Nothing is kept — the point is the HTTP cache, so `<video>` starts
+from it instead of from the network.
+
+**The guard is the clip's own time, not a blanket ceiling**
+A single ceiling for every clip is wrong for all of them at once: too generous for a short clip (the
+board sits dead past its end) and a real risk of cutting a long one. So each clip is guarded with
+its own number, derived from the rule the beat already plays by — loop to the floor, then let the
+pass you are in finish. That is `idealEndMsFor`: `ceil(ELIM_MIN_MS / duration) * duration`, the
+first whole loop at or past the floor, which is what a healthy clip takes IN THE IDEAL.
+
+**…plus room for the seams that end really contains.** Real playback runs a little longer than the
+ideal: `ended` fires, the handler rewinds to 0, `play()` is called and a frame decodes, every time
+round. Armed on the ideal number exactly, the timer beats the last `ended` to the exit on every clip
+that loops — and the beat goes back to ending on a number instead of on a loop boundary, which is
+the thing the per-clip guard exists to stop. Worse, it never surfaces as a failure, only as a clip
+that ends a few frames early. So `guardMsFor` adds `ELIM_GUARD_SLACK_MS` **per loop** — what varies
+between clips is the number of seams, not a fixed overhead, and these clips are expected to be
+replaced, so the shape has to survive a shorter one arriving. The guard is there for a stalled
+stream: it should fire well after any honest end, and a stall waiting a few hundred ms longer costs
+nothing.
+
+Two conditions make that number honest, and both are pinned:
+- **the count starts at real playback (`playing`), not at mount** — otherwise loading spends the
+  clip's own budget and a slow connection reproduces the same cut with a different number. Only the
+  first `playing` counts; a stall that resumes must not hand the clip a fresh budget.
+- **the lengths live beside the clip list** (`CLIP_MS`), and `eliminateClips.test.ts` reads each
+  file's real duration out of its own `moov/mvhd` box and fails if the table disagrees or a clip
+  ships without an entry. That matters here specifically: the clips ship with unconfirmed rights and
+  are expected to be replaced, so a swap has to fail loudly rather than quietly mis-time the beat.
+
+`performance.now()`, as in the source.
+
+**Four ways it ends, one way out**
+`finish()` is the single exit — the overlay goes, whichever guard is armed is disarmed, the beat's
+promise resolves once — and four things reach it:
+- `ended` past `ELIM_MIN_MS`. Before the floor, `ended` replays the clip instead.
+- `error` — a missing file, a refused codec. Nothing is put in its place: the board is already in
+  its eliminated state, which is what carries the news; the clip was the punctuation, not the
+  sentence.
+- a rejected `play()` — autoplay refused. It fires no event at all, so without catching the promise
+  the beat would wait on a clip that was never going to play.
+- a guard: the clip's own time once playback has started, and `ELIM_START_MS` before it has. The
+  second is a LOADING guard, not a clip one — it covers the only case the per-clip number cannot,
+  a clip that never begins at all, which would otherwise hold the board for the rest of the match.
+
+**The winner waits for it**
+The engine settles the elimination and the win it caused in ONE reduction (`fake/triggers.ts`:
+`eliminated`, its discards, then `gameOver`), so `view.over` is true the instant the batch lands —
+while the sweep and the clip are still queued. `over` also rides BESIDE the projection
+(`toBoardOver` hangs it off the props, not off `BoardState`), so the shadow that holds every other
+visible fact back does not cover it. `useBeats` therefore publishes one plain fact, `running` — the
+queue is still working, held for the whole drain rather than per beat — and `_Board` renders
+`GameOver` only when it is false. Without it the winner panel is announced over the top of the clip
+that explains why they won.
+
+**Under `prefers-reduced-motion` there is no clip at all**
+Decided, not emergent: a full-screen autoplaying video is exactly what the preference is about.
+`useBeats` queues no beat under the preference, so the board goes straight to its eliminated state
+— the same policy, in the same one place, that every other beat obeys.
+
+**Params & timings**
+| Step | Value |
+|---|---|
+| the emptied table holds before the clip covers it | `ELIM_DELAY = 400` |
+| the clip loops at least | `ELIM_MIN_MS = 5000` |
+| its ideal end, the first whole loop past that | 6.10 / 6.53 / 6.47 / 9.40s for the current four |
+| the guard, which is that plus room per seam | `+ ELIM_GUARD_SLACK_MS = 250` per loop |
+| a clip that never starts playing at all | `ELIM_START_MS = 10000` (a loading guard, not a clip one) |
+| fade in | 260ms, over a clip that is ALREADY playing — the fade does not hold it back |
+| fade out | none: the turn is over, there is nothing left to watch out of |
+
+**Invariants**
+- The overlay is `inset: 0` of the **stage**, not of the viewport — `.table` is already
+  `position: relative`, so it supplies its own bounds (the same reason the board's `EdgeGlow`
+  measures nothing).
+- **I5** on the clip: a media element does not re-fetch when `src` changes, so the `<video>` is
+  keyed by its source — a different clip is a different element.
+
+**Building blocks**
+`wait` · `Beat.exclusive` / `Beats.running` (`useBeats.ts`) · the `eliminated` plan
+(`planBeats.ts`).
+
+**Live reference**
+`apps/frontend/src/features/board-beats/eliminateBeat.tsx`, `features/board-beats/planBeats.ts`
+(the `eliminated` plan), `features/board-beats/useBeats.ts` (`beatOf`). The playground's own tail is
+`Error 503`'s `eliminate()` — the source this was ported from.
 
 ---
 
@@ -1416,34 +1660,162 @@ Vibe).
 
 ---
 
+## An AI trigger resolves (live board) — cause, effect, one of six endings
+
+Driven by `aiRevealed` and `takenFromDiscard`, planned by `planBeats` (`aiTailAfter`) and run by
+`aiBeat` (`useAiBeat`). The playground recipe above is its original; the board keeps the shared
+opening and the vocabulary of endings, and translates the rest — there is no fan of Inside
+candidates here, an opponent is a seat and a count, and a prompt an effect raises can outlive the
+batch that revealed it.
+
+**When to call**
+Never directly. `useBeats` plans an `aiEvent` beat from `aiRevealed` — paired with the `discarded`
+that banks the trigger in the same reduction — and runs it through `run`; a `takenFromDiscard` event
+with `to: 'hand'` plans its own beat and runs through `runTaken`. Neither is `exclusive`: an AI card
+is read, not obeyed, and nothing about it needs input dead.
+
+**Visual result**
+One shared opening for every ending: the trigger comes off its pile and stands at `cause`, left of
+centre; the events deck gives up the card that explains it to `effect`, wider and to the right; both
+flip face up and hold — `TABLE_HOLD`, doubled for Hallucination. Only then do the endings differ,
+each one read off what the plan already decided rather than re-derived from the card's own id:
+
+| Ending | What the table sees |
+|---|---|
+| `zone` | the effect card settles into an empty release/monitoring slot (`playToReleaseZone`) and STAYS — a card standing in a zone slot is what the batch's own `released`/`placed` looks like from outside this beat. |
+| `crush` | the destroyed release rises as its own flyer at its own slot, in the same commit the zone lets go of it, and takes its own road — the events deck (`returnToDeck`) or the discard (the discard-exit step), whichever the plan's `destination` says (read off `releaseEventsOf`, never guessed from the card's id); the effect card goes home once the trigger and the destroyed release have left. |
+| `turnEnded` | the turn simply ends; the effect goes home. |
+| `alarm` | the effect mimics an Error 503 that resolved with nobody able to answer it (no pending raised); the effect goes home. |
+| `none` | nothing else followed in the batch; the effect goes home. |
+| `standing` | a prompt is now owed — `crush`, `neutralize503`'s mimic, `handLimit` (Bad Vibe) or `pickFromDiscard` (Inside) — and the effect card is dropped exactly where it stands rather than sent home. |
+
+"Goes home" is one leg, `goHome`, shared by every ending but `zone` and `standing`: the card flips
+face down where it stands and shrinks back into the events deck (`returnToDeck`).
+
+> **The trigger never gets the `standing` treatment, and that is not a stylistic choice.** The
+> engine banks it — `discarded(trigger-ai)` in `fireTrigger` — in the very reduction that reveals
+> it, before `resolveAiEvent` ever runs; by the time this beat plans, the projection already has the
+> trigger in the discard heap. Holding it on screen would contradict a projection that has already
+> moved it. The effect card CAN stand, because `decks.events` is projected only as a count — one
+> fewer, and nothing on screen disagrees with the card still standing at `effect`. Do not "fix" this
+> into a matching pair: the asymmetry is downstream of an open backlog entry on the engine banking
+> the trigger before its own effect resolves, not a gap in this beat (`docs/animations/backlog.md`).
+
+**Elements / refs** — all from `BoardAnchors`
+- `pileBox(index)` — the pile the trigger drew off.
+- `cause` / `effect` — the AI pair's own centre places, from `centrePlaceStyle('ai', …)`
+  (`TableCentre/centre.ts`).
+- `eventsBox` — the events deck: both ends of the effect card's trip home.
+- `releaseSlot(player, slot)` — a `zone` ending's destination, and a `crush`'s victim.
+- `discardBox` / the discard-exit step — the trigger's own road, and an ordinary `crush`
+  destination's.
+
+**Sequence — `run` (`aiEvent`)**
+1. `toSlot({ key: TRIG, card: trigger, from: cardAreaOf(pileBox(plan.pile)), to: cause })`; flip
+   after `BEFORE_FLIP`; hold `AFTER_FLIP`.
+2. `toSlot({ key: EFF, card: event, from: cardAreaOf(eventsBox), to: effect })`; flip; hold.
+3. `wait(plan.eventCard === 'ai-hallucination' ? HALLUCINATION_HOLD : TABLE_HOLD)` — the one place
+   this runner reads the card's own id, and only to size the READING; `plan.tail` alone still
+   decides what the effect DOES.
+4. A `crush` raises the destroyed release as its own flyer, at its own slot, in the same commit the
+   zone lets go of it.
+5. Three legs run together (`Promise.all`): the trigger to the discard on
+   `scatterAt(plan.triggerDiscardId)` (**I7**); the effect down its ending's road; a `crush`'s
+   destroyed release down `plan.tail.destination`'s road.
+
+**Sequence — `runTaken` (`takenFromDiscard`)**
+`ai-inside`'s own answer, resolved. One path, two audiences:
+1. `toSlot({ key: EFF, card, from: cardAreaOf(discardBox), to: effect, faceDown: false })`; hold
+   `SHOW_HOLD` — open at the centre for the WHOLE table, the same way `AiCardsStory`'s own
+   `insideGrab` holds it, regardless of who it belongs to.
+2. **Mine** — `useHandArrival` into the fan.
+3. **Someone else's** — `dealToSeat` into their seat; their `handCount` is bumped in the same step
+   the flight lands, so the hand-over to `live` does not pop their fan by one the instant the queue
+   drains.
+4. If this batch also answers a standing prompt (`plan.homeward`), the AI card that has been
+   standing at `effect` since the batch that raised it goes home now: a no-travel raise at the place
+   it already occupies, flip, `returnToDeck`. Written out here rather than shared with
+   `handLimitBeat.tsx`'s or `defenseBeat.tsx`'s own `sendHomeward` — a carrier passed between hooks
+   is how this codebase has already grown two latch bugs of that family.
+
+**Params & timings**
+| Step | Preset / wait | Value |
+|---|---|---|
+| pile → `cause`, events deck → `effect` | `drawToCenter` (via `toSlot`) | 480 ms each |
+| flip, before / after | `wait(BEFORE_FLIP)` / `wait(AFTER_FLIP)` | 220 ms / 560 ms |
+| table hold | `wait(TABLE_HOLD)` | 2600 ms (`HALLUCINATION_HOLD` = 5200 ms) |
+| effect home | `returnToDeck` | 480 ms |
+| trigger / an ordinary crush → discard | the discard-exit step | — |
+| Inside, shown to the table | `wait(SHOW_HOLD)` | 1500 ms |
+
+**Invariants**
+- **I2** — the `standing` leg waits a frame before dropping its carrier, so the projection's own
+  `aiStanding` render (`_Board.tsx`, off `pending.source`) is up before the flyer lets go.
+- **I4** — `toSlot` pins after every arrival, so the flip and the next leg start from where the card
+  visibly stands.
+- **I7** — the trigger's discard-exit reads `scatterAt(plan.triggerDiscardId)`, the same call the
+  heap rests it on.
+- Local: what an ending DOES is never re-derived from `eventCard`'s id — only the Hallucination
+  hold's length is, and that is a presentation question, not a mechanic one.
+
+**End state & cleanup**
+`zone` — the card stays in its slot. `crush` — the slot is empty; the destroyed release and the
+effect card have each taken their own road. `standing` — the effect card is left exactly where it
+stands; its trip home belongs to whichever batch answers the prompt. Every other ending — the effect
+is back in the events deck. The trigger is always in the discard.
+
+**Building blocks**
+[`drawToCenter`/`playToReleaseZone`/`returnToDeck`](./reference.md#presets) · `flipCard` (auto, via
+`Card`) · [`useHandArrival`](./reference.md#hand-arrival--cards-arrive-in-the-hand) ·
+[`useDiscardExit`](./reference.md#discard-exit--cards-leave-the-table-for-the-discard) ·
+[`useToCentre`/`toSlot`](./reference.md#the-movement-steps-and-the-carrier-under-them) ·
+[`cardAreaOf`](./reference.md#card-geometry-helpers) ·
+[`centrePlaceStyle`](./reference.md#centre-of-the-table--the-places-a-card-lands-in).
+
+**Live reference**
+Not a playground scene — this beat runs on the real board:
+`apps/frontend/src/features/board-beats/aiBeat.tsx`, with the plans in
+`features/board-beats/planBeats.ts` (`aiTailAfter`) and the standing render in
+`pages/board/[gameId]/_Board.tsx`. The playground original is the recipe above.
+
+---
+
 ## Take a specific card — name it, then it flies out of the opponent's hand
 
 **When to call**
-The player names a card to demand from an opponent (`requestCard`) → `start()`, then `pickWanted(card)`. Phases
-`idle → choose → picked → (reveal | miss)`. The outcome is forced in the showcase by the `inHand` toggle.
+The player names a card to demand from an opponent (`requestCard`) → `start()`, then `pickWanted(card)` to arm the
+choice and `confirmWanted()` to commit it. Phases `idle → choose → picked → (reveal | miss)`. The outcome is
+forced in the showcase by the `inHand` toggle.
 
 **Visual result**
-A catalog grid (base cards, no triggers, face-up) appears at the centre and the opponent's face-down fan slides
-in from the top. Clicking a grid card holds it (the rest leave); then either that card flies out of the opponent
-fan to the centre, flips face up and drops into your hand (hit), or the fan shakes with a "not in hand" note and
-leaves (miss).
+A `CardCatalog` (base cards, no triggers, face-up) appears in the middle band and the opponent's face-down fan
+slides in from the top. Clicking a cell arms it — the card lights in the selection colour — and the confirm bar
+commits it, after which the named card holds enlarged while the rest of the catalog slides away; then either that
+card flies out of the opponent fan to the centre, flips face up and drops into your hand (hit), or the fan
+flinches in place with a "not in hand" note and leaves (miss).
 
 **Elements / refs**
 - `rootRef` (stage — the centre is measured against it, not `window`: the playground has a sidebar), `handRef`
-  (your fan), `fanRef` (opponent fan wrapper — slots are its inner children), `revealRef` (the flying card).
+  (your fan), `topHandRef` (the opponent fan's slide wrapper — the node that flinches on a miss), `fanRef`
+  (the fan inside it — slots are its inner children), `revealRef` (the flying card).
+- `CardCatalog` (`open` / `selected` / `chosen`, `width = GRID_W`) and `ConfirmAction` under it.
 - State: `phase`, `wanted`, `oppHand: PoolCard[]`, `handIn` (fan slide toggle), `chosenUid`, `reveal`,
   `centered`, `flipped`, `hand`.
 
 **Sequence**
 1. `start()`: `setOppHand(sampleBase(OPP_HAND))`; `setPhase('choose')`; `handIn=false` → double-rAF → `handIn=true`
-   (the fan slides in).
-2. `pickWanted(card)` (only in `choose`): `setWanted`; `setPhase('picked')`; `later(() => resolve(card),
+   (the fan slides in). The catalog opens with it.
+2. `pickWanted(card)` (only in `choose`) only **arms** the pick: `setWanted`, and the cell goes `selected`. Naming
+   a card is irreversible, so the commit is the shared `ConfirmAction` bar — `confirmWanted()` (guarded on
+   `phase === 'choose' && wanted`) does `setPhase('picked')`, which flips the catalog to `open={false}` with
+   `chosen={wanted.id}` — the named cell holds enlarged while the rest leave — and `later(() => resolve(wanted),
    PICK_BEAT)`.
-3. `resolve(card)`: **miss** (`!inHand`) → `setPhase('miss')`, `later(setHandIn(false), MISS_HOLD)`,
-   `later(backToIdle, MISS_HOLD + 560)`. **hit** → plant the wanted card into a random opponent slot; read that
-   slot's rect (**I1**); compute the delta to the **stage centre** (`cx/cy` from `rootRef`, not `window`);
-   `chosenUid = that slot` (its face renders `null`, so only the flyer shows the card); `handIn=false` (the rest
-   of the fan slides up and off); build `reveal` (`from` rect + `to` transform: translate to centre,
+3. `resolve(card)`: **miss** (`!inHand`) → `setPhase('miss')`, `play('shake', topHandRef.current, { amp:
+   MISS_SHAKE, dur: MISS_SHAKE_MS, shape: 'spring' })` — the fan flinches whole, in place —
+   `later(setHandIn(false), MISS_HOLD)`, `later(backToIdle, MISS_HOLD + 560)`. **hit** → plant the wanted card
+   into a random opponent slot; read that slot's rect (**I1**); compute the delta to the **stage centre**
+   (`cx/cy` from `rootRef`, not `window`); `chosenUid = that slot` (its face renders `null`, so only the flyer
+   shows the card); `handIn=false` (the rest of the fan slides up and off); build `reveal` (`from` rect + `to` transform: translate to centre,
    `scale(REVEAL_W / r.width)`, `rotate(0)`); double-rAF → `centered=true` (a CSS transition drives the flight).
 4. `onRevealEnd` (transform end, `centered && !flipped`): `flipped=true` (flip face up), `later(fall,
    REVEAL_HOLD)`.
@@ -1457,7 +1829,8 @@ leaves (miss).
 | reveal centre width | `REVEAL_W = 220` px |
 | centre hold before the drop | `REVEAL_HOLD = 820` ms |
 | miss shake + note | `MISS_HOLD = 1620` ms (+560 to idle) |
-| opponent fan / grid width | `OPP_HAND = 6`, `GRID_W = 100` |
+| the flinch itself | `play('shake')`, `MISS_SHAKE = 9` / `MISS_SHAKE_MS = 460` / `shape: 'spring'` — a whole fan, not the 7px `settle` sized for an input |
+| opponent fan / catalog cell width | `OPP_HAND = 6`, `GRID_W = 100` |
 | final drop | `useHandArrival` (`FLIGHT_MS = 480`) |
 
 **Invariants**
@@ -1472,63 +1845,281 @@ leaves (miss).
   the hand.
 
 **Building blocks**
-`useHandArrival` · `Hand` (`faceDown`, `renderFace`) · CSS transitions on `.reveal` / `.topHand`.
+`useHandArrival` · `CardCatalog` (`open` / `selected` / `chosen`) · `ConfirmAction` ·
+[`play('shake')`](./reference.md#presets) · `Hand` (`faceDown`, `renderFace`) · CSS transitions on `.reveal` /
+`.topHand`.
 
 **Live reference**
-`Specific opponent card` — `apps/playground/stories/interactive/PickSpecificCardStory.tsx`.
+`Specific opponent card` — `apps/playground/stories/interactive/PickSpecificCardStory.tsx`. The board's version
+of this scene is the `requested` half of
+[A card changes hands](./recipes.md#a-card-changes-hands-live-board--taker-victim-watcher-and-the-ask-before-them).
 
 ---
 
-## Opponent takes your card — the victim's view (a card leaves your hand)
+## Opponent takes your card — the victim's view (a card leaves your hand for a seat)
 
 **When to call**
-Mirror of the above, from the target's side (`giveCard`): the opponent names a card and it leaves YOUR hand.
-`start()` → `pickWanted(card)`. Phases `idle → choose → picked → (take | miss)`; stages `from → center → up`.
+Mirror of "Take a specific card", from the target's side (`giveCard`): the opponent names a card and it
+leaves YOUR hand. `start()` → `pickWanted(card)` → `confirmWanted()`. Phases
+`idle → choose → picked → (take | miss)`; stages `from → center → up`.
 
 **Visual result**
-The opponent's broadcast catalog grid and their face-down fan slide in from the top. The picked card holds; then,
-if you hold it, that card lifts out of your hand, flies to the centre, flips **face-down** (now theirs) and tucks
-up behind the opponent fan; else a "you don't have that card" note shows and nothing leaves.
+The opponent's catalog stands in the middle band — the same `CardCatalog` the taker picks from,
+broadcast, so you watch them choose. The named card holds enlarged while the rest of the catalog slides
+away; then, if you hold that card, it lifts out of your fan, flies to the stage centre, flips
+**face-down** (it is theirs now) and sinks into the taker's **seat**, shrinking into a card-sized box
+inside it and dissolving as their hand counter goes up. Else a "you don't have that card" note shows
+and nothing leaves.
 
 **Elements / refs**
-- `rootRef` (stage), `handRef` (your fan — slots are inner children), `fanRef` (opponent fan — the take lands at
-  its centre).
-- State: `phase`, `wanted`, `oppHand`, `handIn`, `hand`, `take: {card, from, center, up}`,
-  `stage: 'from' | 'center' | 'up'`, `flipped`.
+- `rootRef` (stage — the centre is measured against it, not `window`: the playground has a sidebar),
+  `handRef` (your fan — the slots are its inner children), `seatRefs[id]` (the opponents' `Seat` nodes;
+  the take lands in `TAKER`'s).
+- The opponents are **`Seat`s**, exactly as on the table: their hands are hidden there and the counter
+  IS the hand. There is no opponent fan in this scene to fly into or tuck behind.
+- State: `phase`, `wanted`, `hand`, `taken` (what the taker has gained this run), `take: { card, from,
+  center, up }`, `stage`, `flipped`.
 
 **Sequence**
-1. `start()` / `pickWanted(card)` — as the mirror (the opponent fan slides in; the pick holds `PICK_BEAT`).
-2. `resolve(card)`: find the card in YOUR hand by id. **miss** (`< 0`) → `setPhase('miss')`, `later(backToIdle,
-   MISS_HOLD)`. **hit** → read the source slot rect; compute two transforms — `center` (to the stage centre,
-   `scale(REVEAL_W / r.width)`, `rotate(0)`) and `up` (to the opponent-fan centre, `scale(1)`, `rotate(180)`);
-   remove the card from `hand` (the fan closes the gap); `stage='from'` → double-rAF → `stage='center'`.
-3. `onTakeEnd` (transform end): `center && !flipped` → `flipped=true` (flip **face-down** — now the opponent's
-   hidden card), `later(setStage('up'), CENTER_HOLD)`; `stage==='up'` → append the card to `oppHand`, clear
-   `take`, `later(setHandIn(false), 640)`, `later(backToIdle, 1200)`.
+1. `start()`: `setPhase('choose')` — `CardCatalog` opens across `.grid` (base deck, no triggers, cells
+   at `GRID_W`) with `ConfirmAction` under it. Naming a card is irreversible, so a click only ARMS the
+   pick (`pickWanted` → `wanted`; the cell lights in the shared selection colour) and the bar commits
+   it.
+2. `confirmWanted()`: `setPhase('picked')` — the catalog goes `open={false}` with `chosen={wanted.id}`,
+   which is what holds the named card enlarged while the rest slide away — and
+   `later(() => resolve(wanted), PICK_BEAT)`. From here your fan is `pointer-events: none` for the whole
+   sequence, the same guard Combo, AI cards and Cherry-pick take while they resolve.
+3. `resolve(card)`: find the card in YOUR hand by id. **miss** (`index < 0`) → `setPhase('miss')`, the
+   `.miss` note, `later(backToIdle, MISS_HOLD)`; nothing leaves and nothing flinches. **hit** → read the
+   source slot's rect; compute two transforms — `center` (to the stage centre from `rootRef`,
+   `scale(REVEAL_W / r.width)`, `rotate(0deg)`) and `up` (to the centre of
+   `cardBoxIn(seatRect, r.width * SEAT_SHRINK)`, scaled to that box, `rotate(0deg)`); drop the card from
+   `hand` so your fan closes the gap; `stage = 'from'` → **double-rAF** → `stage = 'center'`.
+4. `onTakeEnd` (transform end): `center && !flipped` → `flipped = true` (`Card faceDown={flipped}` — it
+   turns **face-down**, it is the opponent's hidden card from here), then `later(setStage('up'),
+   CENTER_HOLD)`. `stage === 'up'` → `setTaken(n + 1)` (the taker's `handCount` now carries it),
+   `setTake(null)`, `later(backToIdle, 620)`.
 
 **Params & timings**
 | Step | Value |
 |---|---|
 | chosen holds / others leave | `PICK_BEAT = 620` ms |
+| each hop | CSS transition on `.take` (`transform` + `opacity`), `--ease-soft`, 460 ms |
 | centre width | `REVEAL_W = 220` px |
-| centre hold before flying up | `CENTER_HOLD = 820` ms |
+| centre hold before it sinks into the seat | `CENTER_HOLD = 820` ms |
+| how small it gets inside the seat | `SEAT_SHRINK = 0.7` of the source slot's width |
 | miss note | `MISS_HOLD = 1620` ms |
-| fan leaves after landing | `later(…, 640)` then `backToIdle` at `1200` ms |
+| back to idle once it has landed | `later(…, 620)` ms |
+| your hand / catalog cell | `INITIAL_HAND = 6` · `GRID_W = 100` |
 
 **Invariants**
-- The taken card ends **face-down**, `rotate(180)` — it becomes the opponent's hidden card, matching their fan.
-- The centre is measured against the **stage**, not `window` (**I1** + sidebar).
-- Two-hop flight (`from → center → up`) via **CSS transitions**; `zIndex` drops to 30 on the way up so it tucks
-  behind the opponent fan. No `useHandArrival` — the card leaves the hand, it does not settle into one.
+- The card ends **face-down inside a seat**, not in a fan. It aims at
+  `cardBoxIn(seat, width * SEAT_SHRINK)` and never at the seat's own rect (**I6** — a seat is far wider
+  than a card, and a card told to fill it would inflate), shrinks into that box and fades. This is the
+  `dealToSeat` movement, the same one `Draw card` uses for a card going to a hidden hand — expressed
+  here as a CSS transition rather than the preset, because the whole two-hop flight is one
+  transitioning node.
+- The centre is measured against the **stage** (`rootRef`), not `window` (**I1** + the sidebar).
+- Two hops (`from → center → up`) on one node at a constant `zIndex: 55`. There is nothing to tuck
+  under: the destination is a seat, and a seat is not a stack of cards.
+- **No `useHandArrival`** — the card leaves a hand, it does not settle into one. That is the one thing
+  separating this from its mirror, and the thing a later refactor unifies by accident.
 
 **End state & cleanup**
-- Hit → the card is gone from your hand and shown joining the opponent fan; back to `idle`. Miss → nothing leaves.
+Hit → the card is gone from your hand and the taker's counter is one higher; back to `idle`. Miss →
+nothing leaves. `restart` clears the timers, rebuilds your hand and zeroes `taken`.
 
 **Building blocks**
-`Hand` (`faceDown`, `renderFace`) · CSS transitions on `.take` / `.topHand`.
+`CardCatalog` (`open` / `selected` / `chosen`) · `ConfirmAction` · `Seat` ·
+[`cardBoxIn`](./reference.md#card-geometry-helpers) · `Hand` · CSS transitions on `.take`.
 
 **Live reference**
 `Opponent takes your card` — `apps/playground/stories/interactive/OpponentTakesCardStory.tsx`.
+
+---
+
+## A card changes hands (live board) — taker, victim, watcher, and the ask before them
+
+Driven by `requested` and `handTransfer`, planned by `planBeats` and run by `transferBeat`
+(`useTransferBeat`). The two recipes above are its playground originals, and the board **translates**
+them rather than transcribing them: there is no opponent fan here — an opponent's hand is a `Seat` and
+a count — so the named steal and the random one both come out of the donor's seat. The gesture
+survives; the geometry belonged to a stage with no seats in it.
+
+**When to call**
+Never directly. `useBeats` plans a `requested` beat from the engine's `requested` event and a
+`handTransfer` beat from `handTransfer`, and runs them through `runRequested` / `runTransfer`. Neither
+is `exclusive` and neither raises `alarm`: a card changing hands does not own the table, and nothing
+about it needs input dead.
+
+**Visual result**
+Three of them, and which one you get is decided by what the event carried rather than by a rule the
+board re-derives.
+- **Taker** — the card comes out of the donor's seat, turns face-up at the centre, stands, and settles
+  into your fan. If the steal was random rather than named, the donor's backs fan out of their seat
+  first, hold, and go back.
+- **Victim** — the mirror: the card leaves your own fan, flies to the centre, turns face-**down**, and
+  sinks into the taker's seat.
+- **Watcher** — a closed card crosses the table from one seat to the other; nothing turns over and the
+  two counts are all that changes.
+
+And before any of them, when the card was demanded by name: the named card stands at the centre for the
+whole table, then either hands over to the projection (hit) or is followed by the flinch and the note
+(miss).
+
+**Elements / refs** — all from `BoardAnchors`
+- `centre` — the attack slot; every leg of every branch stages there.
+- `seatBox(player)` — a card-sized box centred on a seat (**I6**), shrunk again to
+  `CARD_W * SEAT_SHRINK` for the size a card is while it is inside a hidden hand: the exact box
+  `dealToSeat` sinks into and `takeFromSeat` comes out of.
+- `seatOf(player)` — the seat NODE, for the miss flinch.
+- `hand` — your own fan. `useHandArrival` for the taker, `handSlotAt(index)` for the victim's source
+  slot, and the flinch target when the miss is aimed at you.
+
+**Sequence — `runRequested` (the ask)**
+1. Raise the named card face-up at the centre and `play('popIn')` — on EVERY peer, the asker included.
+   `requested` carries no `visibleTo` and its `hit` field reaches everybody, because the rules make the
+   request public on a hit and a miss alike (`docs/rules/cards.md:125`). It **appears** rather than
+   travels: the one candidate origin is the catalog cell the asker named it in, and that cell belongs
+   to a staging hook this beat can neither see nor measure — so no peer gets a flight, rather than one
+   peer getting a different scene from the rest of the table.
+2. **Hit** — publish the `giveCard` pending into the beat's own shadow, `await nextFrames()` so the
+   publish has committed (**I2**), then `drop`. The beat is only the entrance: `requested` and
+   `handTransfer` arrive in **different batches**, so no overlay can span the gap. What carries the card
+   across it is `_Board.tsx`'s own centre render of `cardById(pending.requested)`, public to every peer
+   (`fake/attacks.ts:444` projects `giveCard` with no `mine` gate). Publish first and drop second, so
+   the static render is standing before the carrier lets go and the slot is never blank for a frame —
+   the same ordering, for the same reason, as `drawBeat`'s standing trigger.
+3. **Miss** — the pending clears outright, so nothing in the projection survives it and the beat has to
+   carry the whole scene or the table never learns the outcome. `wait(REQUEST_HOLD)` with the named card
+   standing, `play('shake', …, SHAKE)` on the target, the note, `wait(MISS_HOLD)`, `drop`. The target is
+   flinched **as they are rendered**: `seatOf(target)` to everyone watching, and `anchors.hand` — their
+   own fan — when the miss is aimed at you, because you have no seat. One gesture, two renderings: the
+   fan flinch is the playground's original and the seat flinch is its translation.
+
+**Sequence — `runTransfer` (the card)**
+One branch, on `plan.role`.
+- **taker** — `takeFromSeat` from the donor's seat box to the centre; `pin` (**I4**); the donor's count
+  drops and is published as its own step; `patch({ faceDown: false })`, so the `Card` plays its own
+  `flipCard`; `wait(REVEAL_HOLD)`; measure the flyer, `drop`, then `arrive(…, grown, grown)` into the
+  fan at its **end** — `grown` is read off `ctx.base.you.hand.length`, the fan this beat has grown so
+  far (**I8**), and the end is not a choice: the engine appends what a hand gains and `toBoardState`
+  passes that order through untouched, so any other slot makes the beat's last frame disagree with the
+  projection it hands over to.
+- **the offer — the taker's leg only, and only when `plan.named` is false** — before the flight,
+  `plan.donorHand` backs (capped at `OFFER_MAX`) rise out of the donor's seat box on `takeFromSeat`,
+  staggered `OFFER_STEP` apart, into the shallow arc `offerPoses` lays across the centre; they hold
+  `OFFER_HOLD` and return on `dealToSeat`. The taken card is **not** among them — it flies on its own,
+  out of the same seat, so the offer clears whole rather than one card short. Nobody picks and nothing
+  waits for input: `stealRandom` has already chosen, with the seeded RNG. The offered hand is the only
+  thing that makes "a card at random" read differently from "the card I named", which otherwise share
+  one flight.
+- **victim** — out of `handSlotAt(index)`, the index resolved here against the hand this beat planned
+  against (the registry indexes rather than looks up by uid, deliberately, so it need not know the
+  hand); your fan closes the gap while the card is in the air; `playToCenter`; `pin`;
+  `patch({ faceDown: true })` — it turns **face-down**, and that is the beat, because from here it is
+  theirs and a hidden hand is where it is going; `wait(CENTER_HOLD)`; `dealToSeat` into the taker's seat
+  box; `drop`; their count goes up. **No `useHandArrival`** — the card leaves a hand, it does not settle
+  into one.
+- **watcher** — `plan.card` is absent, so there is nothing to turn over and nothing to hold at the
+  centre to be read. `takeFromSeat` out of the donor's seat box to the centre on a `COVER` stand-in that
+  carries no identity, `pin`, the donor's count drops, `dealToSeat` into the taker's seat box, `drop`,
+  the taker's count goes up. Face-down for every frame.
+
+**What selects the closed flight**
+`plan.card`, and nothing else. Present means the engine put this peer in the event's audience; absent
+means it did not, and nothing here widens it — re-deriving who may see what is how a hand leaks. The
+three derived facts are all read off the **pre-batch** projection (**I1**): `role` off `selfId`,
+`named` as `base.pending?.kind === 'giveCard'` (a plain equality against a public pending — the
+transfer's own batch says nothing about whether it was demanded, because `requested{hit:true}` opened
+that pending in an earlier reduction), and `donorHand` as the donor's count while it still stands on
+screen, since `live` has already taken the card out.
+
+> The watcher leg is currently **unreachable in production**: the engine tags every `handTransfer` with
+> `visibleTo: [from, to]` and `forViewer` drops the whole event for anyone else, so a bystander sees no
+> transfer at all. The leg ships because it expresses the "never widen a redacted event" property, and
+> it stays correct the day `handTransfer` becomes public with `card` redacted the way `drawn` already
+> is. Recorded in [`backlog.md`](./backlog.md) and in the audit register.
+
+**Params & timings**
+| Step | Preset / wait | Value |
+|---|---|---|
+| the named card appears at the centre | `popIn` | 260 ms |
+| it stands before the outcome | `wait(REQUEST_HOLD)` | 820 ms |
+| the flinch | `play('shake', …, SHAKE)` | `{ amp: 9, dur: 460, shape: 'spring' }` — a whole seat or a whole fan flinching, not the 7px `settle` sized for an input |
+| the note, before the scene clears | `wait(MISS_HOLD)` | 1620 ms |
+| seat → centre | `takeFromSeat` | 460 ms |
+| centre → seat | `dealToSeat` | 460 ms |
+| hand slot → centre | `playToCenter` | 480 ms |
+| face-up at the centre (taker) | `wait(REVEAL_HOLD)` | 820 ms |
+| face-down at the centre (victim) | `wait(CENTER_HOLD)` | 820 ms |
+| into the fan | `useHandArrival` | `FLIGHT_MS = 480` |
+| a card's size inside a seat | `SEAT_SHRINK` | 0.7 of `CARD_W` (`drawBeat`'s own value) |
+| the offer: stagger · hold · spread · cap | `OFFER_STEP` · `OFFER_HOLD` · `OFFER_SPREAD` · `OFFER_MAX` | 45 ms · 620 ms · 0.62 of the centre's width · 9 backs |
+
+Every hold above is the stories' own number, carried over rather than chosen here. `PICK_BEAT = 620` is
+the one that did not come with them, and the board has no equivalent constant: `CardCatalog`'s `chosen`
+cell holds by CSS alone (`scale(1.7)` while its neighbours leave over 220 ms) and the band unmounts the
+moment the pending stops being a `requestCard`. So the ask is paced by the engine's own round trip, and
+the readable pause belongs to `runRequested` — `popIn` and, on a miss, `REQUEST_HOLD`.
+
+**Invariants**
+- **I1** — the plan reads the projection still on screen, so the donor's count is the one the table can
+  see and the victim's own hand is the one their fan is rendering.
+- **I2** — `nextFrames()` between publishing the `giveCard` shadow and dropping the carrier, so the
+  static render has committed before the flyer lets go.
+- **I4** — the carrier is pinned at the centre after each arrival there, so the flip, the hold and the
+  onward flight all leave from where the card visibly stands.
+- **I6** — every seat end of every flight is `cardBoxIn(seatBox(player), CARD_W * SEAT_SHRINK)`, never
+  the seat's own rect.
+- **I8** — the taker's `grown` is read off `ctx.base`, the hand this beat has already grown, not off
+  the hand the batch started with.
+- Local: `plan.card`'s absence, not `role`, is what selects the closed flight; and the last frame of the
+  hit entrance is the projection's own centre render, so the handover changes nothing on screen.
+
+**End state & cleanup**
+Taker: the card spliced into your fan at its end, the donor one count lighter. Victim: the card gone
+from your hand, the taker one count heavier. Watcher: both counts moved, nothing else. The carrier is
+dropped on every path, the offer's backs are dropped by key, and the miss note is cleared before the
+beat returns. A beat that throws costs the animation and never the state — `drain()` drops the shadow in
+its `finally` and the live projection wins. A missing rect (a seat that is not mounted, a hand slot that
+is not there) ends the leg early and lets the projection stand, the contract every runner keeps. A new
+match calls `reset()`: the carrier goes and so does a parked arrival, which would otherwise land a dead
+match's card in the new one's fan.
+
+**Gating**
+The ask is answered in the middle band, not in the panel. `_useRequestStaging.tsx` stands a
+`CardCatalog` there while a `requestCard` pending is ours — `open` while unconfirmed, `selected` for the
+armed pick, `chosen` after `ConfirmAction` commits it, because naming a card is irreversible — and
+`_Board.tsx` suppresses `PendingPrompt` for `requestCard` and `giveCard` the way it already does for
+`defend`, `discardForRelease` and `neutralize503`. What the catalog offers is the base deck without
+triggers (`docs/rules/cards.md:320`, `:339`) and without the events deck
+(`docs/rules/general.md:189`) — every card that can actually BE in a hand, both exclusions cited; the
+`confirm` handler re-checks membership against that same list, so a stale selection cannot resolve a
+card that is no longer on offer. `giveCard` gets no panel at all: the engine asks the victim which COPY
+to surrender, the copies differ only by uid and `onGiveCard` matches on `card.id`, so the choice carries
+no information and the hook auto-resolves it — once per pending, latched on the pending's own identity
+rather than on the mount, because a second Security Bug in one match is an ordinary thing.
+
+**Under `prefers-reduced-motion`**
+No beat is planned and none runs; the board holds the projection it already has. The `giveCard`
+auto-resolve still fires — it lives in the staging hook and not in a beat for exactly this reason: it is
+a game action, and an engine left waiting on an animation nobody plays is a stalled match.
+
+**Building blocks**
+[`takeFromSeat`](./reference.md#presets) · [`dealToSeat`](./reference.md#presets) ·
+[`playToCenter`](./reference.md#presets) · [`popIn`](./reference.md#presets) ·
+[`shake`](./reference.md#presets) · `flipCard` (auto, via `Card`) ·
+[`useHandArrival`](./reference.md#hand-arrival--cards-arrive-in-the-hand) ·
+[`useFlyer`](./reference.md#the-movement-steps-and-the-carrier-under-them) ·
+[`cardBoxIn`](./reference.md#card-geometry-helpers) · `CardCatalog` · `ConfirmAction`.
+
+**Live reference**
+Not a playground scene — this beat runs on the real board:
+`apps/frontend/src/features/board-beats/transferBeat.tsx`, with the plans in
+`features/board-beats/planBeats.ts`, the ask in `pages/board/[gameId]/_useRequestStaging.tsx` and the
+public centre card in `pages/board/[gameId]/_Board.tsx`. The playground originals are the two recipes
+above plus `Specific opponent card`.
 
 ---
 
@@ -1719,6 +2310,21 @@ carries its own mount rect · a `runId` guard drops flights from a previous deal
 heap. A carried-back card is in the hand again and its cell is free — the cells are tracked as a
 claimed SET rather than a count, or a card returning to the grid would take the next free cell instead
 of the one it left.
+
+**On the board (#104).** The scene is split across the two halves of the board's own machinery, and
+the split is what keeps the promise "the hand is never blocked by a flight":
+
+- **The gesture** (`pages/board/[gameId]/_useHandLimit.tsx`) owns everything before the engine
+  answers: the pull gate (`pending.options` for legality, `excess` for the limit), one carrier per
+  card — no single-flight guard, unlike its three sibling hooks — the grid's claimed cells, the
+  carry-back, and the single `RESOLVE` fired when the last card LANDS.
+- **The beat** (`features/board-beats/handLimitBeat.tsx`) owns everything after: it adopts the grid
+  the local player built (through `HandLimitHandoff`) or builds the same one from the actor's seat
+  for every other peer, holds `GATHER_HOLD`, and sends every card out with `layer` = its slot and
+  `delay` = `slot × CLEAR_STEP`.
+
+The geometry both halves read is `@release/ui`'s `TableCentre/discardGrid.ts` — the shapes, the
+widths and the cell offsets, quoted from this scene.
 
 **Live reference.** `Hand limit` (Cards group).
 
@@ -1930,8 +2536,11 @@ opponents' hands, the deck is down by what was dealt, the zone is on screen. Res
 
 ## Ending a match — the winning release, the poppers, the window
 
-**When to call.** The move that closes the third release slot. Guard: the scene runs once
-(`busy`), and the release is accepted only into its own empty slot.
+**When to call.** On every terminal `gameOver` event, whatever its condition — the poppers are the
+finale of ANY victory, not the release condition's own scene (the rules owner's answer on #133). The
+event is the guard, rather than `released`: a direct play, a Security Bug steal and an AI Release can
+all finish the three-slot condition after their own choreography has settled, and a last-standing win
+has no `released` at all.
 
 **Visual result.** The last release settles into the zone, the poppers go off in code symbols out
 of both bottom corners, and the game-over window comes up **while the confetti is still in the
@@ -1954,8 +2563,8 @@ leaving the fan; a layer for the volleys; the `GameOver` window.
    volleys three events instead of one repeated.
 4. At `OVER_AT` the `GameOver` window appears over the table, and the confetti keeps flying **over
    the window**.
-5. Each volley is taken down `CONFETTI_MS` after it went off, by which time its pieces have flown
-   their arcs out.
+5. The complete confetti layer is taken down `CONFETTI_MS` after the first volley went off, by
+   which time every piece from all three volleys has flown its arc out.
 
 **Params & timings.** `POPPERS` `[0, 1] [620, 0.7] [1450, 1.25]` · `POP_PER_SIDE` 33 · `OVER_AT`
 2400 · `CONFETTI_MS` 8500 · piece spread/reach/spin randomised per volley (see the glossary).
@@ -1964,11 +2573,17 @@ leaving the fan; a layer for the volleys; the `GameOver` window.
 be started from a mount effect, never from a ref callback** — otherwise every new volley kills the
 previous one.
 
-**In the playground only.** Both layers — the confetti and the window — are `inset: 0` of the
-stage, which begins **below** the technical line: that line belongs to the playground, not to the
-screen.
+**Layer bounds.** Both layers — the confetti and the window — are `inset: 0` of their stage. In the
+playground that stage begins **below** the technical line; on the live board it is the whole table.
+The confetti layer is above `GameOver` and does not catch pointer events.
 
-**Live reference.** `Game End` (interactive group).
+**Live reference.** `Game End` (interactive group); the production runner is
+`apps/frontend/src/features/board-beats/gameEndBeat.tsx`, planned by `planBeats.ts` from the terminal
+`gameOver` with no filter on its condition. A last-standing win reaches it through the elimination
+path, and the order needs no special case: `flush()` pushes the elimination beat last of its run and
+the `gameOver` branch flushes before pushing its own, so **the clip plays first and the poppers
+follow**. The victory window waits for both — `_Board.tsx` shows it on an empty queue, never on the
+event — so every screen sees the same three things in the same order.
 
 ---
 
@@ -2082,3 +2697,12 @@ question, not an animation one.
 > and the test goes red until it has one. Two scenes are exempt by name, each with its reason next
 > to it: the audit page describes the modules rather than being one, and the `Animations` catalogue
 > is a preset per form, not a game moment.
+
+### Named-card catalogue on the live board
+
+The `requestCard` catalogue and ConfirmAction share a full-table layer. The catalogue has its
+own scroll area above the bottom confirmation bar, with room for hover enlargement and the
+right rail. ConfirmAction must not be positioned inside a vertically centered catalogue:
+that anchors the bar to the card rows and hides choices (including the final wrapped row).
+Selection only arms the requested card; confirmation sends `requestCard` with its catalogue ID.
+The existing `requested` / `handTransfer` beats handle the public reveal, transfer, and miss.

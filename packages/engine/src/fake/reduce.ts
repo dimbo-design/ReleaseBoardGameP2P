@@ -23,7 +23,7 @@ import { onGiveCard, onRequestCard } from './handAttacks'
 import { pruneEmptyPiles } from './piles'
 import { playableFor } from './project'
 import { onCancelRelease, onDiscardForRelease, onPlay } from './release'
-import { fireTrigger, onNeutralize } from './triggers'
+import { fireTrigger, onDecline503, onNeutralize } from './triggers'
 import { onPass, onUnpass, onWindowExpired } from './window'
 
 export { handLimitFor, nextSeat }
@@ -347,7 +347,14 @@ function dispatch(state: GameState, action: Action): Reduction {
     case 'PLAY':
       return onPlay(state, action)
     case 'PASS':
-      return onPass(state, action)
+      // One key, two meanings, told apart by what the table is waiting for. A
+      // 503 the presser owns is a decision, not a reaction window: PASS there
+      // is "I will not neutralize" (#103 testing, problem 4), and `onPass`
+      // would reject it twice over — no window is open, and a decision is
+      // pending. Every other PASS is the window's own.
+      return state.pending?.kind === 'neutralize503' && state.pending.player === action.player
+        ? onDecline503(state, action)
+        : onPass(state, action)
     case 'UNPASS':
       return onUnpass(state, action)
     case 'WINDOW_EXPIRED':

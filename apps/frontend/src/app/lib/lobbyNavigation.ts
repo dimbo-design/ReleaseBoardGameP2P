@@ -21,3 +21,28 @@ export function useGoToLobby() {
     [navigate],
   )
 }
+
+// Where leaving a finished match goes. With a room to return to that is the
+// lobby, carrying the same `resumed` flag as every other entry point — the
+// session outlives the match, so the room still has everyone in it and the host
+// can start the next one straight away.
+//
+// Without one there is nothing to return TO: reloading on the results route
+// loses the session, and the screen is already empty because the projection
+// went with it. Sending that case to the start screen is the difference between
+// a way out and a button that does nothing at all.
+//
+// It lives here rather than in the page for the reason the whole module does:
+// the lobby-resume contract is one thing, and a second copy of it in a page
+// would be the copy that gets missed when the route changes.
+export function useLeaveMatch() {
+  const goToLobby = useGoToLobby()
+  const navigate = useNavigate()
+  return useCallback(
+    (roomCode: string | null) => {
+      if (roomCode) goToLobby(roomCode)
+      else void navigate('/start')
+    },
+    [goToLobby, navigate],
+  )
+}

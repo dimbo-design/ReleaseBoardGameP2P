@@ -429,3 +429,33 @@ it('runs ungated when no gate is supplied', () => {
   keeper.link.submit({ type: 'DRAW' })
   expect(ref.current.state).not.toBe(before)
 })
+
+it('reports every committed state change to onCommit', () => {
+  const net = createMemoryNetwork(['host', 'guest'])
+  const { session } = createSession({
+    gameId: 'g1',
+    keeperId: 'p1',
+    engine: createFakeEngine(),
+    seed: 1,
+    players: [
+      { playerId: 'p1', peerId: 'host', name: 'Ann' },
+      { playerId: 'p2', peerId: 'guest', name: 'Bo' },
+    ],
+    setup: {},
+    deck: FAKE_DECK,
+    events: FAKE_EVENTS,
+  })
+  const ref: SessionRef = { current: session }
+  const saved: string[] = []
+  const keeper = attachKeeper({
+    ref,
+    transport: net.transport('host'),
+    now: () => 1_000,
+    onCommit: (s) => saved.push(s.gameId),
+  })
+
+  keeper.peerLeft('guest')
+
+  expect(saved).toEqual(['g1'])
+  keeper.close()
+})

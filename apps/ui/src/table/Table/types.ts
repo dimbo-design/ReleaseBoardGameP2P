@@ -110,6 +110,12 @@ export interface TableRoom {
   // Connection is a session fact, never a game fact. `reconnecting` is the
   // local peer; `disconnected` names peers seen as gone.
   connection?: 'online' | 'reconnecting'
+  // Present only while `connection` is 'reconnecting'. Absent, the overlay
+  // still renders, on attempt 1 of 5 — a caller that knows it is dialing but
+  // not how far along should not be forced to invent numbers.
+  reconnect?: { attempt: number; maxAttempts: number; status: 'trying' | 'failed' }
+  onReconnectRetry?: () => void
+  onReconnectLeave?: () => void
   disconnected?: string[]
 }
 

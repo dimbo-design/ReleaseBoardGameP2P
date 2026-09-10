@@ -2,10 +2,15 @@ import type { Event } from '@release/engine'
 import type { CardData } from '@release/ui'
 import { cardById } from '@release/ui'
 import { scatterAt } from '@release/ui/animations'
-import { act, render } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
+import { act, fireEvent, render } from '@testing-library/react'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { BoardAnchors, BoardState, IntroBeat } from '~/entities/game/board'
+import { ELIM_DELAY } from './eliminateBeat'
 import { useBeats } from './useBeats'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 const motion = vi.hoisted(() => ({ reduced: true }))
 vi.mock('~/shared/lib/useReducedMotion', () => ({ useReducedMotion: () => motion.reduced }))
@@ -45,6 +50,24 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
         reset: () => setFlying(false),
         FLIGHT_MS: 420,
       }
+    },
+  }
+})
+
+// The arguments every `planBeats` call was made with, delegating to the real
+// implementation — so this records the wire without changing what any other
+// test in this file exercises. What it is here for: the two facts a batch
+// cannot report about itself (`owed`, and the post-batch discard count) reach
+// the planner only because this call site passes them, and dropping either is
+// a silent loss no assertion on a beat's OUTPUT can see.
+const planned = vi.hoisted(() => ({ calls: [] as unknown[][] }))
+vi.mock('./planBeats', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./planBeats')>()
+  return {
+    ...real,
+    planBeats: (...args: Parameters<typeof real.planBeats>) => {
+      planned.calls.push(args)
+      return real.planBeats(...args)
     },
   }
 })
@@ -130,14 +153,21 @@ function Probe({
   anchors,
   intro,
   shadows,
+  alarms,
+  restoredThrough,
 }: {
   live: BoardState
   events: Event[]
   anchors: BoardAnchors
   intro?: IntroBeat | null
   shadows?: string[]
+  // Every value `alarm` has held, in order. A final-state assertion cannot see
+  // a glow that came up and went again inside one beat, which is exactly what a
+  // self-answered 503 does.
+  alarms?: boolean[]
+  restoredThrough?: number
 }) {
-  const beats = useBeats({ live, events, anchors, enabled: true, intro })
+  const beats = useBeats({ live, events, anchors, enabled: true, intro, restoredThrough })
   const shown = beats.shadow ?? live
   // Every DISTINCT board the SHADOW has shown, in order. A final-state
   // assertion cannot see a rollback: the board can go A → B → A → B and end
@@ -150,6 +180,7 @@ function Probe({
     const row = beats.shadow.decks.main.join(',')
     if (shadows && shadows.at(-1) !== row) shadows.push(row)
   }
+  if (alarms && alarms.at(-1) !== beats.alarm) alarms.push(beats.alarm)
   return (
     <>
       {/* The fan as the BOARD would render it — one slot per card of whichever
@@ -169,6 +200,17 @@ function Probe({
       {/* How many flyers are mounted right now — a dead match's in-flight card
           shows up here until its runner's own reset() clears it. */}
       <div data-testid="overlay">{beats.overlays.length}</div>
+      {/* …and the overlays themselves, so a beat that puts something ON the
+          board (the elimination clip, #103) can be looked for rather than
+          merely counted */}
+      <div data-testid="overlays">{beats.overlays}</div>
+      {/* The running beat's own alarm (#102) — the wire this test exercises end
+          to end, from planBeats' `gather` flag through the discard beat's run
+          to the queue's own `Beat.alarm`. */}
+      <div data-testid="alarm">{beats.alarm ? 'alarm' : 'none'}</div>
+      {/* the queue is still working: what the game-over overlay waits on, so
+          the winner is not announced over the beat that won it (#103) */}
+      <div data-testid="running">{beats.running ? 'running' : 'idle'}</div>
     </>
   )
 }
@@ -317,6 +359,39 @@ it('hands the board back to the live projection when the queue drains', async ()
   expect(getByTestId('hand').textContent).toBe('0')
 })
 
+// The new kind is registered: a hand-limit batch produces a beat, the queue
+// runs it, and the board is not left holding a shadow afterwards (#104).
+it('runs a hand-limit discard and drains', async () => {
+  motion.reduced = false
+  sent.calls = []
+  sent.hang = true
+  const anchors = { ...stub, bg: { current: node() } } as BoardAnchors
+  const event = {
+    id: 4,
+    type: 'discarded',
+    player: 'p1',
+    card: 'attack-bug',
+    reason: 'handLimit',
+  } as Event
+  const utils = render(<Probe live={preDiscard} events={[]} anchors={anchors} />)
+  utils.rerender(<Probe live={afterDiscard} events={[event]} anchors={anchors} />)
+
+  // nextFrames + GATHER_HOLD (1500): by this point the registered runner has
+  // built the grid and reached useDiscardExit, where the mock parks it.
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 1700))
+  })
+  expect(sent.calls).toHaveLength(1)
+
+  // Let the exit land. The queue must drain back to the arrived projection.
+  sent.hang = false
+  await act(async () => {
+    sent.release?.()
+    await new Promise((r) => setTimeout(r, 80))
+  })
+  expect(utils.getByTestId('discardCount').textContent).toBe('1')
+})
+
 // The shadow's lifetime scopes PER END. Mid-flight, the fan has already let go
 // of the card — it left the table the moment its slot was measured, at takeoff
 // — but the discard end still holds the pre-batch heap, because the card has
@@ -462,4 +537,296 @@ it('keeps the rematch’s opening when it lands while a beat is in flight', asyn
     await new Promise((r) => setTimeout(r, 80))
   })
   expect(log).toEqual(['intro', 'intro2'])
+})
+
+// The heap's own stand-in pose is keyed by the discard count AFTER the batch
+// (`toBoardState`'s `standInScatter`), and a plan reads it to land a silently
+// banked card exactly where the heap will rest it (#106, the crush ending).
+// That count exists nowhere in the events — the engine banks some cards with no
+// event at all — so it reaches the planner only through this argument.
+it('hands the planner the discard count the batch left behind', async () => {
+  motion.reduced = false
+  planned.calls = []
+  sent.hang = false
+  const { rerender } = render(<Probe live={preDiscard} events={[]} anchors={stub} />)
+  rerender(<Probe live={afterDiscard} events={[discardEvent]} anchors={stub} />)
+  await flush()
+  const args = planned.calls.at(-1)
+  // …the POST-batch count, not the projection the beat animates away from
+  expect(args?.[3]).toBe(afterDiscard.decks.discardCount)
+  expect(args?.[3]).not.toBe(preDiscard.decks.discardCount)
+})
+
+// ===== the watermark a restore or a resend seeds the queue with (#136, Task
+// 16). `isOpening` reads the PROJECTION, so mid-match `intro` is null and
+// beats are ENABLED from the first frame — without the mark, the whole
+// restored feed is "fresh" and the match replays itself as choreography.
+it('animates nothing that was already in the feed when the board mounted', async () => {
+  motion.reduced = false
+  planned.calls = []
+  render(
+    <Probe
+      live={afterDiscard}
+      events={[discardEvent]}
+      anchors={stub}
+      restoredThrough={discardEvent.id}
+    />,
+  )
+  await flush()
+  expect(planned.calls).toEqual([])
+})
+
+it('still animates what arrives after the restored mark', async () => {
+  motion.reduced = false
+  planned.calls = []
+  const later = { ...discardEvent, id: discardEvent.id + 1 } as Event
+  const { rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} restoredThrough={discardEvent.id} />,
+  )
+  rerender(
+    <Probe live={afterDiscard} events={[later]} anchors={stub} restoredThrough={discardEvent.id} />,
+  )
+  await flush()
+  expect(planned.calls.at(-1)?.[0]).toEqual([later])
+})
+
+// ===== fix round 1 (#136): a LIVE resync — no reload, `enabled` already
+// `true` from the first render — where `restoredThrough` itself climbs on a
+// LATER render, alongside the very batch it now covers. That is what a
+// rejoin resend looks like from inside a board that never unmounted:
+// `useGame.ts`'s `restoredNow` (Task 15) moves the mark forward as the
+// projection catches up, while the board's `enabled` was already `true`
+// before the peer dropped. `useRef(restoredThrough ?? 0)` only reads its
+// argument once, so before this fix `seen.current` stays pinned to the mark's
+// FIRST value and the whole resync batch reads as `> seen.current` — planned
+// as choreography, which is the rejoining peer watching every event it
+// missed replay. Both tests above hold `restoredThrough` fixed across their
+// rerender, so neither of them could reach this: this is the case they leave
+// open.
+it('advances the watermark forward when a live resync raises restoredThrough on a later render', async () => {
+  motion.reduced = false
+  planned.calls = []
+  const resync1 = { ...discardEvent, id: discardEvent.id + 1 } as Event
+  const resync2 = { ...discardEvent, id: discardEvent.id + 2 } as Event
+  const { rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} restoredThrough={discardEvent.id} />,
+  )
+  await flush()
+  rerender(
+    <Probe
+      live={afterDiscard}
+      events={[resync1, resync2]}
+      anchors={stub}
+      restoredThrough={resync2.id}
+    />,
+  )
+  await flush()
+  expect(planned.calls).toEqual([])
+})
+
+// ===== the sweep's alarm (#102) — the wire between planBeats' `gather` flag
+// and the queue's own `Beat.alarm`, driven end to end rather than mocked at
+// either end (that is exactly the hole `boardAlarm.test.tsx`'s mocked-`useBeats`
+// test leaves open, and this closes it). An opponent going out is used rather
+// than the local player: `sourceOf` resolves a non-`selfId` discard straight to
+// `{ kind: 'seat', player }` with no hand/release bookkeeping to set up, so the
+// events below are the only thing exercising planBeats/beatOf's own wiring.
+const eliminatedEvent = { id: 5, type: 'eliminated', player: 'p2' } as Event
+const sweptEvent = {
+  id: 6,
+  type: 'discarded',
+  player: 'p2',
+  card: 'attack-bug',
+  reason: 'effect',
+} as Event
+const afterSweep = {
+  ...preDiscard,
+  decks: { ...preDiscard.decks, discardCount: 1 },
+} as unknown as BoardState
+
+it('lights the alarm while a gathered sweep runs, and drops it when the queue drains', async () => {
+  motion.reduced = false
+  sent.calls = []
+  // Park the discard beat mid-flight — `alarm` has to be read while the sweep
+  // is still the running beat, not glimpsed inside a single act() window that
+  // also carries it to completion.
+  sent.hang = true
+  const { getByTestId, rerender } = render(<Probe live={preDiscard} events={[]} anchors={stub} />)
+  rerender(<Probe live={afterSweep} events={[eliminatedEvent, sweptEvent]} anchors={stub} />)
+  await flush()
+  // The sweep is really running, not skipped or dropped.
+  expect(sent.calls).toHaveLength(1)
+  expect(getByTestId('alarm').textContent).toBe('alarm')
+  // Landing: the queue drains, and the alarm goes dark with it — the same
+  // handover every other beat gets, just with `alarm` as the thing watched.
+  sent.hang = false
+  await act(async () => {
+    sent.release?.()
+    await new Promise((r) => setTimeout(r, 80))
+  })
+  expect(getByTestId('alarm').textContent).toBe('none')
+})
+
+it('leaves the alarm dark through an ordinary, ungathered discard', async () => {
+  motion.reduced = false
+  sent.calls = []
+  sent.hang = true
+  const { getByTestId } = mount()
+  await flush()
+  expect(sent.calls).toHaveLength(1)
+  // No `eliminated` in this batch (see `discardEvent`/`mount` above), so
+  // `planBeats` never sets `gather` and the beat's own `alarm` stays false —
+  // the negative half of the wire, checked while the beat is still in flight.
+  expect(getByTestId('alarm').textContent).toBe('none')
+  sent.hang = false
+  await act(async () => {
+    sent.release?.()
+    await new Promise((r) => setTimeout(r, 80))
+  })
+  expect(getByTestId('alarm').textContent).toBe('none')
+})
+
+// ===== the elimination clip (#103) — the same wire as the sweep's alarm above,
+// carried one beat further: planBeats' `eliminated` plan through beatOf into a
+// runner that puts a video on the board and holds the table while it plays.
+it('holds the table under the elimination clip, and hands it back when it goes', async () => {
+  motion.reduced = false
+  sent.calls = []
+  sent.hang = false
+  const { getByTestId, container, rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} />,
+  )
+  rerender(<Probe live={afterSweep} events={[eliminatedEvent, sweptEvent]} anchors={stub} />)
+  await flush()
+  // the sweep has landed and the clip's own delay has passed
+  await act(async () => void (await new Promise((r) => setTimeout(r, ELIM_DELAY + 120))))
+  expect(container.querySelector('video')).not.toBeNull()
+  // it owns the table while it plays — input is dead under a full-screen video
+  expect(getByTestId('exclusive').textContent).toBe('exclusive')
+  // …and what it plays over is the board the match is LEFT with, not the one
+  // the batch found. A non-exclusive beat here would hold the pre-batch shadow
+  // under the clip and empty the table the moment it lifted — the video would
+  // be covering the elimination instead of following it.
+  expect(getByTestId('discardCount').textContent).toBe('1')
+  // and the table comes back when the clip is done with it
+  await act(async () => {
+    fireEvent.error(container.querySelector('video') as HTMLVideoElement)
+    await new Promise((r) => setTimeout(r, 80))
+  })
+  expect(container.querySelector('video')).toBeNull()
+  expect(getByTestId('exclusive').textContent).toBe('open')
+})
+
+// The decision, pinned rather than left to emerge: a full-screen autoplaying
+// video is exactly what the preference is about, so under it there is no clip
+// at all — the board simply stands in its eliminated state, which is what
+// carries the news. `useBeats` already queues nothing under the preference;
+// this is here so that stays true of the clip specifically.
+it('plays no clip at all under prefers-reduced-motion', async () => {
+  motion.reduced = true
+  sent.calls = []
+  sent.hang = false
+  const { container, rerender } = render(<Probe live={preDiscard} events={[]} anchors={stub} />)
+  rerender(<Probe live={afterSweep} events={[eliminatedEvent, sweptEvent]} anchors={stub} />)
+  await flush()
+  await act(async () => void (await new Promise((r) => setTimeout(r, ELIM_DELAY + 120))))
+  expect(container.querySelector('video')).toBeNull()
+})
+
+// ===== the queue's own "still working" (#103) — `over` rides beside the
+// projection rather than inside it, so the board needs one plain fact to hold
+// the winner overlay back on. Driven through a parked beat rather than mocked:
+// the flag is only worth anything if it is true for the whole run.
+it('reports the queue as working until it drains', async () => {
+  motion.reduced = false
+  sent.calls = []
+  sent.hang = true
+  const { getByTestId } = mount()
+  await flush()
+  expect(sent.calls).toHaveLength(1) // the beat is really in flight
+  expect(getByTestId('running').textContent).toBe('running')
+  sent.hang = false
+  await act(async () => {
+    sent.release?.()
+    await new Promise((r) => setTimeout(r, 80))
+  })
+  expect(getByTestId('running').textContent).toBe('idle')
+})
+
+// Under the preference nothing is queued at all, so the queue is never working
+// and the winner is announced at once — the board goes straight to its end
+// state, which is the same answer the elimination clip gets.
+it('is never working under prefers-reduced-motion', async () => {
+  motion.reduced = true
+  sent.calls = []
+  sent.hang = false
+  const { getByTestId } = mount()
+  await flush()
+  expect(getByTestId('running').textContent).toBe('idle')
+})
+
+it('starts a release victory celebration as an exclusive board beat', async () => {
+  vi.useFakeTimers()
+  motion.reduced = false
+  const event = {
+    id: 99,
+    type: 'gameOver',
+    winner: 'p1',
+    condition: 'release',
+  } as Event
+  const { container, getByTestId, rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} />,
+  )
+
+  rerender(<Probe live={preDiscard} events={[event]} anchors={stub} />)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+
+  expect(container.querySelector('[data-testid="game-end-confetti"]')).not.toBeNull()
+  expect(getByTestId('running').textContent).toBe('running')
+  expect(getByTestId('exclusive').textContent).toBe('exclusive')
+})
+
+// ===== a 503 a standing Monitoring answers by itself (#103 testing, problem 2)
+// No pending is ever raised, so nothing lights the alarm off the projection —
+// the plan carries the fact and the queue turns it into the beat's own `alarm`,
+// the same field the defenceless sweep already uses for the same reason.
+const autoAnswered503 = [
+  { id: 7, type: 'drawn', player: 'p1', pile: 0, deckSize: 9 },
+  { id: 8, type: 'revealed', player: 'p1', card: 'trigger-error-503' },
+  { id: 9, type: 'neutralized', player: 'p1', method: 'monitoring' },
+  { id: 10, type: 'discarded', player: 'p1', card: 'trigger-error-503', reason: 'trigger' },
+] as Event[]
+
+it('lights the alarm while a self-answered 503 is on its way out', async () => {
+  motion.reduced = false
+  sent.calls = []
+  sent.hang = false
+  const alarms: boolean[] = []
+  const { getByTestId, rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} alarms={alarms} />,
+  )
+  rerender(<Probe live={afterSweep} events={autoAnswered503} anchors={stub} alarms={alarms} />)
+  await flush()
+  // it burned at some point during the beat…
+  expect(alarms).toContain(true)
+  // …and the table is not left lit once the queue has drained
+  expect(getByTestId('alarm').textContent).toBe('none')
+})
+
+it('leaves the alarm dark through an ordinary draw', async () => {
+  motion.reduced = false
+  sent.calls = []
+  sent.hang = false
+  const alarms: boolean[] = []
+  const plain = [
+    { id: 7, type: 'drawn', player: 'p1', card: 'attack-bug', pile: 0, deckSize: 9 },
+  ] as Event[]
+  const { rerender } = render(
+    <Probe live={preDiscard} events={[]} anchors={stub} alarms={alarms} />,
+  )
+  rerender(<Probe live={afterSweep} events={plain} anchors={stub} alarms={alarms} />)
+  await flush()
+  expect(alarms).not.toContain(true)
 })

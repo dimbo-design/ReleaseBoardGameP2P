@@ -1,3 +1,11 @@
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-block-end: 18px;
+}
+
 /* tall mock stage so the reconnect window has room to read at full size */
 .stage {
   position: relative;

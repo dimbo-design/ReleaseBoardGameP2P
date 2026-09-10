@@ -210,6 +210,15 @@ export function useComboBeat(
       // zeros stay until that shape exists.
       const standAttack = () => {
         if (ctx.base.pending || plan.target === ctx.base.selfId) return
+        // And never for an attack that was resolved inside the play that made
+        // it (#19 follow-up): a DDoS is not answerable by a defence card, so
+        // the engine banks it on the spot and owes nobody a decision. A `defend`
+        // fabricated here would tell the whole table an answer is owed for a
+        // throw nobody can answer — and `deriveDock` would draw the known-wrong
+        // `0s` expired ring over it for the length of this beat. It became
+        // reachable the moment a turn-played DDoS started logging `attacked`,
+        // which is the fix this rides in behind.
+        if (plan.resolved) return
         ctx.publish({
           ...ctx.base,
           pending: {

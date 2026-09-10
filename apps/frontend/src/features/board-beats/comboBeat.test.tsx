@@ -238,6 +238,32 @@ it('publishes the attack it just folded in, so the cover has something to cover'
   })
 })
 
+// A DDoS is not answerable by a defence card — the engine resolves it on the
+// spot and raises no pending at all (`release.ts`'s own comment). Since #19's
+// fix it DOES log `attacked`, so it reaches this beat like any other attack,
+// and a fabricated `defend` here would tell the table an answer is owed for a
+// throw nobody can answer — with `deriveDock` drawing the known-wrong `0s`
+// expired ring over it for the length of the beat.
+it('never says an answer is owed for an attack that cannot be answered', async () => {
+  resetPlayed()
+  const { api, Probe } = harness()
+  const published: BoardState[] = []
+  render(<Probe />)
+  const plan: Extract<BeatPlan, { kind: 'attackPlaced' }> = {
+    kind: 'attackPlaced',
+    key: 'attack:5',
+    eventId: 5,
+    attacker: 'p2',
+    card: 'attack-ddos',
+    sudo: false,
+    target: 'p3', // neither us nor the thrower: we are watching
+    // what `planBeats` marks a DDoS batch with — its own test is next door
+    resolved: true,
+  }
+  await drive(() => api.beat?.runAttack(plan, { base, publish: (s) => published.push(s) }))
+  expect(published).toHaveLength(0)
+})
+
 // The one peer this must never do it for. `options` is redacted for everyone
 // but the pending's owner, so an empty one published onto OUR OWN board would
 // say a defence is owed and offer no legal card to give it. Unreachable in

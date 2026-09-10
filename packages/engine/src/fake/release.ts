@@ -224,6 +224,25 @@ export function onPlay(state: GameState, action: Action & { type: 'PLAY' }): Red
     // banking it happens right here rather than at a later resolution — it
     // was always the right moment, it just used to do it silently.
     if (card.id === 'attack-ddos') {
+      // `attackTargets` only ever offers a DDoS a release or a Monitoring, both
+      // of which name their owner; the guard is what tells the compiler that,
+      // and it rejects a malformed target rather than logging an attack on
+      // nobody.
+      if (action.target.kind !== 'release' && action.target.kind !== 'monitoring') {
+        return reject(state, action, 'illegal target')
+      }
+      // A DDoS is an attack, and the log has to say so. It used to say only
+      // what the attack DID (a Monitoring destroyed, a release returned), which
+      // left the move history without the throw and the results screen without
+      // the attack: the one card the "King of DDoS" plate is about was the one
+      // attack nothing counted.
+      log.add({
+        type: 'attacked',
+        attacker: action.player,
+        card: card.id,
+        sudo,
+        target: action.target.player,
+      })
       for (const c of spentCards) {
         log.add({ type: 'discarded', player: action.player, card: c.id, reason: 'attackSpent' })
       }

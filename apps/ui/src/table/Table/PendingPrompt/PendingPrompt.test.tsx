@@ -105,6 +105,33 @@ it('resolves requestCard with a real catalogue card id, not a release slot', () 
   expect(CARDS.some((c) => c.id === choice.card)).toBe(true)
 })
 
+it('offers only cards that can actually be in a hand', () => {
+  // The guess space is not the whole catalogue. Two groups can never be held,
+  // and the rules say so outright rather than leaving it to be inferred:
+  //   • triggers — docs/rules/cards.md:320 «Обе карты нельзя держать в руке»
+  //     and :339 «В руку триггер не попадает ни на мгновение»; they resolve at
+  //     the moment they are drawn.
+  //   • the events deck — docs/rules/general.md:189, every one of its cards is
+  //     "либо в колоде, либо на столе", so none of them passes through a hand.
+  // Offering them makes a guess that cannot possibly hit look like a legal
+  // one, which is worse than a missing option: nothing rejects it, the request
+  // simply always misses.
+  const { getAllByRole } = render(
+    <PendingPrompt
+      pending={{ kind: 'requestCard', player: 'you', target: 'p2' }}
+      hand={hand}
+      copy={copy}
+      onResolve={vi.fn()}
+    />,
+  )
+  const offered = getAllByRole('option').length
+  const holdable = CARDS.filter((c) => c.deck === 'base' && c.category !== 'trigger')
+  expect(offered).toBe(holdable.length)
+  expect(offered).toBeLessThan(CARDS.length)
+  expect(holdable.some((c) => c.category === 'trigger')).toBe(false)
+  expect(holdable.some((c) => c.deck === 'ai')).toBe(false)
+})
+
 it('cannot resolve a stale selection once a new pending of the same kind/player drops it', () => {
   // The reset effect keys off `${pending.kind}:${pending.player}` — a second
   // pending of the *same* kind for the *same* player (a real shape once the
@@ -229,6 +256,63 @@ it('asks for the deck card only after the hand card, and resolves once with both
   })
 })
 
+it('names the release a crush sacrifice burns', () => {
+  // Regression for the bug this task exists to fix: `triggers.ts` refuses a
+  // sacrifice with no `card` ('sacrifice needs a release card') — the panel
+  // used to resolve `{ method: 'sacrifice' }` alone, which the engine always
+  // rejected.
+  const onResolve = vi.fn()
+  const pending: TablePending = {
+    kind: 'crush',
+    player: 'you',
+    slot: 'frontend',
+    methods: ['sacrifice'],
+  }
+  const { getAllByRole, getByRole } = render(
+    <PendingPrompt
+      pending={pending}
+      hand={[]}
+      release={{ frontend: { uid: 'release-frontend#3', card: makeCard('release-frontend') } }}
+      copy={copy}
+      onResolve={onResolve}
+    />,
+  )
+  // options[0] is the 'sacrifice' method itself; options[1] is the only
+  // release on offer, once the method picks it into view.
+  fireEvent.click(getAllByRole('option')[0])
+  fireEvent.click(getAllByRole('option')[1])
+  fireEvent.click(getByRole('button', { name: copy.confirm }))
+  expect(onResolve).toHaveBeenCalledWith({
+    kind: 'crush',
+    method: 'sacrifice',
+    card: 'release-frontend#3',
+  })
+})
+
+it('will not confirm a crush sacrifice with no release picked', () => {
+  const onResolve = vi.fn()
+  const pending: TablePending = {
+    kind: 'crush',
+    player: 'you',
+    slot: 'frontend',
+    methods: ['sacrifice'],
+  }
+  const { getAllByRole, getByRole } = render(
+    <PendingPrompt
+      pending={pending}
+      hand={[]}
+      release={{ frontend: { uid: 'release-frontend#3', card: makeCard('release-frontend') } }}
+      copy={copy}
+      onResolve={onResolve}
+    />,
+  )
+  fireEvent.click(getAllByRole('option')[0]) // picks the 'sacrifice' method, no release yet
+  const confirmBtn = getByRole('button', { name: copy.confirm })
+  expect(confirmBtn).toHaveProperty('disabled', true)
+  fireEvent.click(confirmBtn)
+  expect(onResolve).not.toHaveBeenCalled()
+})
+
 it('cannot resolve a stale discard pick once a new pickFromDiscard pending for the same player drops it', () => {
   // Same failure mode as the discardForRelease staleness test above, for the
   // new discardPicks state: a second pickFromDiscard pending for the same
@@ -277,7 +361,12 @@ it('drops a discard pick when the pending kind changes and later offers the same
     picks: 1,
     source: 'operation-git-cherry-pick',
   }
-  const other: TablePending = { kind: 'neutralize503', player: 'you', methods: ['debugger'] }
+  const other: TablePending = {
+    kind: 'neutralize503',
+    player: 'you',
+    card: 'trigger-error-503',
+    methods: ['debugger'],
+  }
 
   const { getAllByRole, getByRole, rerender } = render(
     <PendingPrompt pending={picking} hand={[]} copy={copy} onResolve={onResolve} />,

@@ -54,6 +54,9 @@
     The highlight is uniform across the set — but its hue follows the CONTEXT of
     the move: a gain reads mint, a loss reads --danger-accent. */
 
+  /* the table's alarm — an Error 503 nobody has answered yet */
+  --alarm-glow: #f34;
+
   /* ===== White overlays — --fg at an alpha (borders, text, faint surfaces) ===== */
   --white-02: rgb(255 255 255 / 2%);
   --white-03: rgb(255 255 255 / 3%);

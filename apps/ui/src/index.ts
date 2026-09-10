@@ -111,7 +111,7 @@ export { default as GameModes } from './table/GameModes'
 export { default as GameOver } from './table/GameOver'
 export type { GameOverCondition, GameOverCopy } from './table/GameOver/GameOver'
 export { default as Hand } from './table/Hand'
-export { CARD_W, type SlotPlacement, slotPlacement } from './table/Hand/fan'
+export { CARD_W, handStep, type SlotPlacement, slotPlacement } from './table/Hand/fan'
 export type { HandCardState, HandItem, HandPlayDrop } from './table/Hand/Hand'
 export { default as MoveHistory } from './table/MoveHistory'
 export type { HistoryEntry, MoveHistoryCopy } from './table/MoveHistory/MoveHistory'
@@ -169,5 +169,15 @@ export {
   centrePlaceStyle,
   centreTransform,
 } from './table/TableCentre/centre'
+export {
+  GRID_CARD_W,
+  GRID_GAP,
+  GRID_TOP,
+  type GridCell,
+  type GridShape,
+  gridCardW,
+  gridCells,
+  gridOf,
+} from './table/TableCentre/discardGrid'
 export type { TurnDockCopy, TurnDockState } from './table/TurnDock/TurnDock'
 export { default as TurnDock } from './table/TurnDock/TurnDock'

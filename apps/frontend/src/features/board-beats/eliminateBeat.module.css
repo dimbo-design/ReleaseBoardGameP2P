@@ -1,0 +1,28 @@
+/* Ported from the playground's own Error503Story.module.css — the overlay fills
+   the STAGE (inset 0 of the table), not the viewport. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface-0) 82%, transparent);
+
+  /* comes in with a short fade, goes away at once — the video is already playing
+     under the fade, it is not held back by it */
+  animation: elim-in 260ms var(--ease-out);
+}
+
+.video {
+  max-inline-size: 72%;
+  max-block-size: 72%;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px var(--black-50);
+}
+
+@keyframes elim-in {
+  from {
+    opacity: 0;
+  }
+}

@@ -5,17 +5,23 @@ import type {
   BeatRun,
   BoardAnchors,
   BoardState,
+  HandLimitHandoff,
   IntroBeat,
   StagedHandoff,
 } from '~/entities/game/board'
 import { useReducedMotion } from '~/shared/lib/useReducedMotion'
+import { useAiBeat } from './aiBeat'
 import { useComboBeat } from './comboBeat'
 import { useDeckBeat } from './deckBeat'
 import { useDefenseBeat } from './defenseBeat'
 import { useDiscardBeat } from './discardBeat'
 import { useDrawBeat } from './drawBeat'
+import { useEliminateBeat } from './eliminateBeat'
+import { useGameEndBeat } from './gameEndBeat'
+import { useHandLimitBeat } from './handLimitBeat'
 import type { BeatPlan } from './planBeats'
 import { planBeats } from './planBeats'
+import { useTransferBeat } from './transferBeat'
 
 // The board's beat queue. `useGame` accumulates engine events off the wire in
 // BATCHES — a peer can receive several moves in one sync — so a board that
@@ -77,6 +83,16 @@ interface Beat {
   ended?: BoardState
   /** it owns the table: input is dead while it runs */
   exclusive: boolean
+  /**
+   * A sweep is running: a defenceless player's whole table is gathering at
+   * the centre before it scatters (#102). The engine eliminates in the same
+   * batch as the reveal, so no `pending` is ever raised for this path — this
+   * is the only alarm the board gets, and it is what keeps the glow lit while
+   * the hand flies away with no pending to explain it. Set where the plan
+   * becomes a beat rather than derived from `plan.kind` in the queue's own
+   * runtime state, which keeps plan shapes out of it.
+   */
+  alarm: boolean
   run: (ctx: BeatRun) => Promise<void>
 }
 
@@ -84,6 +100,20 @@ export interface Beats {
   shadow: BoardState | null
   overlays: ReactNode[]
   exclusive: boolean
+  /** the running beat's own alarm — see `Beat.alarm` */
+  alarm: boolean
+  /**
+   * The queue is still working: a beat is running, and the batch behind it has
+   * not drained. What the board holds its END back on (#103) — the engine
+   * settles an elimination and the win it caused in ONE reduction, so `over`
+   * is true on the projection while the sweep and the clip are still queued,
+   * and `over` rides BESIDE the projection (`toBoardOver`, its own prop)
+   * rather than inside it, so no shadow can stand in for this.
+   *
+   * Not the same fact as `exclusive`, which asks whether input is dead: an
+   * ordinary discard is not exclusive and is very much still working.
+   */
+  running: boolean
   gapAt: number | null
   gapSize: number
 }
@@ -94,6 +124,12 @@ export function useBeats(args: {
   anchors: BoardAnchors
   enabled: boolean
   intro?: IntroBeat | null
+  // The highest event id already reflected in the projection the board first
+  // rendered — a restore, or a resend to a seat that rejoined (`Game.restoredThrough`,
+  // Task 15). Seeds the watermark below, and keeps raising it whenever a later
+  // render finds it has climbed further (a live resync) — see `seen` for why
+  // seeding it once is not enough.
+  restoredThrough?: number
   // The staging → beat handoff (#100): the page's staged play, read once at
   // the start of `attackPlaced`/`releasePlaced` and cleared through its own
   // `release()` when that play turns out to be the local actor's.
@@ -106,8 +142,23 @@ export function useBeats(args: {
   // `_useBoardStaging.ts`'s own `takeStagedRelease`, called once
   // `releasePlaced` picks the standing release up out of the stage slot.
   takeStagedRelease?: RefObject<(() => void) | null>
+  // The hand limit's own handoff (#104): the grid the local player filled by
+  // hand, read once at the start of a `handLimit` beat so the runner flies the
+  // cells that are standing instead of a fan the cards left long ago.
+  handLimit?: RefObject<HandLimitHandoff | null>
 }): Beats {
-  const { live, events, anchors, enabled, intro, staging, clearPaidCost, takeStagedRelease } = args
+  const {
+    live,
+    events,
+    anchors,
+    enabled,
+    intro,
+    restoredThrough,
+    staging,
+    clearPaidCost,
+    takeStagedRelease,
+    handLimit,
+  } = args
   const reduced = useReducedMotion()
   const [running, setRunning] = useState<Beat | null>(null)
   // The same answer as `running`, but ahead of it: `drain()` sets this
@@ -131,6 +182,11 @@ export function useBeats(args: {
   const decks = useDeckBeat(anchors)
   const combo = useComboBeat(anchors, staging, clearPaidCost, takeStagedRelease)
   const defense = useDefenseBeat(anchors, staging)
+  const elimination = useEliminateBeat()
+  const gameEnd = useGameEndBeat()
+  const handLimits = useHandLimitBeat(anchors, handLimit)
+  const transfers = useTransferBeat(anchors)
+  const ais = useAiBeat(anchors)
 
   // `intro` rides along because the arming effect below reads the beat from here
   // rather than from its own closure: the effect fires on the match key, and the
@@ -148,7 +204,28 @@ export function useBeats(args: {
   // empty for the whole second match and nothing would ever animate again. This
   // is the same shape as the "once per peer" bug the opening had — a latch that
   // outlived the thing it was latching.
-  const seen = useRef(0)
+  //
+  // Everything at or below `restoredThrough` was already reflected in the
+  // projection this board first rendered — a restore, or a resend to a seat
+  // that rejoined. The `!enabled` branch below does the same job for the
+  // opening; this seeds the same watermark for a board that arrives
+  // mid-match, where `isOpening` is false and beats are therefore ENABLED
+  // from the first frame.
+  //
+  // MONOTONIC FORWARD, not "once": `restoredThrough` is not only a
+  // first-render fact. A peer that stays mounted through a resync — no
+  // reload, `enabled` already `true` — sees it advance on a LATER render, as
+  // the projection it was handed catches up (`restoredNow` in `useGame.ts`,
+  // Task 15). A `useRef` that only reads this at construction cannot see
+  // that: `seen` would freeze at whatever `restoredThrough` was on mount, the
+  // whole resync batch would read as `> seen.current`, and it would replay as
+  // choreography — the exact failure this field exists to prevent, just
+  // reached from a rejoin instead of a reload. So the batch effect below
+  // re-checks `restoredThrough` on every pass, BEFORE it filters `events`,
+  // and raises `seen.current` to it whenever it is ahead. Never the other
+  // direction: forward only, so a mark can only climb, and a point the
+  // projection has already restored is never treated as fresh again.
+  const seen = useRef(restoredThrough ?? 0)
   const queue = useRef<Beat[]>([])
   const draining = useRef(false)
 
@@ -157,36 +234,97 @@ export function useBeats(args: {
   const beatOf = useCallback(
     (plan: BeatPlan, base: BoardState): Beat | null => {
       if (plan.kind === 'discard') {
-        return { key: plan.key, base, exclusive: false, run: (ctx) => discards.run(plan, ctx) }
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          alarm: plan.gather === true,
+          run: (ctx) => discards.run(plan, ctx),
+        }
+      }
+      if (plan.kind === 'handLimit') {
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => handLimits.run(plan, ctx),
+        }
       }
       if (plan.kind === 'draw') {
-        return { key: plan.key, base, exclusive: false, run: (ctx) => draws.run(plan, ctx) }
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          // A 503 a standing Monitoring answered by itself raises no pending at
+          // all (#103 testing, problem 2), so `glowStrong` has nothing to read
+          // — yet the table still has to see that a 503 landed. The plan
+          // carries the fact; this is the same field, and the same reason, the
+          // defenceless sweep lights its own glow with.
+          alarm: plan.draws.some((d) => d.reveal?.neutralized === true),
+          run: (ctx) => draws.run(plan, ctx),
+        }
       }
       if (plan.kind === 'reshuffle') {
         return {
           key: plan.key,
           base,
           exclusive: false,
+          alarm: false,
           run: (ctx) => decks.runReshuffle(plan, ctx),
         }
       }
       if (plan.kind === 'piles') {
-        return { key: plan.key, base, exclusive: false, run: (ctx) => decks.runPiles(plan, ctx) }
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => decks.runPiles(plan, ctx),
+        }
+      }
+      if (plan.kind === 'gameEnd') {
+        return {
+          key: plan.key,
+          base,
+          exclusive: true,
+          alarm: false,
+          run: (ctx) => gameEnd.run(plan, ctx),
+        }
       }
       if (plan.kind === 'attackPlaced') {
-        return { key: plan.key, base, exclusive: false, run: (ctx) => combo.runAttack(plan, ctx) }
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => combo.runAttack(plan, ctx),
+        }
       }
       if (plan.kind === 'releasePlaced') {
-        return { key: plan.key, base, exclusive: false, run: (ctx) => combo.runRelease(plan, ctx) }
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => combo.runRelease(plan, ctx),
+        }
       }
       if (plan.kind === 'pairToDiscard') {
-        return { key: plan.key, base, exclusive: false, run: (ctx) => combo.runPairOut(plan, ctx) }
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => combo.runPairOut(plan, ctx),
+        }
       }
       if (plan.kind === 'covered') {
         return {
           key: plan.key,
           base,
           exclusive: false,
+          alarm: false,
           run: (ctx) => defense.runCovered(plan, ctx),
         }
       }
@@ -195,7 +333,80 @@ export function useBeats(args: {
           key: plan.key,
           base,
           exclusive: false,
+          alarm: false,
           run: (ctx) => defense.runStolen(plan, ctx),
+        }
+      }
+      if (plan.kind === 'eliminated') {
+        return {
+          key: plan.key,
+          base,
+          // EXCLUSIVE, unlike every beat above it: the clip covers the whole
+          // stage, and a table nobody can see is not a table anybody may play
+          // on. It is also what makes the runner's own ceiling load-bearing —
+          // a clip that never ends would hold the board here (#103).
+          exclusive: true,
+          // The alarm belongs to the sweep, and the sweep is over: the glow
+          // goes dark as the clip comes up, rather than burning under it.
+          alarm: false,
+          run: (ctx) => elimination.run(plan, ctx),
+        }
+      }
+      if (plan.kind === 'neutralized') {
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => defense.runNeutralized(plan, ctx),
+        }
+      }
+      if (plan.kind === 'handTransfer') {
+        return {
+          key: plan.key,
+          base,
+          // Not exclusive: a card changing hands does not own the table the way
+          // an elimination clip does, and nothing about it needs input dead.
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => transfers.runTransfer(plan, ctx),
+        }
+      }
+      if (plan.kind === 'requested') {
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => transfers.runRequested(plan, ctx),
+        }
+      }
+      if (plan.kind === 'aiEvent') {
+        return {
+          key: plan.key,
+          base,
+          // Not exclusive: an AI card is read, not obeyed, and nothing about it
+          // needs input dead.
+          exclusive: false,
+          // The 503 mimic's own glow. A `standing` tail carries it too, because
+          // the alarm is owed for as long as the prompt is — same field, same
+          // reason, as `draw`'s `neutralized` case.
+          alarm:
+            plan.tail.kind === 'alarm' ||
+            (plan.tail.kind === 'standing' && plan.tail.alarm === true),
+          run: (ctx) => ais.run(plan, ctx),
+        }
+      }
+      if (plan.kind === 'takenFromDiscard') {
+        return {
+          key: plan.key,
+          base,
+          // Not exclusive: a card coming back out of the discard is read, not
+          // obeyed, and nothing about it needs input dead — same reasoning as
+          // `aiEvent` just above.
+          exclusive: false,
+          alarm: false,
+          run: (ctx) => ais.runTaken(plan, ctx),
         }
       }
       return null
@@ -210,6 +421,14 @@ export function useBeats(args: {
       combo.runPairOut,
       defense.runCovered,
       defense.runStolen,
+      defense.runNeutralized,
+      elimination.run,
+      gameEnd.run,
+      handLimits.run,
+      transfers.runTransfer,
+      transfers.runRequested,
+      ais.run,
+      ais.runTaken,
     ],
   )
 
@@ -299,7 +518,7 @@ export function useBeats(args: {
   // the arm also keeps it before the BATCH effect, which must not read a stale
   // watermark on the one pass where it matters most.)
   const playing = useRef<string | null>(null)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `discards`, `draws`, `decks`, `combo` and `defense` are read for the CURRENT render's runners on purpose, not added to the deps below — discardBeat/drawBeat/comboBeat/defenseBeat's own `reset` are unmemoized (each depends on `useDiscardExit`'s or `useHandArrival`'s own `reset`, neither wrapped in `useCallback`), so listing any of them would fire this on every render instead of once per match key. `deckBeat`'s `reset` happens to be stable (its one dependency, `useFlyer`'s `drop`, IS memoized) — excluded here too, for one uniform list rather than a one-off exception for the runner that doesn't need it
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `discards`, `draws`, `decks`, `combo`, `defense`, `elimination`, `gameEnd`, `handLimits`, `transfers` and `ais` are read for the CURRENT render's runners on purpose, not added to the deps below — this effect is keyed to the match, not runner object identity
   useLayoutEffect(() => {
     const key = intro?.key ?? null
     if (key == null || playing.current === key) return
@@ -321,6 +540,11 @@ export function useBeats(args: {
     decks.reset()
     combo.reset()
     defense.reset()
+    elimination.reset()
+    gameEnd.reset()
+    handLimits.reset()
+    transfers.reset()
+    ais.reset()
   }, [intro?.key, live])
 
   // Beat zero, queued once. Keyed by the intro's own key so a re-render with a
@@ -353,6 +577,7 @@ export function useBeats(args: {
       // base and this one animates away from the projection at large.
       base: latest.current.live,
       exclusive: true,
+      alarm: false,
       run: beat.run,
     })
     void drain()
@@ -375,6 +600,16 @@ export function useBeats(args: {
   // this a queue rather than a one-slot buffer.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `running` re-arms the effect on drain; the body reads `runningRef` because it must also see a beat this same pass started
   useLayoutEffect(() => {
+    // MONOTONIC FORWARD, ahead of everything below: a live resync raises
+    // `restoredThrough` on a pass where `enabled` is already `true`, so
+    // neither branch further down is a safe place to catch it — the
+    // `!enabled` branch never runs on that pass, and the running-beat guard
+    // can return before the fresh-events filter is even reached. Doing it
+    // here, first, guarantees the filter a few lines down always reads a
+    // watermark that already accounts for whatever the projection has
+    // restored as of THIS render.
+    if ((restoredThrough ?? 0) > seen.current) seen.current = restoredThrough ?? 0
+
     // FIRST, before the running-beat guard: nothing here is to be animated, so
     // the watermark keeps pace with the feed and `settled` with the projection.
     // Order matters — the opening is an exclusive beat that occupies the queue
@@ -406,7 +641,7 @@ export function useBeats(args: {
     // chaining itself: a plan is a fold of events, and where a beat ends is only
     // known once it has run.
     let previous: Beat | undefined
-    for (const plan of planBeats(fresh, before)) {
+    for (const plan of planBeats(fresh, before, live.pending, live.decks.discardCount)) {
       const beat = beatOf(plan, before)
       if (!beat) continue
       beat.after = previous
@@ -414,7 +649,7 @@ export function useBeats(args: {
       queue.current.push(beat)
     }
     void drain()
-  }, [events, live, enabled, reduced, beatOf, drain, running])
+  }, [events, live, enabled, reduced, beatOf, drain, running, restoredThrough])
 
   return {
     // The shadow is what the running beat has published, or its own base while
@@ -432,11 +667,30 @@ export function useBeats(args: {
       ...decks.overlay,
       ...combo.overlay,
       ...defense.overlay,
+      ...elimination.overlay,
+      ...gameEnd.overlay,
+      ...handLimits.overlay,
+      ...transfers.overlay,
+      ...ais.overlay,
     ],
     exclusive: running?.exclusive ?? false,
-    // The fan opens for a card on its way into it — the draw beat is the one
-    // that grows it (I8); nothing else does yet.
-    gapAt: draws.gapAt,
-    gapSize: draws.gapSize,
+    alarm: running?.alarm ?? false,
+    // `running` (the state) is held for the whole drain, not per beat: `drain()`
+    // clears it in its own `finally`, once the queue is empty. So this stays
+    // true across the handover between two beats of one batch, which is exactly
+    // the window the winner overlay must not appear in.
+    running: running != null,
+    // The fan opens for a card on its way into it. Three beats grow it now —
+    // a draw (I8), a card taken from an opponent, and a Release taken back
+    // out of the discard (#106) — and never more than one of them is open at
+    // once, because one beat runs at a time. So this is a choice between
+    // them, not a merge of them.
+    gapAt: draws.gapAt ?? transfers.gapAt ?? ais.gapAt,
+    gapSize:
+      draws.gapAt == null
+        ? transfers.gapAt == null
+          ? ais.gapSize
+          : transfers.gapSize
+        : draws.gapSize,
   }
 }

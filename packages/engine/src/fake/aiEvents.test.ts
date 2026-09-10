@@ -98,7 +98,14 @@ describe('Crush against a slot that holds nothing (#70)', () => {
 
     const r = fireEvent(state, 'ai-crush-frontend')
 
-    expect(r.state.pending).toMatchObject({ kind: 'crush', player: 'p1' })
+    // `source` names the AI card this prompt belongs to (resolveAiEvent's
+    // ai-crush-* branch) — driven through the real trigger resolution, not a
+    // state literal, so a regression that drops the field here is caught.
+    expect(r.state.pending).toMatchObject({
+      kind: 'crush',
+      player: 'p1',
+      source: 'ai-crush-frontend',
+    })
   })
 })
 
@@ -115,7 +122,11 @@ describe('Bad Vibe-Coding (#69)', () => {
     })
 
     const fired = fireEvent(state, 'ai-bad-vibe-coding')
-    expect(fired.state.pending).toBeTruthy()
+    // `source` names the AI card this prompt belongs to (resolveAiEvent's
+    // ai-bad-vibe-coding branch) — driven through the real trigger
+    // resolution, not a state literal, so a regression that drops the field
+    // here is caught.
+    expect(fired.state.pending).toMatchObject({ source: 'ai-bad-vibe-coding' })
 
     const resolved = reduce(fired.state, {
       type: 'RESOLVE',

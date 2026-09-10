@@ -1,0 +1,11 @@
+/* the carrier for a card pulled out of the release zone (#102) — `position:
+   fixed` against the viewport, same as every other flight carrier
+   (`useFlyer`/`useHandArrival`/`useDiscardExit`/`Arrow`): it flies by
+   coordinates read from `getBoundingClientRect`, so nothing between here and
+   the viewport may become a containing block. */
+.carrier {
+  position: fixed;
+  z-index: var(--z-flight);
+  aspect-ratio: var(--card-aspect);
+  pointer-events: none;
+}

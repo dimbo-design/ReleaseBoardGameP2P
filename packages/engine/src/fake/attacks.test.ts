@@ -549,3 +549,73 @@ it('projects the defence prompt only to the player who owes it', () => {
   expect(other?.kind).toBe('defend')
   expect(other && 'options' in other && other.options).toEqual([])
 })
+
+it('rejects a DDoS played with a sudo', () => {
+  // Not a rules curiosity — it is the premise the board's `resolved` flag rests
+  // on. planBeats decides a turn-played DDoS never stood awaiting an answer by
+  // checking that the NEXT event is that same card's own attackSpent discard.
+  // That reading only holds while a DDoS spends exactly one card. `attack-ddos`
+  // has no sudo effect in cards.ts, so a combo is rejected before any of it —
+  // and this says so out loud, because a card that resolved in place while
+  // spending something alongside it would slide past the check and bring the
+  // fabricated defend pending back (review of PR #125).
+  const s = engine.createGame(config())
+  const primed: GameState = {
+    ...s,
+    players: {
+      ...s.players,
+      p1: { ...s.players.p1, hand: [DDOS, SUDO] },
+      p2: { ...s.players.p2, release: { monitoring: MON } },
+    },
+  }
+
+  const r = reduce(primed, {
+    type: 'PLAY',
+    player: 'p1',
+    card: DDOS.uid,
+    combo: SUDO.uid,
+    target: { kind: 'monitoring', player: 'p2' },
+    at: 1000,
+  })
+
+  expect(r.state).toBe(primed)
+  expect(r.events).toContainEqual(
+    expect.objectContaining({ type: 'rejected', reason: 'that card has no sudo variant' }),
+  )
+})
+
+it('logs a turn-played DDoS as an attack, not only as its consequences', () => {
+  // A DDoS played on your own turn used to reach the table through resolveDdos,
+  // which logged what the attack DID — a Monitoring destroyed, a release
+  // returned — and never that an attack happened. The move history therefore
+  // showed a Monitoring dying with nothing that killed it, and the results
+  // screen counted no attack at all: the one card the "King of DDoS" plate is
+  // about was the one attack nothing counted. And because a DDoS is
+  // deliberately unanswerable by a defence card, a match whose attacks were
+  // DDoS showed 0 in BOTH results columns.
+  const s = engine.createGame(config())
+  const primed: GameState = {
+    ...s,
+    players: {
+      ...s.players,
+      p1: { ...s.players.p1, hand: [DDOS] },
+      p2: { ...s.players.p2, release: { monitoring: MON } },
+    },
+  }
+
+  const r = reduce(primed, {
+    type: 'PLAY',
+    player: 'p1',
+    card: DDOS.uid,
+    target: { kind: 'monitoring', player: 'p2' },
+    at: 1000,
+  })
+
+  expect(r.events).toContainEqual(
+    expect.objectContaining({ type: 'attacked', attacker: 'p1', card: DDOS.id, target: 'p2' }),
+  )
+  expect(r.state.tally.p1).toMatchObject({ attack: 1, ddos: 1 })
+  expect(r.state.tally.p2.attackedInto).toBe(1)
+  // The consequence is still logged; the attack is now logged alongside it.
+  expect(r.events.some((e) => e.type === 'monitoringDestroyed')).toBe(true)
+})

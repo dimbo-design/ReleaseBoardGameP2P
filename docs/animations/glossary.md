@@ -76,7 +76,6 @@ The words that flow into a preset as `params`.
 | `CARD_RATIO` | `1.4` (height / width) | `@/primitives/Card` | card art proportion. Reciprocal of the `--card-aspect` CSS token (`368 / 515`, width / height) — keep JS names off "aspect" to avoid the opposite convention. |
 | `CARD_W` | `150` | `@/table/Hand/fan` | canonical hand-card width (the real source) |
 | `SOURCE_CARD_W` | `140` | `CardToHandStory` | preview source-card width |
-| `DEAL_CARD_W` | `150` | `PickOpponentCardStory` | deal-grid card width |
 | `ROT` / `DX_FRAC` / `DY_FRAC` | `14` / `0.083` / `0.067` | `scatter.ts` | scatter ±ranges: tilt `±14°` (absolute — a tilt does not scale with size), offsets as FRACTIONS of the card width (`≈ ±10px` / `±8px` at `REF_WIDTH = 120`), so a heap looks equally tossed at any card size |
 | `PAIR_AUX` / `PAIR_AUX_POSE` | `{ rot: -7, dy: -26 }` → `translateY(-26%) rotate(-7deg)` | `@/primitives/CardPair` | the aux card's pose inside a pair. Declared as **data**, the CSS string derived from it — three readers need two forms: the component and `foldIntoPair` take the string, `useDiscardExit` takes `.rot` as a number when a pair splits and the aux half flies out at the tilt it was seen at. Same shape as `Scatter` + `restTransform` for the heap. (`dy` is a % of the card height; a split does not need it — the half's place comes from its measured rect.) |
 | `SHAKE_SHAPES` | `settle: 1, 6/7, 4/7, 3/7` · `spring: 1, 1, 2/3, 2/3` | `presets.ts` | the character of a shake as fractions of `amp`, out-and-back through zero. `settle` = a jolt that calms down (an input field), `spring` = two full swings then two smaller (a large element that flinched whole) |
@@ -135,7 +134,8 @@ playground.
 | `ELIM_MIN_MS` | `5000` | `Error503Story` | minimum elimination-video play time before it fades |
 | `COVER_DX` / `COVER_DY` | `16` / `-12` | `Error503Story` | the answer covers the 503 nudged, so both cards are read |
 | `COVER_HOLD` | `1200` | `Error503Story` | the answer and the alarm stand open before they leave together |
-| `GATHER_HOLD` | `1500` | `Error503Story` | the swept hand is held at the centre before it scatters (the hand-limit beat) |
+| `GATHER_HOLD` | `1500` | `Error503Story` · `HandLimitStory` | cards gathered at the centre are held before they scatter — the sweep's heap and the hand limit's grid, one value |
+| `CLEAR_STEP` | `90` | `HandLimitStory` | between cards as the finished grid leaves for the discard |
 | `PICK_HOLD` | `900` | `AiCardsStory` | Bad Vibe: the given-up card stands beside the AI card before both leave |
 | `TABLE_HOLD` | `2600` | `AiCardsStory` | hold on the table after an AI card reveals, before it resolves |
 | `HALLUCINATION_HOLD` | `5200` | `AiCardsStory` | `×2 TABLE_HOLD` — Hallucination lingers |
@@ -171,7 +171,9 @@ and `BEAT` is the pause between beats, so the order reads as an order and not as
 | `HEAP_HOLD` | `640` | the finished heap stands open at the centre before it goes to the fan |
 | `FLIP_HOLD` / `REVEAL_HOLD` | `380` / `620` | it is all in the hand, then it turns over / the hand is read, and only then the zone arrives |
 
-`GameEndStory` — the last release, the poppers, the window.
+`GameEndStory` / `features/board-beats/gameEndBeat.tsx` — the release-condition victory, the
+poppers, the window. The live runner keys from `gameOver(condition: 'release')`, so direct,
+Security Bug and AI Release wins share the same celebration.
 
 | Name | Value | Beat |
 |---|---|---|
@@ -185,9 +187,15 @@ and `BEAT` is the pause between beats, so the order reads as an order and not as
 ## 5. Data / content constants
 
 Not animation tuning, listed for completeness: `BASE`, `AI_DECK`, `NON_TRIGGER`, `ORDINARY_POOL`,
-`DECK_COUNTS`, `SOURCES`, `RELEASE_SLOTS`, `DISCARD_N`, `COLS_MAX`, `GAP_X` / `GAP_Y`, `CARD_H`,
-`ORIGIN`, `INITIAL_HAND`, card ids (`BRANCH`, `MERGE`, `SUDO`), trigger ids (`ERROR_503`,
-`AI_TRIGGER`).
+`DECK_COUNTS`, `SOURCES`, `RELEASE_SLOTS`, `DISCARD_N`, `CARD_H`, `INITIAL_HAND`, card ids
+(`BRANCH`, `MERGE`, `SUDO`), trigger ids (`ERROR_503`, `AI_TRIGGER`).
+
+> `DEAL_CARD_W`, `COLS_MAX`, `GAP_X` / `GAP_Y` and `ORIGIN` used to be listed here and above, as the
+> geometry of a deal-grid in `PickOpponentCardStory`. That grid exists in no story: three of the four
+> names exist nowhere in the repository, and `ORIGIN` survives only in `@/cards/useCardTilt` meaning
+> something else entirely (a pointer's rest position). They were the glossary's half of the same drift
+> that had `recipes.md` transcribing a scene it had never read (#105). Removed rather than repointed:
+> there is nothing to point at.
 
 ---
 

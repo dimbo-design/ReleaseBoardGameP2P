@@ -51,6 +51,14 @@ agree forever. It goes.
 | 9 | Absent seats | **The keeper drives them** with the engine's opponent policy after a grace period |
 | 10 | Guests | **Out of scope** — deferred to [#58](https://github.com/MythHand/ReleaseBoardGameP2P/issues/58) |
 
+> **Decisions 5, 8 and 9 are amended by the
+> [Session reconnect spec](./2026-08-24-session-reconnect-design.md) (2026-08-24).**
+> #5 — `PlayerId` stays `p1…pN`; a separate persisted `clientId` carries the identity
+> across a reload, so `referee.ts` is untouched. #8 — a host *reload* is no longer
+> terminal (the host snapshots `GameState` and restores it); a keeper that never
+> returns still is. #9 — the keeper does not drive absent seats while zero seats are
+> connected. That spec also closes the presence gap recorded below.
+
 ## Why a keeper, and what it costs
 
 `reduce` takes the whole `GameState` — every hand and the ordered deck. Whoever

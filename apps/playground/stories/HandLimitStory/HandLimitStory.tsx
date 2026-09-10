@@ -9,6 +9,7 @@ import Typography from '@/primitives/Typography'
 import Hand from '@/table/Hand'
 import { handStep } from '@/table/Hand/fan'
 import type { HandItem, HandPlayDrop } from '@/table/Hand/Hand'
+import { GRID_GAP, GRID_TOP, gridCardW, gridOf } from '@/table/TableCentre/discardGrid'
 import { pick, useLang } from '../../Playground/lang'
 import HoverSelect from '../controls/HoverSelect'
 import TechBar from '../controls/TechBar'
@@ -40,20 +41,6 @@ const SIZES = [4, 6, 9, 13]
 
 const GRID_HOLD = 1500 // the finished grid is held open before it leaves
 const CLEAR_STEP = 90 // per-card stagger, grid → discard
-
-// Grid shape by card count. Driven by the known count, not grown card by card:
-// 1–4 one row, then two rows of 3 / 4 / 5, and three rows past 10. Ten cards to
-// discard is already anomalous for the game's mechanics, so 15 is ample headroom.
-function gridOf(n: number): { cols: number; rows: number } {
-  if (n <= 4) return { cols: Math.max(n, 1), rows: 1 }
-  if (n <= 6) return { cols: 3, rows: 2 }
-  if (n <= 8) return { cols: 4, rows: 2 }
-  if (n <= 10) return { cols: 5, rows: 2 }
-  return { cols: Math.ceil(n / 3), rows: 3 }
-}
-// the taller the grid, the smaller the card — a wide grid must stay on screen
-// without ever shrinking a small, readable one
-const GRID_CARD_W = [150, 132, 116]
 
 // a card at rest in the discard — carries its own scatter (tilt + offset)
 interface DiscardEntry extends Scatter {
@@ -141,7 +128,7 @@ export default function HandLimitStory() {
 
   const excess = Math.max(0, hand.length - limit)
   const grid = gridOf(cells)
-  const cardW = GRID_CARD_W[grid.rows - 1]
+  const cardW = gridCardW(grid.rows)
   cellsRef.current = cells
   placedRef.current = placed
 
@@ -368,7 +355,14 @@ export default function HandLimitStory() {
         {cells > 0 && (
           <div
             className={styles.grid}
-            style={{ gridTemplateColumns: `repeat(${grid.cols}, ${cardW}px)` }}
+            // the row and the gap are the kit's own numbers (discardGrid.ts) —
+            // a CSS module cannot import them, so they arrive inline, the same
+            // idiom the board itself uses for GRID_TOP (`_Board.tsx`)
+            style={{
+              insetBlockStart: `${GRID_TOP}%`,
+              gap: `${GRID_GAP}px`,
+              gridTemplateColumns: `repeat(${grid.cols}, ${cardW}px)`,
+            }}
           >
             {Array.from({ length: cells }, (_, i) => {
               const card = placed.find((p) => p.slot === i)?.card

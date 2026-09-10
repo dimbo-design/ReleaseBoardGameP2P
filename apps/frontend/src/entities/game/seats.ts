@@ -24,7 +24,7 @@ export function seatsFor(peers: Record<string, PeerInfo>): Seat[] {
   return Object.values(peers)
     .filter((p) => p.role === 'host' || p.role === 'player')
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map((p, i) => ({ playerId: seatId(i), peerId: p.id, name: p.name }))
+    .map((p, i) => ({ playerId: seatId(i), peerId: p.id, clientId: p.clientId, name: p.name }))
 }
 
 // The seat a given peer got, or null if it is watching rather than playing.

@@ -49,6 +49,9 @@ export interface BoardOpponent {
   // A played Code Review lying under the release it protects.
   support?: ReleaseSupport
   eliminated?: boolean
+  // Which of this opponent's release slots is a standing AI card wearing an
+  // ordinary id, keyed to its events-deck id — see `you.releaseEvent` below.
+  releaseEvent?: Partial<Record<'frontend' | 'backend' | 'database' | 'monitoring', string>>
 }
 
 // Everything the engine's projection can answer. Assembled by the consumer's
@@ -61,6 +64,18 @@ export interface BoardState {
     // A played Code Review lying under the release it protects.
     support?: ReleaseSupport
     eliminated?: boolean
+    // The uid of whatever stands in each slot. The kit's `ReleaseSlots` carries
+    // card DATA and no identity — it is domain-free by design — but a choice
+    // the engine has to act on names a uid (`neutralize503`'s sacrifice), so
+    // the adapter keeps them here rather than widening the kit's own type.
+    releaseUid?: Partial<Record<'frontend' | 'backend' | 'database' | 'monitoring', string>>
+    // Which of this player's release slots is a standing AI card wearing an
+    // ordinary id (`release-<slot>`), keyed to the events-deck id it actually
+    // goes home as. Same reasoning as `releaseUid`: the kit's `ReleaseSlots` is
+    // domain-free and has no member for it, so the adapter keeps it beside the
+    // slot rather than widening the kit's own type. Absent slot means an
+    // ordinary card.
+    releaseEvent?: Partial<Record<'frontend' | 'backend' | 'database' | 'monitoring', string>>
   }
   opponents: BoardOpponent[]
   decks: {
@@ -127,6 +142,12 @@ export interface BoardRoom {
   // Connection is a session fact, never a game fact. `reconnecting` is the
   // local peer; `disconnected` names peers seen as gone.
   connection?: 'online' | 'reconnecting'
+  // Present only while `connection` is 'reconnecting'. Absent, the overlay
+  // still renders, on attempt 1 of 5 — a caller that knows it is dialing but
+  // not how far along should not be forced to invent numbers.
+  reconnect?: { attempt: number; maxAttempts: number; status: 'trying' | 'failed' }
+  onReconnectRetry?: () => void
+  onReconnectLeave?: () => void
   disconnected?: string[]
 }
 
@@ -159,6 +180,21 @@ export interface BoardChromeCopy {
   askCost: string
   askDefend: string
   askPartner: string
+  // An Error 503 owed an answer (#102). One line for all three methods rather
+  // than one per method: they are three GESTURES but one question, and what
+  // may answer is the projection's own set — so the line points at what is lit
+  // instead of naming a gesture that a pending offering only Monitoring (or
+  // only a sacrifice) would not have.
+  askNeutralize: string
+  // The hand is over the limit and the fan is the picker (#104). Count-free on
+  // interpolation to put a number into — and the grid's own empty cells already
+  // show how many are owed.
+  askHandLimit: string
+  // Inside's own caption (#106, `pickFromDiscard`) — the row over the
+  // discard asks this one, the same way the fan itself asks the four lines
+  // above it. Shared with Git Cherry-pick once #61 lands: the two effects
+  // resolve through the same pending, so they read the same line.
+  insidePrompt: string
   // поле паузы (опционально — рендерится только вместе с обработчиком паузы):
   // подпись поля, состояние тумблера (вкл / выкл) и строка-пояснение
   pauseGame?: string
@@ -227,6 +263,28 @@ export interface StagedHandoff {
   supportUid?: string
   el: HTMLElement | null // the staged node at the centre (pair flyer or single-card node)
   release: () => void // clears the page's staging state
+}
+
+/**
+ * The hand limit's own handoff (#104). The local player builds the grid at the
+ * centre themselves, card by card, long before the engine's `discarded` events
+ * come back — so the beat that takes those cards to the heap must fly the cells
+ * that are already standing rather than a hand the cards left minutes ago.
+ *
+ * A ref, read once at run start, for the same reason `StagedHandoff` is one. It
+ * lives here because the page produces it and a feature consumes it.
+ *
+ * `release()` does NOT end the gesture: it drops the grid's own render, in the
+ * same commit the exit's carriers go up. The picked cards stay hidden from the
+ * fan until the pending itself clears — the same split `_useNeutralizeStaging`
+ * keeps, and for the same reason (the board is still rendering the beat's
+ * shadow, whose hand still holds them).
+ */
+export interface HandLimitHandoff {
+  player: string
+  cards: { uid: string; card: CardData; slot: number }[]
+  cellAt: (slot: number) => HTMLElement | null
+  release: () => void
 }
 
 /**
@@ -301,6 +359,11 @@ export interface BoardProps {
     gameId: string | null
     view: PlayerView | null
     events: Event[]
+    // The highest event id already reflected in the projection this peer
+    // started from (`Game.restoredThrough`) — everything up to it was restored,
+    // not played, so `useBeats` must not plan it as a movement anybody should
+    // watch. Undefined/`0` when nothing was restored.
+    restoredThrough?: number
     onDone: () => void
   }
 }

@@ -37,6 +37,13 @@ it('never forwards the call to leave the lobby', () => {
   expect(isRelayable('GAME_STARTING')).toBe(false)
 })
 
+it('never forwards the host`s repointing of a seat', () => {
+  // A relayed frame reaches guests wearing the host's id, so forwarding a
+  // peer-originated SEAT_REBOUND would let any player repoint any seat at a peer
+  // id of its choosing — and that seat's private fan-out follows the peer id.
+  expect(isRelayable('SEAT_REBOUND')).toBe(false)
+})
+
 it('forwards to all peers except the sender and the host', () => {
   const targets = relayTargets({ connectedPeerIds: ['h', 'a', 'b', 'c'], hostId: 'h', from: 'a' })
   expect(targets.sort()).toEqual(['b', 'c'])

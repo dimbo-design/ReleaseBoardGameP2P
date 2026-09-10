@@ -14,13 +14,27 @@ const tally = (over: Partial<PlayerTally> = {}): PlayerTally => ({
 })
 
 const seats = [
-  { playerId: 'p1', peerId: 'peer-a', name: 'Ann' },
-  { playerId: 'p2', peerId: 'peer-b', name: 'Bo' },
+  { playerId: 'p1', peerId: 'peer-a', clientId: 'client-a', name: 'Ann' },
+  { playerId: 'p2', peerId: 'peer-b', clientId: 'client-b', name: 'Bo' },
 ]
 
 const peers: Record<string, PeerInfo> = {
-  'peer-a': { id: 'peer-a', name: 'Ann', role: 'host', ready: true, where: 'stats' },
-  'peer-b': { id: 'peer-b', name: 'Bo', role: 'player', ready: true, where: 'lobby' },
+  'peer-a': {
+    id: 'peer-a',
+    clientId: 'client-a',
+    name: 'Ann',
+    role: 'host',
+    ready: true,
+    where: 'stats',
+  },
+  'peer-b': {
+    id: 'peer-b',
+    clientId: 'client-b',
+    name: 'Bo',
+    role: 'player',
+    ready: true,
+    where: 'lobby',
+  },
 }
 
 it('rows are keyed by peer id, never by the engine seat id', () => {
@@ -68,13 +82,27 @@ it('a seat that lost its peer keeps its own counters, and so does everyone else'
   // surviving roster would renumber Cid to p2 and print Bo's counters under
   // Cid's name while Bo vanished from the match entirely.
   const dealt = [
-    { playerId: 'p1', peerId: 'aaa', name: 'Ann' },
-    { playerId: 'p2', peerId: 'bbb', name: 'Bo' },
-    { playerId: 'p3', peerId: 'ccc', name: 'Cid' },
+    { playerId: 'p1', peerId: 'aaa', clientId: 'client-aaa', name: 'Ann' },
+    { playerId: 'p2', peerId: 'bbb', clientId: 'client-bbb', name: 'Bo' },
+    { playerId: 'p3', peerId: 'ccc', clientId: 'client-ccc', name: 'Cid' },
   ]
   const survivors: Record<string, PeerInfo> = {
-    aaa: { id: 'aaa', name: 'Ann', role: 'host', ready: true, where: 'stats' },
-    ccc: { id: 'ccc', name: 'Cid', role: 'player', ready: true, where: 'stats' },
+    aaa: {
+      id: 'aaa',
+      clientId: 'client-aaa',
+      name: 'Ann',
+      role: 'host',
+      ready: true,
+      where: 'stats',
+    },
+    ccc: {
+      id: 'ccc',
+      clientId: 'client-ccc',
+      name: 'Cid',
+      role: 'player',
+      ready: true,
+      where: 'stats',
+    },
   }
 
   const rows = toStatPlayers({

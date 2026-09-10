@@ -8,7 +8,12 @@ import { attackTargets, drawObligationMet } from './core'
 import { canAttackWith } from './window'
 
 const releasedView = (r: Released | undefined): ReleasedView | undefined =>
-  r && { uid: r.card.uid, card: r.card.id, codeReview: r.codeReview?.id }
+  r && {
+    uid: r.card.uid,
+    card: r.card.id,
+    codeReview: r.codeReview?.id,
+    ...(r.card.event ? { event: r.card.event } : {}),
+  }
 
 function releaseView(state: GameState, id: PlayerId): ReleaseView {
   const z = state.players[id].release
@@ -17,7 +22,13 @@ function releaseView(state: GameState, id: PlayerId): ReleaseView {
     backend: releasedView(z.backend),
     database: releasedView(z.database),
   }
-  if (z.monitoring) view.monitoring = { uid: z.monitoring.uid, card: z.monitoring.id }
+  if (z.monitoring) {
+    view.monitoring = {
+      uid: z.monitoring.uid,
+      card: z.monitoring.id,
+      ...(z.monitoring.event ? { event: z.monitoring.event } : {}),
+    }
+  }
   return view
 }
 

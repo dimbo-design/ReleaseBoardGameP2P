@@ -39,16 +39,17 @@
 
 /* ===== table layout — positions mirror @release/ui Table.module.css ===== */
 
-/* the turn's discard, built openly at the centre — the columns and the card
-   width come from the known card count (set inline). Sits above the discard
+/* the turn's discard, built openly at the centre — the row, the gap, the
+   columns and the card width all come from the kit's own numbers
+   (discardGrid.ts: GRID_TOP, GRID_GAP, gridOf/gridCardW), set inline; a
+   stylesheet cannot import them and must not keep a second copy (the same
+   rule `_Board.module.css` states for its own grid). Sits above the discard
    heap, so the cards fly over it when the finished grid leaves. */
 .grid {
   position: absolute;
-  inset-block-start: 44%;
   inset-inline-start: 50%;
   z-index: 70;
   display: grid;
-  gap: 12px;
   transform: translate(-50%, -50%);
 }
 

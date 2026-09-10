@@ -1,0 +1,17 @@
+/* The miss note. It sits over the table centre, above the flyer layer, and it
+   is the only thing on screen that says a request came back empty — the rules
+   make that public, so it must be legible to the whole table and not only to
+   whoever asked. */
+.note {
+  position: fixed;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  z-index: 260;
+  padding-block: 8px;
+  padding-inline: 18px;
+  color: var(--white-70);
+  pointer-events: none;
+  background: var(--surface-1);
+  border-radius: 8px;
+  transform: translate(-50%, 140px);
+}

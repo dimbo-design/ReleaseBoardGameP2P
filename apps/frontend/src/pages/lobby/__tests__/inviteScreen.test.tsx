@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { vi } from 'vitest'
-import type { UseLobby } from '~/entities/lobby'
+import { MAX_RECONNECT_ATTEMPTS, type UseLobby } from '~/entities/lobby'
 import InviteScreen from '../_InviteScreen'
 
 vi.mock('@release/translation', () => ({
@@ -28,6 +28,14 @@ function base(): UseLobby {
   return {
     state: null,
     status: 'idle',
+    restoring: false,
+    reconnect: {
+      attempt: 0,
+      maxAttempts: MAX_RECONNECT_ATTEMPTS,
+      status: 'idle',
+      events: [],
+      retry: vi.fn(),
+    },
     roomCode: null,
     isHost: false,
     canStart: false,

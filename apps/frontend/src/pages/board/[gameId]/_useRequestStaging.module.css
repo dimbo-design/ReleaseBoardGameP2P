@@ -1,0 +1,23 @@
+/* The full-table layer keeps ConfirmAction pinned to the table bottom. Only
+   the catalogue scrolls; its cards must not sit underneath the confirm bar. */
+.requestBand {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.catalog {
+  position: absolute;
+  inset-block: 160px 170px;
+  inset-inline: 24px 72px;
+  padding: 64px 48px;
+  overflow: auto;
+  pointer-events: auto;
+}
+
+/* CardCatalog normally fills its parent's height. Here its rows determine the
+   scrollable height, with padding around them for the enlarged hover card. */
+.catalog > div {
+  block-size: auto;
+}

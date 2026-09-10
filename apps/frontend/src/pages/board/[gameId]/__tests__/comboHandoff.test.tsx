@@ -1187,3 +1187,97 @@ it('does not replay our own defence, or hand it back to the fan, when the answer
     animateSpy.mockRestore()
   }
 })
+
+// REPRODUCTION (user report): playing a card flies it to the table but leaves a
+// copy in the fan. The window nothing covered is AFTER `handoff.release()`:
+// the beat clears the gesture's staging so the static cover render can hand
+// over, but the board is still rendering the beat's SHADOW — `base`, the
+// projection from before the batch, whose `you.hand` still holds the card that
+// was played. With `staged` null there is nothing left filtering it out, so it
+// reappears in the fan for the length of the exit.
+//
+// The existing mid-flight test above stops before the beat ever reaches
+// `release()`, which is why the suite was green while the board was not.
+it('never shows the played defence back in the fan, at any point in the beat', async () => {
+  const animateSpy = holdFlightsOpen()
+  try {
+    played.names = []
+    played.calls = []
+    const { rerender } = render(<DefenceHarness live={defBefore} events={[]} />)
+    stubRect(screen.getByTestId('cover-slot'), COVER_RECT)
+
+    const fan = () =>
+      Array.from(document.querySelectorAll('[data-hand-slot] [data-card]')).map((el) =>
+        el.getAttribute('data-card'),
+      )
+
+    await drive(() => {
+      dapi.defense?.onHandPlay('defense-hotfix#0', { x: 0, y: 0, rect: SLOT_RECT as DOMRect })
+    }, 20)
+    expect(fan()).toEqual(['attack-bug'])
+
+    // the engine answers and the beat plays the whole exchange through
+    const seen: (string | null)[][] = []
+    vi.useFakeTimers()
+    try {
+      rerender(<DefenceHarness live={defAfter} events={defFlush} />)
+      for (let i = 0; i < 120; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(20)
+        })
+        seen.push(fan())
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // The card was played. It must not be in the fan on ANY frame of the beat.
+    const framesShowingIt = seen.filter((f) => f.includes('defense-hotfix')).length
+    const sample = (seen.find((f) => f.includes('defense-hotfix')) ?? []).join(',')
+    expect({ framesShowingIt, sample }).toEqual({ framesShowingIt: 0, sample: '' })
+  } finally {
+    animateSpy.mockRestore()
+  }
+})
+
+// The same defect on the TURN side: a release the player shipped reappearing in
+// the fan while the beat flies it to the zone. Same cause as the defence case
+// above — `handoff.release()` clearing the staging that filters the fan, while
+// the board still renders the beat's pre-batch shadow.
+it('never shows the played release back in the fan, at any point in the beat', async () => {
+  played.names = []
+  const { rerender } = render(<Harness live={soloReleaseBefore} events={[]} />)
+  await standTheRelease(rerender)
+  const fanCount = () => document.querySelectorAll('[data-hand-slot]').length
+  expect(fanCount()).toBe(1)
+
+  const costDiscardEvent: Event = {
+    id: 1,
+    type: 'discarded',
+    player: 'p1',
+    card: 'attack-bug',
+    reason: 'releaseCost',
+  } as Event
+
+  const seen: number[] = []
+  vi.useFakeTimers()
+  try {
+    rerender(<Harness live={soloReleaseAfter} events={[costDiscardEvent, soloReleasedEvent]} />)
+    for (let i = 0; i < 120; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20)
+      })
+      seen.push(fanCount())
+    }
+  } finally {
+    vi.useRealTimers()
+  }
+
+  // The release left the hand when it was staged. Nothing in this beat may put
+  // a card back into the fan, so the count must never climb above where the
+  // gesture left it.
+  expect({ maxFan: Math.max(...seen), frames: seen.filter((n) => n > 1).length }).toEqual({
+    maxFan: 1,
+    frames: 0,
+  })
+})

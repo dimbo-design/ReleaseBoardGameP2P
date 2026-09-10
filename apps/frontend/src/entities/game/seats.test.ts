@@ -1,8 +1,14 @@
 import type { PeerInfo } from '~/network'
 import { seatOf, seatsFor } from './seats'
 
-const peer = (id: string, name: string, role: PeerInfo['role']): PeerInfo => ({
+const peer = (
+  id: string,
+  name: string,
+  role: PeerInfo['role'],
+  clientId = `client-${id}`,
+): PeerInfo => ({
   id,
+  clientId,
   name,
   role,
   ready: true,
@@ -50,4 +56,14 @@ it('seats the same roster the same way however it is enumerated', () => {
   // Insertion order differs; the seating must not, or a re-render could move a
   // player between seats mid-game.
   expect(seatsFor(roster(a, b, c))).toEqual(seatsFor(roster(c, a, b)))
+})
+
+it('carries each peer clientId onto the seat it is dealt', () => {
+  const seats = seatsFor(
+    roster(peer('peer-a', 'Ann', 'host', 'client-a'), peer('peer-b', 'Bo', 'player', 'client-b')),
+  )
+  expect(seats).toEqual([
+    { playerId: 'p1', peerId: 'peer-a', clientId: 'client-a', name: 'Ann' },
+    { playerId: 'p2', peerId: 'peer-b', clientId: 'client-b', name: 'Bo' },
+  ])
 })

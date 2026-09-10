@@ -37,6 +37,28 @@ function twoPlayerSession() {
   })
 }
 
+// The referee used to reduce, fan out and forget. That is exactly why a peer
+// which missed a batch could never afterwards be told what was in it.
+it('accumulates every event it has reduced', () => {
+  const { session: start } = twoPlayerSession()
+  const { session } = applyIntent(start, 'peer-a', { type: 'DRAW' }, 1_000)
+  expect(session.log.length).toBeGreaterThan(start.log.length)
+})
+
+it('keeps the log in id order', () => {
+  const { session: start } = twoPlayerSession()
+  const { session } = applyIntent(start, 'peer-a', { type: 'DRAW' }, 1_000)
+  const ids = session.log.map((e) => e.id)
+  expect(ids).toEqual([...ids].sort((a, b) => a - b))
+})
+
+// The deal itself is in the log from the start: it is the first thing the
+// engine emitted, and a peer restoring the match needs it to draw its own hand.
+it('has the opening deal in it before anyone has acted', () => {
+  const { session } = twoPlayerSession()
+  expect(session.log.length).toBeGreaterThan(0)
+})
+
 // One step of driving whichever seat holds the turn, using only applyIntent:
 // pays a pending release cost, plays a release when one is playable, else
 // draws or pushes. `twoPlayerSession()`'s seed-1 opening hand holds no release
@@ -344,6 +366,25 @@ it('starts the first turn`s inactivity clock on its first tick', () => {
   expect(result.outgoing.map((o) => o.to)).toEqual(['peer-a', 'peer-b'])
 })
 
+// onClockStarted (packages/engine/src/fake/reduce.ts) always returns
+// `events: []` — starting a clock changes GameState but announces nothing —
+// so there is no event payload here for a content assertion to hook into,
+// unlike every other site in this file. The one trace this append site (tick,
+// ~457-464) leaves behind is that `log` comes out of `[...session.log,
+// ...events]` as a FRESH array, not the array a dropped append would leave
+// untouched: `{ ...session, state }` would carry `session.log` through
+// unchanged BY REFERENCE, because `...session` already spreads it in first.
+// Same elements either way — that part is asserted too, so this cannot be
+// mistaken for "any new array will do."
+it('appends the first tick`s clock-start into a fresh log, though it has no events to add', () => {
+  const { session } = twoPlayerSession()
+
+  const result = tick(session, 1_000)
+
+  expect(result.session.log).not.toBe(session.log)
+  expect(result.session.log).toEqual(session.log)
+})
+
 it('does nothing while no deadline has passed', () => {
   const { session } = twoPlayerSession()
   const started = tick(session, 1_000).session
@@ -434,6 +475,33 @@ it('takes the unpaid release back rather than paying for it', () => {
   expect(result.session.state.decks.discard.some((c) => c.uid === release)).toBe(false)
 })
 
+// This is the most intricate of the file's log-append sites: cancelRelease,
+// DRAW and PUSH each run their own `reduce` and fold into one local `events`
+// array (referee.ts's `tick`, ~489-518) before a single append carries the
+// whole batch into `session.log`. `costPendingFixture` reaches a turn that
+// still owes BOTH a mandatory draw and its push, with an unpaid release
+// standing in front of them, so all three sub-steps fire in this one expiry.
+it('folds every sub-step of the multi-step draw path into one log append', () => {
+  const { session } = twoPlayerSession()
+  const staged = costPendingFixture(tick(session, 1_000).session)
+  const before = staged.log.length
+  const deadline = staged.state.turn.deadline ?? 0
+
+  const result = tick(staged, deadline + 1)
+
+  // onCancelRelease (packages/engine/src/fake/release.ts) emits nothing —
+  // clearing the pending IS the whole undo — so it cannot itself show up
+  // here. The other two sub-steps both emit, and BOTH must be present: were
+  // either of `events = [...events, ...drawn.events]` (the draw) or
+  // `events = [...events, ...pushed.events]` (the push) changed to an
+  // assignment instead of an append, that sub-step's type would silently
+  // drop out of the tail below while `log.length` still visibly grew — the
+  // exact gap a bare "the log grew" assertion would miss.
+  const grown = result.session.log.slice(before).map((e) => e.type)
+  expect(grown).toContain('drawn') // the mandatory DRAW sub-step
+  expect(grown).toContain('turnEnded') // the PUSH sub-step right after it
+})
+
 it('leaves an expired turn to driveAbsent when its seat is disconnected', () => {
   const { session } = twoPlayerSession()
   const started = tick(session, 1_000).session
@@ -461,6 +529,20 @@ it('expires a reaction window once its deadline passes', () => {
 
   expect(result.session.state.window).toBeNull()
   expect(result.outgoing.length).toBeGreaterThan(0)
+})
+
+// tick's own WINDOW_EXPIRED append (referee.ts, ~417-424) — closeWindow
+// (packages/engine/src/fake/window.ts) emits `windowClosed`, so its presence
+// in the tail is what proves this specific reduce's events reached the log
+// rather than merely something in the batch above having grown it.
+it('appends the closed window`s own event to the log', () => {
+  const { session } = twoPlayerSession()
+  const opened = openWindowFixture(session)
+  const before = opened.log.length
+
+  const result = tick(opened, (opened.state.window?.deadline ?? 0) + 1)
+
+  expect(result.session.log.slice(before).map((e) => e.type)).toContain('windowClosed')
 })
 
 it('expires a window a deadline-free pending would otherwise hold open', () => {
@@ -612,6 +694,29 @@ it('hands a returning player a fresh clock instead of playing them out', () => {
   expect(returned.session.state.players[player].hand.length).toBe(handBefore)
 })
 
+// rebind's own CLOCK_STARTED append (referee.ts, ~181-188). Same limitation
+// as tick's first-clock append above: onClockStarted always emits `events:
+// []`, so there is no event content to assert on — a fresh, same-content log
+// array is the only observable sign this append ran rather than the restamp
+// falling through to `{ ...next, state }`, which would carry the old `log`
+// reference through unchanged.
+it('restamps a returning player`s clock into a fresh log, though it has no events to add', () => {
+  const { session } = twoPlayerSession()
+  const started = tick(session, 1_000).session
+  const deadline = started.state.turn.deadline ?? 0
+  const player = started.state.turn.player
+  const seat = started.seats.find((s) => s.playerId === player)
+
+  const dropped = disconnect(started, seat?.peerId ?? '', deadline - 5_000).session
+  const deferred = tick(dropped, deadline + 1).session
+  const before = deferred.log
+
+  const returned = rebind(deferred, player, 'peer-back', deadline + 10_000)
+
+  expect(returned.session.log).not.toBe(before)
+  expect(returned.session.log).toEqual(before)
+})
+
 it('leaves a live clock alone when its owner reconnects — no extension', () => {
   const { session } = twoPlayerSession()
   const started = tick(session, 1_000).session
@@ -626,4 +731,55 @@ it('leaves a live clock alone when its owner reconnects — no extension', () =>
   expect(returned.session.state.turn.deadline).toBe(deadline)
   expect(returned.outgoing).toHaveLength(1)
   expect(returned.outgoing[0].to).toBe('peer-back')
+})
+
+it('does not drive absent seats when no seat is connected at all', () => {
+  const { session } = twoPlayerSession()
+  const empty: Session = {
+    ...session,
+    seats: session.seats.map((s) => ({ ...s, peerId: null, absentSince: 0 })),
+  }
+  const result = driveAbsent(empty, ABSENT_GRACE_MS + 1)
+  // A keeper with no audience advances nothing: no state change, no fan-out.
+  expect(result.session).toBe(empty)
+  expect(result.outgoing).toEqual([])
+})
+
+it('still drives an absent seat while another seat is connected', () => {
+  const { session } = twoPlayerSession()
+  const oneGone: Session = {
+    ...session,
+    seats: session.seats.map((s) =>
+      s.playerId === session.state.turn.player ? { ...s, peerId: null, absentSince: 0 } : s,
+    ),
+  }
+  const result = driveAbsent(oneGone, ABSENT_GRACE_MS + 1)
+  expect(result.session).not.toBe(oneGone)
+})
+
+// driveAbsent's OTHER commit (referee.ts, ~232-238): botAction's own
+// suggestion is accepted on the first try, rather than falling through to the
+// DRAW/PUSH net below it. Staged with a pending `discardForRelease` decision
+// owed by the absent seat itself, so botAction answers it with a RESOLVE that
+// pays the cost — a commit with real events (paying a release discards a card
+// and places it), unlike the bare turn-clock stamps elsewhere in this file.
+it('logs what an absent seat`s own accepted bot suggestion commits', () => {
+  const { session } = twoPlayerSession()
+  const staged = costPendingFixture(tick(session, 1_000).session)
+  const pending = staged.state.pending
+  if (pending?.kind !== 'discardForRelease') throw new Error('fixture lost its pending')
+  const owner = staged.seats.find((s) => s.playerId === pending.player)
+  const dropped = disconnect(staged, owner?.peerId ?? '', 2_000).session
+  const before = dropped.log.length
+
+  const result = driveAbsent(dropped, 2_000 + ABSENT_GRACE_MS + 1)
+
+  // Paying the release's cost discards a card and places the release — losing
+  // either this whole append (referee.ts's `log: [...session.log, ...events]`
+  // at line 236) or overwriting it would either leave the log flat or miss
+  // these specific event types while the state itself still visibly moved.
+  const grown = result.session.log.slice(before).map((e) => e.type)
+  expect(result.session.state.pending).toBeNull()
+  expect(grown).toContain('discarded')
+  expect(grown).toContain('released')
 })

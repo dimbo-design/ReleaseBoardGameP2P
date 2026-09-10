@@ -25,8 +25,7 @@ export interface PendingPromptCopy {
   requestCard: { prompt: string; action: string }
   giveCard: { prompt: string; action: string }
   handLimit: { prompt: string; action: string }
-  // Git Cherry-pick's discard pick. No case in the switch below yet renders
-  // it — that is a later task — but the copy contract must stay total over
+  // Git Cherry-pick's discard pick. The copy contract must stay total over
   // every TablePending kind, since `copy[pending.kind]` indexes it.
   pickFromDiscard: { prompt: string; action: string }
 }
@@ -34,6 +33,9 @@ export interface PendingPromptCopy {
 export interface PendingPromptProps {
   pending: TablePending
   hand: HandItem[]
+  // the player's own releases, by slot: what a `sacrifice` method may burn.
+  // Carries the uid, because the engine's choice names one, not a slot.
+  release?: Partial<Record<'frontend' | 'backend' | 'database', { uid: string; card: CardType }>>
   copy: PendingPromptCopy
   onResolve: (choice: TableChoice) => void
 }
@@ -55,21 +57,27 @@ const METHOD_LABEL: Record<NeutralizeMethodId, string> = {
   sacrifice: 'Sacrifice',
 }
 
-// A selectable card, resolved against `hand` — never against the catalogue.
-// A uid the hand doesn't carry (stale pending mid-transition) silently drops.
+// A selectable card, resolved against `hand` by default — never against the
+// catalogue. A uid the hand doesn't carry (stale pending mid-transition)
+// silently drops. `card` is an escape hatch for a card that is not in a
+// hand at all (a release standing in the player's own zone, offered as a
+// `crush` sacrifice target): when passed, it is rendered directly and `hand`
+// is not consulted.
 function CardOption({
   uid,
   hand,
+  card,
   selected,
   onClick,
 }: {
   uid: string
   hand: HandItem[]
+  card?: CardType
   selected: boolean
   onClick: () => void
 }) {
-  const item = hand.find((h) => h.uid === uid)
-  if (!item) return null
+  const shown = card ?? hand.find((h) => h.uid === uid)?.card
+  if (!shown) return null
   return (
     <button
       type="button"
@@ -78,15 +86,23 @@ function CardOption({
       className={styles.option}
       onClick={onClick}
     >
-      <Card
-        card={item.card}
-        interactive={false}
-        width={104}
-        state={selected ? 'selected' : 'idle'}
-      />
+      <Card card={shown} interactive={false} width={104} state={selected ? 'selected' : 'idle'} />
     </button>
   )
 }
+
+// The guess space for `requestCard`: every card that can actually BE in a
+// hand, which is not the whole catalogue. Two groups are excluded, and the
+// rules say so outright rather than leaving it to inference:
+//   • triggers — `docs/rules/cards.md:320` («Обе карты нельзя держать в руке»)
+//     and `:339` («В руку триггер не попадает ни на мгновение»): they resolve
+//     at the moment they are drawn and never reach a hand.
+//   • the events deck — `docs/rules/general.md:189`: each of its cards is at
+//     any time «либо в колоде, либо на столе», so none passes through a hand.
+// Offering them made a guess that cannot possibly hit look like a legal one —
+// worse than a missing option, because nothing rejects it and the request just
+// always misses.
+const HOLDABLE = CARDS.filter((c) => c.deck === 'base' && c.category !== 'trigger')
 
 // A selectable card TYPE from the kit's own catalogue — used only by
 // `requestCard`, where the choice names a card the opponent might hold, not
@@ -180,7 +196,13 @@ function TextOption({
 // one exception is `requestCard`, which is a bluff rather than a legal move —
 // see CatalogueCardOption above for why reading the catalogue there is not a
 // legality decision.
-export default function PendingPrompt({ pending, hand, copy, onResolve }: PendingPromptProps) {
+export default function PendingPrompt({
+  pending,
+  hand,
+  release,
+  copy,
+  onResolve,
+}: PendingPromptProps) {
   // Reset selection when the pending itself changes (a new kind/player, not a
   // referential change to the same one — TableState is rebuilt from scratch on
   // every projection update, so `pending` is rarely `===` across renders even
@@ -191,6 +213,9 @@ export default function PendingPrompt({ pending, hand, copy, onResolve }: Pendin
   const [method, setMethod] = useState<NeutralizeMethodId | null>(null)
   const [requestedCard, setRequestedCard] = useState<string | null>(null)
   const [discardPicks, setDiscardPicks] = useState<string[]>([])
+  // which release a `crush` sacrifice burns — separate from `card` (the
+  // 503's own sacrifice state lives on the board's own scene now, #102).
+  const [sacrificed, setSacrificed] = useState<string | null>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: fingerprint is the re-arm trigger, not read inside
   useEffect(() => {
     setCard(null)
@@ -198,6 +223,7 @@ export default function PendingPrompt({ pending, hand, copy, onResolve }: Pendin
     setMethod(null)
     setRequestedCard(null)
     setDiscardPicks([])
+    setSacrificed(null)
   }, [fingerprint])
 
   const kindCopy = copy[pending.kind]
@@ -309,38 +335,63 @@ export default function PendingPrompt({ pending, hand, copy, onResolve }: Pendin
       break
     }
     case 'crush': {
-      complete = method != null && pending.methods.includes(method)
+      const burnable = Object.values(release ?? {}).filter(
+        (r): r is { uid: string; card: CardType } => r != null,
+      )
+      // A sacrifice must name WHICH release it burns — the engine refuses one
+      // that does not ('sacrifice needs a release card', triggers.ts), so the
+      // panel is not complete until a release is picked.
+      const needsCard = method === 'sacrifice'
+      complete =
+        method != null &&
+        pending.methods.includes(method) &&
+        (!needsCard || (sacrificed != null && burnable.some((r) => r.uid === sacrificed)))
       confirm = () => {
-        if (method && pending.methods.includes(method)) onResolve({ kind: 'crush', method })
+        if (!complete || !method) return
+        onResolve({ kind: 'crush', method, ...(needsCard ? { card: sacrificed as string } : {}) })
       }
-      options = pending.methods.map((m) => (
-        <TextOption
-          key={m}
-          label={METHOD_LABEL[m]}
-          selected={method === m}
-          onClick={() => setMethod(m)}
-        />
-      ))
+      options = [
+        ...pending.methods.map((m) => (
+          <TextOption
+            key={m}
+            label={METHOD_LABEL[m]}
+            selected={method === m}
+            onClick={() => setMethod(m)}
+          />
+        )),
+        ...(needsCard
+          ? burnable.map((r) => (
+              <CardOption
+                key={r.uid}
+                uid={r.uid}
+                hand={hand}
+                card={r.card}
+                selected={sacrificed === r.uid}
+                onClick={() => setSacrificed(r.uid)}
+              />
+            ))
+          : []),
+      ]
       break
     }
     case 'requestCard': {
       // The pending names who's being asked (`target`), not what may be
       // asked for — there is no `pending.options` because this is a guess,
       // not a legal move (see the module comment on CatalogueCardOption). The
-      // guess space is every distinct card type the kit's catalogue knows —
-      // 37 definitions, not the ~125-card physical deck (which counts
-      // per-copy quantities the catalogue collapses into one entry each).
+      // guess space is every distinct card type that can be HELD (`HOLDABLE`
+      // above) — not the ~125-card physical deck, which counts per-copy
+      // quantities the catalogue collapses into one entry each.
       // The catalogue is static, so membership here can't go stale the way
       // pending.options can — checked anyway, for the same structural reason
       // as every other kind: confirm should never resolve an option that
       // isn't actually on offer.
-      complete = requestedCard != null && CARDS.some((c) => c.id === requestedCard)
+      complete = requestedCard != null && HOLDABLE.some((c) => c.id === requestedCard)
       confirm = () => {
-        if (requestedCard && CARDS.some((c) => c.id === requestedCard)) {
+        if (requestedCard && HOLDABLE.some((c) => c.id === requestedCard)) {
           onResolve({ kind: 'requestCard', card: requestedCard })
         }
       }
-      options = CARDS.map((c) => (
+      options = HOLDABLE.map((c) => (
         <CatalogueCardOption
           key={c.id}
           card={c}

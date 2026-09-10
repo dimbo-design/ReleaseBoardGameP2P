@@ -52,11 +52,29 @@ export type TablePending =
       deadline: number
       scope: 'release' | 'hand'
     }
-  | { kind: 'neutralize503'; player: string; methods: NeutralizeMethodId[] }
-  | { kind: 'crush'; player: string; slot: ReleaseSlotId; methods: NeutralizeMethodId[] }
+  // null for the ai-error-503 mimic, which has no card standing anywhere to
+  // show — mirrors the engine's PendingView (Decision 7).
+  // Mirrors PendingView. NOTE: an *optional* field added on one side only is
+  // NOT caught by engineContract.test-d.ts — `Exact` passes when the sole
+  // difference is optional. What catches it is the board reading `.source`
+  // against this type and failing to compile.
+  | {
+      kind: 'neutralize503'
+      player: string
+      card: string | null
+      methods: NeutralizeMethodId[]
+      source?: string
+    }
+  | {
+      kind: 'crush'
+      player: string
+      slot: ReleaseSlotId
+      methods: NeutralizeMethodId[]
+      source?: string
+    }
   | { kind: 'requestCard'; player: string; target: string }
   | { kind: 'giveCard'; player: string; requested: string }
-  | { kind: 'handLimit'; player: string; excess: number; options: string[] }
+  | { kind: 'handLimit'; player: string; excess: number; options: string[]; source?: string }
   | {
       kind: 'pickFromDiscard'
       player: string

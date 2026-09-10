@@ -26,6 +26,11 @@ import type { MessageType } from '../types'
 // private but is authored by the keeper
 // alone, and `keeperId: null` is the death notice that ends the game for
 // everyone: a forwarded peer-originated one is a table-wide kill switch.
+// SEAT_REBOUND belongs to the first group: it is the host's answer to a
+// returning player, and a forwarded peer-originated one would let any player
+// repoint any seat at a peer id of its choosing — the seat's private fan-out
+// follows that peer id, so the forger would start receiving another seat's
+// projection, hand included.
 //
 // Nothing legitimate is lost. The keeper is the host, so every game frame
 // travels a direct connection in both directions and never reaches the relay.
@@ -41,6 +46,7 @@ const NEVER_RELAYED: ReadonlySet<MessageType> = new Set<MessageType>([
   'LOBBY_DISBANDED',
   'HOST_TRANSFERRED',
   'GAME_STARTING',
+  'SEAT_REBOUND',
   'GAME_STARTED',
   'INTENT',
   'INTRO_READY',

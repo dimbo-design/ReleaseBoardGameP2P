@@ -102,14 +102,48 @@ export type Pending =
       // Security Bug only: the card type the attacker named.
       requested?: CardId
     }
-  | { kind: 'neutralize503'; player: PlayerId; methods: NeutralizeMethod[] }
-  | { kind: 'crush'; player: PlayerId; slot: ReleaseSlot; methods: NeutralizeMethod[] }
+  // The alarm waits here while its answer is chosen — out of the deck, in no
+  // hand and no zone, exactly as a thrown attack waits on a `defend`. By the
+  // rules it reaches the discard only once it has been neutralized, «вместе с
+  // картой, которой нейтрализовали» (docs/rules/resolution.md), so holding it
+  // is what lets both leave in one moment.
+  //
+  // `card` is null for the `ai-error-503` mimic: that card is an events-deck
+  // one-off, already back in the events deck by the time this pending exists
+  // (fireTrigger's trigger-ai branch, general.md §6.4) — never in the discard,
+  // so there is nothing here for a neutralize answer to bank alongside it.
+  | {
+      kind: 'neutralize503'
+      player: PlayerId
+      card: CardInstance | null
+      methods: NeutralizeMethod[]
+      // The AI event card this prompt belongs to. Absent for a pending raised
+      // by anything other than an AI card.
+      source?: CardId
+    }
+  | {
+      kind: 'crush'
+      player: PlayerId
+      slot: ReleaseSlot
+      methods: NeutralizeMethod[]
+      // The AI event card this prompt belongs to. Absent for a pending raised
+      // by anything other than an AI card.
+      source?: CardId
+    }
   | { kind: 'requestCard'; player: PlayerId; target: PlayerId }
   | { kind: 'giveCard'; player: PlayerId; requested: CardId; attacker: PlayerId }
   // `endsTurn` false is Bad Vibe-Coding borrowing the prompt without the
   // consequence: the same "discard N" question, but the seat stays put.
   // Absent means the ordinary end-of-turn hand limit, which does end the turn.
-  | { kind: 'handLimit'; player: PlayerId; excess: number; endsTurn?: boolean }
+  | {
+      kind: 'handLimit'
+      player: PlayerId
+      excess: number
+      endsTurn?: boolean
+      // The AI event card this prompt belongs to. Absent for a pending raised
+      // by anything other than an AI card.
+      source?: CardId
+    }
   // The options travel on the pending rather than opening the discard globally:
   // only discardTop/discardCount are ever public (project.ts) — the pile's
   // full contents are not — so an effect that reaches into it brings its own
