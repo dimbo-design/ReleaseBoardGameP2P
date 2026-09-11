@@ -1,47 +1,18 @@
+import type { Event } from '@release/engine'
 import type { TableActions } from '@release/ui'
 import { Card, ConfirmAction, cardById, Typography } from '@release/ui'
-import { play, useHandArrival } from '@release/ui/animations'
-import type { ReactNode } from 'react'
+import { HEAP_SHOW, play, scatterAt, useDiscardExit, useHandArrival } from '@release/ui/animations'
+import type { ReactNode, RefObject } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BoardAnchors, BoardState } from '~/entities/game/board'
+import type { DiscardPickHandoff } from '~/entities/game/board/types'
 import { useReducedMotion } from '~/shared/lib/useReducedMotion'
 import styles from './_useCherryPickStaging.module.css'
+import { useResolveFeedback } from './_useResolveFeedback'
 
-// Git Cherry-pick — the OTHER `pickFromDiscard` (see `_useInsideStaging.tsx`,
-// which owns `ai-inside`). Two things make it a sibling rather than a widening
-// of that row: the offer is the whole discard rather than its Releases, so it
-// scrolls, and a sudo pick fills two slots whose roles are decided by rule
-// rather than by click order.
-//
-// The two roles come from the ENGINE's own offer, not from a rule re-derived
-// here: `openPickFromDiscard` withholds triggers from a base pick, and
-// `onPickFromDiscard` refuses one the hand slot. So a trigger in `options` can
-// only be the deck card, and that is the whole of the rule this hook needs.
-//
-// The grid stands OVER an unchanged heap: the engine leaves the candidates in
-// `decks.discard` until the pick resolves, so nothing is lifted out of the
-// projection while it is being chosen from.
-//
-// THE FLIGHTS (Task A4, corrected in a fix round after review): ported from
-// the approved playground scene (`apps/playground/stories/interactive/
-// GitCards/CherryPick.tsx`'s own `confirmPick()`), timings verbatim for the
-// two legs that actually travel. Two things differ from that story, both
-// load-bearing on the board rather than a sandbox:
-//   • only the CHOSEN cards fly — the hand card to the centre and into the
-//     fan, the sudo card flipping and onto the deck. The UNPICKED cards never
-//     leave the projection and so never fly either: the engine keeps them in
-//     `decks.discard` until the pick resolves, and the heap above this grid
-//     renders that same `decks.discard` the whole time the grid is open. A
-//     return flight for them would draw each one TWICE — once as a flying
-//     cell, once already resting in the heap underneath — and land it on a
-//     scatter pose the heap doesn't key by (array position, not the discard
-//     event's own id), so even without the double-draw it would jump at the
-//     moment the flight ends. The story needs that leg because its own
-//     discard is local state it emptied into the grid; the board's discard
-//     was never emptied, so the grid simply reveals it again when it goes.
-//   • a game action must never wait on an animation nobody plays
-//     (`_useInsideStaging`'s rule): under reduced motion the RESOLVE fires at
-//     once and the grid unmounts with nothing ever having flown.
+// The grid owns the local accepted pick; the event queue awaits its flight
+// instead of animating a second copy from the discard. The heap is empty
+// while its cards are in the grid, matching the playground scene.
 const isTrigger = (id: string) => cardById(id)?.category === 'trigger'
 
 // timings — the approved scene, the three legs that actually travel (deal,
@@ -66,7 +37,9 @@ function between(from: DOMRect, to: DOMRect): string {
 }
 
 export function useCherryPickStaging(args: {
+  handoff: RefObject<DiscardPickHandoff | null>
   state: BoardState
+  events?: Event[]
   anchors: BoardAnchors
   actions?: TableActions
   copy: {
@@ -78,7 +51,7 @@ export function useCherryPickStaging(args: {
     confirm: string
   }
   enabled: boolean
-}): { grid: ReactNode | null; overlay: ReactNode[] } {
+}): { grid: ReactNode | null; overlay: ReactNode[]; gapAt: number | null; gapSize: number } {
   const { state, anchors, actions, copy, enabled } = args
   const reduced = useReducedMotion()
   const pending = state.pending
@@ -135,7 +108,22 @@ export function useCherryPickStaging(args: {
   // the chosen card settles into the hand (the shared step every other
   // arrival on the board uses) — nothing here mirrors the hand locally, the
   // fan already renders straight off the projection's own `you.hand`.
+  const exit = useDiscardExit(anchors.discardBox)
   const arrival = useHandArrival(anchors.hand, () => {})
+
+  // Declared above the auto-answer effect below, which lists it as a
+  // dependency. A dependency array is read during render, so a `const`
+  // declared further down would not exist yet at that point.
+  const resolve = useResolveFeedback(args.events ?? [], state.selfId, actions, () => {
+    setConfirmed(false)
+    setFlying(false)
+    setFlipped(new Set())
+    clearTimers()
+    for (const el of cellRefs.current.values()) {
+      for (const animation of el.getAnimations?.() ?? []) animation.cancel()
+      el.style.cssText = ''
+    }
+  })
 
   // One candidate is not a choice — `_useInsideStaging`'s precedent, and
   // #105's Decision 2 before it. Latched on the pending rather than the mount,
@@ -151,8 +139,8 @@ export function useCherryPickStaging(args: {
     const key = `${ours.player}:${ours.source}:${only.uid}`
     if (answered.current === key) return
     answered.current = key
-    actions?.onResolve?.({ kind: 'pickFromDiscard', card: only.uid })
-  }, [ours, actions])
+    resolve({ kind: 'pickFromDiscard', card: only.uid })
+  }, [ours, resolve])
 
   // Nothing armed survives the pending it was armed for. `flying` is left
   // alone here on purpose — it clears itself once its own flight lands, and a
@@ -256,22 +244,8 @@ export function useCherryPickStaging(args: {
 
   const ready = ours ? picks.length === ours.picks : false
 
-  // confirm: freeze every cell at its viewport rect first — position:fixed
-  // both escapes `.cells`'s own scroll clip AND, pinned all at once, causes no
-  // reflow (ALL cells are pinned, not just the two that travel — leaving an
-  // unpicked neighbour unpinned would reflow it into the space a picked
-  // card's own `position: fixed` vacates). This is exactly why `.grid` (the
-  // pins' own ancestor) must never carry a transform — see its module CSS
-  // comment. Then the chosen card reveals to
-  // centre and drops into the hand, and the sudo card flips then flies onto
-  // the deck top. The rest simply stay put — pinned at the exact rect they
-  // already stood in, which changes nothing, since the heap under this grid
-  // has held them the whole time (see the header above); they surface again,
-  // unmoved, the instant the grid goes. Ported from the story's own
-  // `confirmPick()` — the two-pass rect capture is kept exactly as written,
-  // for exactly its own reason: pinning one cell reflows the rest, so a single
-  // read-and-pin loop would capture already-shifted positions for every card
-  // after the first.
+  // Pin all cells together only after acceptance. The queue owns the
+  // lifetime, so a refused choice never plays a success animation.
   const confirmPick = () => {
     if (!ours || confirmed || !ready) return
     const hand = roles.hand
@@ -290,98 +264,122 @@ export function useCherryPickStaging(args: {
     // and the grid simply unmounts.
     if (reduced) {
       setConfirmed(true)
-      actions?.onResolve?.(choice)
+      resolve(choice)
       return
     }
 
-    // Dispatched at once, same as every other staging hook on this board —
-    // the flight below is what happens with the LOCAL choice while the
-    // network catches up, not a gate in front of it.
     setConfirmed(true)
-    actions?.onResolve?.(choice)
-    setFlying(true)
+    args.handoff.current = {
+      card: ours.options.find((o) => o.uid === hand)?.id ?? '',
+      run: () =>
+        new Promise<void>((done) => {
+          setFlying(true)
+          const handData = cardById(ours.options.find((o) => o.uid === hand)?.id ?? '')
+          const deckOpt = deck ? ours.options.find((o) => o.uid === deck) : undefined
+          const deckData = deckOpt ? cardById(deckOpt.id) : undefined
+          const deckRect = anchors.pileBox(0)?.getBoundingClientRect()
 
-    const handData = cardById(ours.options.find((o) => o.uid === hand)?.id ?? '')
-    const deckOpt = deck ? ours.options.find((o) => o.uid === deck) : undefined
-    const deckData = deckOpt ? cardById(deckOpt.id) : undefined
-    const deckRect = anchors.pileBox(0)?.getBoundingClientRect()
+          // pass 1: read EVERY cell's rect first, before touching layout.
+          const rects = new Map<string, DOMRect>()
+          for (const o of ours.options) {
+            const el = cellRefs.current.get(o.uid)
+            if (el) rects.set(o.uid, el.getBoundingClientRect())
+          }
+          // pass 2: pin them all at their captured rects (no more reflow matters)
+          for (const o of ours.options) {
+            const el = cellRefs.current.get(o.uid)
+            const r = rects.get(o.uid)
+            if (!el || !r) continue
+            el.style.position = 'fixed'
+            el.style.left = `${r.left}px`
+            el.style.top = `${r.top}px`
+            el.style.width = `${r.width}px`
+            el.style.margin = '0'
+            el.style.zIndex = '100'
+          }
 
-    // pass 1: read EVERY cell's rect first, before touching layout.
-    const rects = new Map<string, DOMRect>()
-    for (const o of ours.options) {
-      const el = cellRefs.current.get(o.uid)
-      if (el) rects.set(o.uid, el.getBoundingClientRect())
-    }
-    // pass 2: pin them all at their captured rects (no more reflow matters)
-    for (const o of ours.options) {
-      const el = cellRefs.current.get(o.uid)
-      const r = rects.get(o.uid)
-      if (!el || !r) continue
-      el.style.position = 'fixed'
-      el.style.left = `${r.left}px`
-      el.style.top = `${r.top}px`
-      el.style.width = `${r.width}px`
-      el.style.margin = '0'
-      el.style.zIndex = '100'
-    }
+          // chosen → hand: fly to centre, enlarge, hold, then the shared
+          // useHandArrival drop into the fan — same as taking an opponent card
+          const handEl = cellRefs.current.get(hand)
+          const handRect = rects.get(hand)
+          if (handData && handEl && handRect) {
+            const stage = anchors.centre.current?.getBoundingClientRect()
+            const cx = stage ? stage.left + stage.width / 2 : window.innerWidth / 2
+            const cy = stage ? stage.top + stage.height / 2 : window.innerHeight / 2
+            const dx = cx - (handRect.left + handRect.width / 2)
+            const dy = cy - (handRect.top + handRect.height / 2)
+            handEl.style.zIndex = '130'
+            handEl.style.transition = `transform ${REVEAL_DUR}ms var(--ease-soft)`
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                handEl.style.transform = `translate(${dx}px, ${dy}px) scale(${REVEAL_W / handRect.width})`
+              }),
+            )
+            later(() => {
+              const el = cellRefs.current.get(hand)
+              if (!el) return
+              // the card on screen IS the one that flies — the step measures it and
+              // takes it off screen itself, no local copy and no opacity trick
+              void arrival.arrive(
+                [{ key: `cherry-hand-${hand}`, card: handData, el }],
+                state.you.hand.length,
+              )
+            }, REVEAL_DUR + REVEAL_HOLD)
+          }
 
-    // chosen → hand: fly to centre, enlarge, hold, then the shared
-    // useHandArrival drop into the fan — same as taking an opponent card
-    const handEl = cellRefs.current.get(hand)
-    const handRect = rects.get(hand)
-    if (handData && handEl && handRect) {
-      const stage = anchors.centre.current?.getBoundingClientRect()
-      const cx = stage ? stage.left + stage.width / 2 : window.innerWidth / 2
-      const cy = stage ? stage.top + stage.height / 2 : window.innerHeight / 2
-      const dx = cx - (handRect.left + handRect.width / 2)
-      const dy = cy - (handRect.top + handRect.height / 2)
-      handEl.style.zIndex = '130'
-      handEl.style.transition = `transform ${REVEAL_DUR}ms var(--ease-soft)`
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          handEl.style.transform = `translate(${dx}px, ${dy}px) scale(${REVEAL_W / handRect.width})`
+          // chosen → deck top: flip face-down in place FIRST, then fly onto the deck
+          if (deck && deckData && deckRect) {
+            const el = cellRefs.current.get(deck)
+            if (el) el.style.zIndex = '120' // above the deck pile — lands on top, not under
+            setFlipped(new Set([deck]))
+            later(() => {
+              const dEl = cellRefs.current.get(deck)
+              const r = rects.get(deck)
+              if (dEl && r) play('returnToDeck', dEl, { from: r, to: deckRect })
+            }, FLIP_DUR)
+          }
+
+          const remaining = ours.options.filter((o) => o.uid !== hand && o.uid !== deck)
+          void exit.send(
+            remaining.flatMap((o, i) => {
+              const card = cardById(o.id)
+              if (!card) return []
+              const rest = state.decks.discardHeap?.find((h) => h.card.id === o.id)
+              return [
+                {
+                  key: o.uid,
+                  card,
+                  node: cellRefs.current.get(o.uid),
+                  scatter: rest ?? scatterAt(i, 116),
+                  fade: i < remaining.length - HEAP_SHOW,
+                  delay: Math.min(i, STAGGER_CAP) * 14,
+                  layer: i,
+                },
+              ]
+            }),
+          )
+          const returnDone = 420 + Math.min(remaining.length, STAGGER_CAP) * 14
+          const deckDone = deck ? FLIP_DUR + DECK_DUR + DECK_HOLD : 0
+          later(
+            () => {
+              setFlying(false)
+              done()
+            },
+            Math.max(returnDone, deckDone, HAND_MIN) + 100,
+          )
         }),
-      )
-      later(() => {
-        const el = cellRefs.current.get(hand)
-        if (!el) return
-        // the card on screen IS the one that flies — the step measures it and
-        // takes it off screen itself, no local copy and no opacity trick
-        void arrival.arrive(
-          [{ key: `cherry-hand-${hand}`, card: handData, el }],
-          state.you.hand.length,
-        )
-      }, REVEAL_DUR + REVEAL_HOLD)
     }
-
-    // chosen → deck top: flip face-down in place FIRST, then fly onto the deck
-    if (deck && deckData && deckRect) {
-      const el = cellRefs.current.get(deck)
-      if (el) el.style.zIndex = '120' // above the deck pile — lands on top, not under
-      setFlipped(new Set([deck]))
-      later(() => {
-        const dEl = cellRefs.current.get(deck)
-        const r = rects.get(deck)
-        if (dEl && r) play('returnToDeck', dEl, { from: r, to: deckRect })
-      }, FLIP_DUR)
-    }
-
-    // the rest never travel — see the header above. They stay exactly where
-    // pass 2 pinned them (unmoved) until the grid unmounts below, at which
-    // point the heap that was rendering them the whole time is all that's
-    // left on screen. No flight, so nothing here to start or to wait on.
-
-    // The round ends when the two legs that actually fly are both done — a
-    // stationary cell has nothing to finish.
-    const deckDone = deck ? FLIP_DUR + DECK_DUR + DECK_HOLD : 0
-    const handDone = handData ? HAND_MIN : 0
-    later(() => setFlying(false), Math.max(deckDone, handDone) + 100)
+    resolve(choice)
   }
 
-  const overlay = arrival.overlay
+  const overlay = [...arrival.overlay, ...exit.overlay]
+  const gaps = { gapAt: arrival.gapAt, gapSize: arrival.gapSize }
 
-  if (!flying && (!ours || confirmed || (ours.picks === 1 && ours.options.length < 2))) {
-    return { grid: null, overlay }
+  if (
+    !flying &&
+    (!ours || (confirmed && reduced) || (ours.picks === 1 && ours.options.length < 2))
+  ) {
+    return { grid: null, overlay, ...gaps }
   }
 
   return {
@@ -453,6 +451,7 @@ export function useCherryPickStaging(args: {
       </div>
     ),
     overlay,
+    ...gaps,
   }
 }
 

@@ -1,8 +1,10 @@
-import type { TableActions } from '@release/ui'
+import type { Event } from '@release/engine'
+import type { HandPlayDrop, TableActions } from '@release/ui'
 import { Card, ConfirmAction, cardById } from '@release/ui'
-import type { ReactNode } from 'react'
+import { play, useFlyer } from '@release/ui/animations'
 import { useEffect, useState } from 'react'
-import type { BoardState } from '~/entities/game/board'
+import type { BoardAnchors, BoardState } from '~/entities/game/board'
+import { useResolveFeedback } from './_useResolveFeedback'
 import styles from './_useUpgradeStaging.module.css'
 
 // System Upgrade — the one pending that owes several seats at once. Three
@@ -18,16 +20,19 @@ import styles from './_useUpgradeStaging.module.css'
 // ever animates a card coming in and hands over to this (I7).
 export function useUpgradeStaging(args: {
   state: BoardState
+  anchors: BoardAnchors
+  events?: Event[]
   actions?: TableActions
   copy: { prompt: string; waiting: string; takePrompt: string; confirm: string }
   enabled: boolean
-}): { surface: ReactNode | null } {
+}) {
   const { state, actions, copy, enabled } = args
   const pending = state.pending?.kind === 'systemUpgrade' ? state.pending : null
 
   const asked = pending?.phase === 'discarding' && pending.owed.includes(state.selfId)
   const picking = pending?.phase === 'picking' && pending.actor === state.selfId
 
+  const flyer = useFlyer()
   const [given, setGiven] = useState<string | null>(null)
   const [taken, setTaken] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(false)
@@ -42,7 +47,40 @@ export function useUpgradeStaging(args: {
     }
   }, [pending])
 
-  if (!pending || !enabled) return { surface: null }
+  const resolve = useResolveFeedback(args.events ?? [], state.selfId, actions, () => {
+    setConfirmed(false)
+    setGiven(null)
+    flyer.drop()
+  })
+
+  const onHandPlay = (uid: string, drop: HandPlayDrop) => {
+    const item = state.you.hand.find((c) => c.uid === uid)
+    if (!enabled || !asked || given || !item) return false
+    setGiven(uid)
+    void (async () => {
+      const target = args.anchors.centre.current?.getBoundingClientRect()
+      // `HandPlayDrop.rect` is optional. With no rect there is no leg to fly,
+      // and the answer still goes out — exactly as a missing centre skips it.
+      const from = drop.rect
+      if (target && from) {
+        const [el] = await flyer.raise([{ key: 'upgrade-local', card: item.card, at: from }])
+        if (el) await play('playToCenter', el, { from, to: target, duration: 460 })?.finished
+      }
+      setConfirmed(true)
+      resolve({ kind: 'upgradeDiscard', card: uid })
+    })()
+    return true
+  }
+  const interaction = {
+    asked: Boolean(enabled && asked),
+    onHandPlay,
+    handItems: state.you.hand.filter((c) => c.uid !== given),
+    stagedUid: given,
+    el: () => flyer.elOf('upgrade-local'),
+    release: () => flyer.drop(),
+    overlay: flyer.overlay,
+  }
+  if (!pending || !enabled) return { surface: null, ...interaction }
 
   const centre = (
     <div className={styles.centre}>
@@ -72,47 +110,15 @@ export function useUpgradeStaging(args: {
     </div>
   )
 
-  if (confirmed) return { surface: centre }
+  if (confirmed) return { surface: centre, ...interaction }
 
   if (asked) {
     return {
+      ...interaction,
       surface: (
         <div className={styles.surface} data-testid="board-upgrade-ask">
           {centre}
-          <div className={styles.hand}>
-            {state.you.hand.map((h) => (
-              <button
-                key={h.uid}
-                type="button"
-                data-testid={`upgrade-hand-${h.uid}`}
-                className={styles.cell}
-                onClick={() => setGiven(h.uid)}
-              >
-                <Card
-                  // `HandItem.card` is already the card object (Hand.tsx:53) —
-                  // no lookup, and no cast.
-                  card={h.card}
-                  interactive={false}
-                  width="100%"
-                  state={given === h.uid ? 'selected' : 'idle'}
-                  accent="var(--select-accent)"
-                />
-              </button>
-            ))}
-          </div>
-          <ConfirmAction
-            open
-            label={copy.confirm}
-            caption={copy.prompt}
-            disabled={given == null}
-            onConfirm={() => {
-              // re-checked against THIS render's hand, the discipline the
-              // kit's own panel keeps on every branch
-              if (!given || !state.you.hand.some((h) => h.uid === given)) return
-              setConfirmed(true)
-              actions?.onResolve?.({ kind: 'upgradeDiscard', card: given })
-            }}
-          />
+          <ConfirmAction open={false} label={copy.confirm} caption={copy.prompt} disabled />
         </div>
       ),
     }
@@ -120,6 +126,7 @@ export function useUpgradeStaging(args: {
 
   if (picking) {
     return {
+      ...interaction,
       surface: (
         <div className={styles.surface}>
           {centre}
@@ -131,7 +138,7 @@ export function useUpgradeStaging(args: {
             onConfirm={() => {
               if (!taken || !pending.thrown.some((t) => t.card.uid === taken)) return
               setConfirmed(true)
-              actions?.onResolve?.({ kind: 'upgradeTake', card: taken })
+              resolve({ kind: 'upgradeTake', card: taken })
             }}
           />
         </div>
@@ -142,6 +149,7 @@ export function useUpgradeStaging(args: {
   // Answered, or never asked: the cards stand and the caption says why nothing
   // is being asked of this seat.
   return {
+    ...interaction,
     surface: (
       <div className={styles.surface}>
         {centre}

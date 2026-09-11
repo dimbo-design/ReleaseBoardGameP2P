@@ -1,3 +1,4 @@
+import type { Event } from '@release/engine'
 import type { TableActions } from '@release/ui'
 import { Card, ConfirmAction, cardById, Typography } from '@release/ui'
 import { play, useCardReorder } from '@release/ui/animations'
@@ -6,6 +7,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BoardAnchors, BoardState } from '~/entities/game/board'
 import { useReducedMotion } from '~/shared/lib/useReducedMotion'
 import styles from './_useRebaseStaging.module.css'
+import { useResolveFeedback } from './_useResolveFeedback'
 
 // Git Rebase — the top of a pile, shown to its owner and to nobody else. The
 // privacy is not enforced here: `pendingView` hands every other peer an empty
@@ -59,6 +61,7 @@ interface Pile {
 
 export function useRebaseStaging(args: {
   state: BoardState
+  events?: Event[]
   anchors: BoardAnchors
   actions?: TableActions
   copy: { prompt: string; position: string; confirm: string }
@@ -186,6 +189,21 @@ export function useRebaseStaging(args: {
     }
   }, [ours, reduced, anchors])
 
+  const resolve = useResolveFeedback(args.events ?? [], state.selfId, actions, () => {
+    setConfirmed(false)
+    setFlying(false)
+    setFaceDown(false)
+    setReady(true)
+    clearTimers()
+    for (const el of cardRefs.current.values()) {
+      for (const animation of el.getAnimations?.() ?? []) animation.cancel()
+      el.style.cssText = ''
+    }
+    setOrder(
+      Object.fromEntries((ours?.piles ?? []).map((e) => [e.pile, e.cards.map((c) => c.uid)])),
+    )
+  })
+
   if ((!ours && !flying) || (confirmed && !flying)) return { row: null }
 
   const move = (pile: number, uid: string, delta: number) =>
@@ -213,7 +231,7 @@ export function useRebaseStaging(args: {
     // only the moment differs.
     if (reduced) {
       setConfirmed(true)
-      actions?.onResolve?.(choice)
+      resolve(choice)
       return
     }
 
@@ -253,7 +271,7 @@ export function useRebaseStaging(args: {
       later(() => {
         setFlying(false)
         setFaceDown(false)
-        actions?.onResolve?.(choice)
+        resolve(choice)
       }, last + BACK_DUR)
     }, FLIP_DUR + FLIP_HOLD)
   }

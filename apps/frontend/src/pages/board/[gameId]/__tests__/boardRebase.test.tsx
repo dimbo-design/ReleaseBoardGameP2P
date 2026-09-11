@@ -139,3 +139,40 @@ describe('the row that answers Git Rebase', () => {
     expect(screen.queryByTestId('board-rebase-row')).toBeNull()
   })
 })
+
+it('reopens a rejected reorder so the player can retry', () => {
+  mockReducedMotion(true)
+  const onResolve = vi.fn()
+  const base = makeBoardProps()
+  const state = {
+    ...base.state,
+    pending: rebasePending([
+      { uid: 'a', id: 'attack-bug' },
+      { uid: 'b', id: 'release-frontend' },
+    ]),
+  }
+  const { rerender } = render(<Board {...base} state={state} actions={{ onResolve }} />)
+  fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+  rerender(
+    <Board
+      {...base}
+      state={state}
+      actions={{ onResolve }}
+      intro={{
+        gameId: null,
+        view: null,
+        onDone: () => {},
+        events: [
+          {
+            id: 1,
+            type: 'rejected',
+            reason: 'that is not the offer',
+            action: { type: 'RESOLVE', player: 'you', at: 0, choice: onResolve.mock.calls[0][0] },
+          },
+        ],
+      }}
+    />,
+  )
+  fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+  expect(onResolve).toHaveBeenCalledTimes(2)
+})

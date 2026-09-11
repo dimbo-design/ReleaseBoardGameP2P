@@ -69,6 +69,7 @@ import kit from '@/table/Table/Table.module.css'
 import { ATTACK_POSE, COVER_POSE, SUDO_POSE, useBoardAnchors } from '~/entities/game/board'
 import type {
   BoardProps,
+  DiscardPickHandoff,
   HandLimitHandoff,
   Panel,
   StagedHandoff,
@@ -223,6 +224,7 @@ export default function Board({
   // declared here, ahead of `useBeats`, because the ref's IDENTITY is all the
   // queue needs at this point; the layout effect that keeps `.current` current
   // runs after every hook regardless of where it sits in the function.
+  const discardPickRef = useRef<DiscardPickHandoff | null>(null)
   const handoffRef = useRef<StagedHandoff | null>(null)
   // The hand limit's own handoff (#104), a ref for the same reason `handoffRef`
   // is one: the beat reads it once at run start (I8), not a render's worth of
@@ -253,6 +255,7 @@ export default function Board({
   // on screen.
   const beats = useBeats({
     live,
+    discardPick: discardPickRef,
     events: intro?.events ?? [],
     anchors,
     enabled: introOver || intro == null,
@@ -473,7 +476,9 @@ export default function Board({
   // `source` for the same reason Inside is: the two effects share a pending
   // kind and nothing else.
   const cherry = useCherryPickStaging({
+    handoff: discardPickRef,
     state,
+    events: intro?.events ?? [],
     anchors,
     actions,
     copy: {
@@ -491,6 +496,7 @@ export default function Board({
   // table. Its content is private by projection, not by anything done here.
   const rebase = useRebaseStaging({
     state,
+    events: intro?.events ?? [],
     anchors,
     actions,
     copy: {
@@ -505,7 +511,9 @@ export default function Board({
   // beat: `thrown` is public and survives every batch boundary, exactly as
   // `cardById(pending.requested)` persists for `requestCard`.
   const upgrade = useUpgradeStaging({
+    anchors,
     state,
+    events: intro?.events ?? [],
     actions,
     copy: {
       prompt: copy.table.upgradePrompt,
@@ -709,6 +717,14 @@ export default function Board({
     // catch-up waits for its carrier). The two hooks are never both staged —
     // the engine suspends normal play while a pending is open — so this cannot
     // steal the turn side's handoff either.
+    if (upgrade.stagedUid) {
+      handoffRef.current = {
+        mainUid: upgrade.stagedUid,
+        el: upgrade.el(),
+        release: upgrade.release,
+      }
+      return
+    }
     const answeringStaged = defenseStaging.staged
     if (answeringStaged?.phase === 'dispatched' && answeringStaged.main) {
       handoffRef.current = {
@@ -761,6 +777,8 @@ export default function Board({
           }
         : null
   }, [
+    upgrade.stagedUid,
+    upgrade.overlay,
     answering,
     defenseStaging.staged,
     defenseStaging.landed,
@@ -1191,10 +1209,10 @@ export default function Board({
         <div className={enter} ref={anchors.discard}>
           <Pile
             label={copy.table.discard}
-            heap={decks.discardHeap}
+            heap={cherry.grid ? [] : decks.discardHeap}
             heapShow={HEAP_SHOW}
-            topCard={decks.discard}
-            count={decks.discardCount}
+            topCard={cherry.grid ? null : decks.discard}
+            count={cherry.grid ? 0 : decks.discardCount}
             width={116}
             boxRef={anchors.discardBox}
           />
@@ -1570,13 +1588,15 @@ export default function Board({
                 // Keep the same owner for items and index-based handlers,
                 // including the exit after the defense prompt closes.
                 items={
-                  discarding
-                    ? handLimit.handItems
-                    : defenseOwnsHand
-                      ? defenseStaging.handItems
-                      : alarmMineOpen
-                        ? neutralizing.handItems
-                        : staging.handItems
+                  upgrade.asked || upgrade.stagedUid
+                    ? upgrade.handItems
+                    : discarding
+                      ? handLimit.handItems
+                      : defenseOwnsHand
+                        ? defenseStaging.handItems
+                        : alarmMineOpen
+                          ? neutralizing.handItems
+                          : staging.handItems
                 }
                 // the fan opens room for the arriving heap while it travels —
                 // the deal wins the tie against every other beat the same way
@@ -1584,14 +1604,20 @@ export default function Board({
                 // return-flight gap is last: it opens only once nothing else
                 // owns the fan.
                 gapAt={
-                  deal.gapAt ?? (discarding ? handLimit.gapAt : null) ?? beats.gapAt ?? liveGapAt
+                  deal.gapAt ??
+                  (discarding ? handLimit.gapAt : null) ??
+                  beats.gapAt ??
+                  cherry.gapAt ??
+                  liveGapAt
                 }
                 gapSize={
                   deal.gapAt == null
                     ? discarding && handLimit.gapAt != null
                       ? handLimit.gapSize
                       : beats.gapAt == null
-                        ? liveGapSize
+                        ? cherry.gapAt == null
+                          ? liveGapSize
+                          : cherry.gapSize
                         : beats.gapSize
                     : deal.gapSize
                 }
@@ -1641,7 +1667,7 @@ export default function Board({
                 // dispatches the play and never tells the stage machine, so the
                 // card stood nowhere for the whole step that followed.
                 onCardClick={
-                  deal.active || discarding
+                  deal.active || discarding || upgrade.asked
                     ? undefined
                     : defenseOwnsHand
                       ? (i) => defenseStaging.onCardClick(i)
@@ -1669,13 +1695,15 @@ export default function Board({
                 onPlay={
                   deal.active || (discarding && handLimit.carrying)
                     ? undefined
-                    : discarding
-                      ? handLimit.onHandPlay
-                      : defenseOwnsHand
-                        ? defenseStaging.onHandPlay
-                        : alarmMineOpen
-                          ? neutralizing.onHandPlay
-                          : staging.onHandPlay
+                    : upgrade.asked
+                      ? upgrade.onHandPlay
+                      : discarding
+                        ? handLimit.onHandPlay
+                        : defenseOwnsHand
+                          ? defenseStaging.onHandPlay
+                          : alarmMineOpen
+                            ? neutralizing.onHandPlay
+                            : staging.onHandPlay
                 }
                 // the reorder gesture's commit — without it the kit settles the
                 // card into its new slot and the next projection render snaps
@@ -2002,6 +2030,7 @@ export default function Board({
       {cherry.grid}
       {rebase.row}
       {upgrade.surface}
+      {upgrade.overlay}
       {previewOverlay}
 
       {/* the pair flyer — a persistent node (I10: position: fixed against the

@@ -1,8 +1,8 @@
 import { cardById } from '@release/ui'
 import type { Rect } from '@release/ui/animations'
 import { play, useFlyer, wait } from '@release/ui/animations'
-import { useCallback, useRef } from 'react'
-import type { BeatRun, BoardAnchors } from '~/entities/game/board'
+import { type RefObject, useCallback, useRef } from 'react'
+import type { BeatRun, BoardAnchors, StagedHandoff } from '~/entities/game/board'
 import type { BeatPlan } from './planBeats'
 
 // System Upgrade's arrivals, and ONLY the arrivals. The cards that have already
@@ -20,18 +20,24 @@ const rectOf = (el: Element | null): Rect | null => {
   return { left: r.left, top: r.top, width: r.width, height: r.height }
 }
 
-export function useUpgradeBeat(anchors: BoardAnchors) {
+export function useUpgradeBeat(anchors: BoardAnchors, staging?: RefObject<StagedHandoff | null>) {
   const { overlay, raise, drop } = useFlyer()
-  const latest = useRef({ anchors })
-  latest.current = { anchors }
+  const latest = useRef({ anchors, staging })
+  latest.current = { anchors, staging }
 
   const run = useCallback(
     async (plan: Extract<BeatPlan, { kind: 'upgrade' }>, _beat: BeatRun) => {
       const a = latest.current.anchors
       const centre = rectOf(a.centre.current)
       if (!centre) return
+      const local = latest.current.staging?.current
+      let adopted = false
       await Promise.all(
         plan.throws.map(async (t, i) => {
+          if (t.player === _beat.base.selfId && local) {
+            adopted = true
+            return
+          }
           // Several answers inside ONE batch are staggered; answers that
           // arrived in separate batches are separate beats and this loop runs
           // once. Both are the same code, which is the point of folding a run.
@@ -57,6 +63,7 @@ export function useUpgradeBeat(anchors: BoardAnchors) {
           drop(key)
         }),
       )
+      if (adopted) local?.release()
     },
     [raise, drop],
   )

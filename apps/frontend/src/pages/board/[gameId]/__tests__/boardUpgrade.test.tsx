@@ -51,16 +51,22 @@ function renderBoard(over: {
 }
 
 describe('the centre a System Upgrade fills', () => {
-  it('asks this seat for a card while it is owed', () => {
+  it('discards by pulling from the real hand without a duplicate picker', async () => {
     const onResolve = vi.fn()
     renderBoard({
       pending: upgradePending(),
       hand: [{ uid: 'h1', card: card('attack-bug') }],
       actions: { onResolve },
     })
-    fireEvent.click(screen.getByTestId('upgrade-hand-h1'))
-    fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
-    expect(onResolve).toHaveBeenCalledWith({ kind: 'upgradeDiscard', card: 'h1' })
+    expect(screen.queryByTestId('upgrade-hand-h1')).toBeNull()
+    const slot = document.querySelector('[data-hand-slot]')
+    if (!slot) throw new Error('the hand rendered no slot to pull from')
+    fireEvent.mouseDown(slot, { clientX: 0, clientY: 0 })
+    fireEvent.mouseMove(window, { clientX: 0, clientY: -20 })
+    fireEvent.mouseUp(window, { clientX: 0, clientY: -200 })
+    await vi.waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith({ kind: 'upgradeDiscard', card: 'h1' }),
+    )
   })
 
   it('asks this seat for nothing once it has answered', () => {

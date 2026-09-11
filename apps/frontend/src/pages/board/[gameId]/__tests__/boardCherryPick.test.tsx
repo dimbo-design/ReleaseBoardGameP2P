@@ -5,10 +5,28 @@
 // `_useInsideStaging`'s row was never built for. `_useCherryPickStaging`
 // gives it a sibling surface rather than widening that row.
 import { fireEvent, render, screen } from '@testing-library/react'
+import { useEffect } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { mockReducedMotion } from '~/test/reducedMotion'
 import Board from '../_Board'
 import { makeBoardProps } from './fixture'
+
+// The opening is outside this test; keep the real board and event queue.
+vi.mock('~/features/game-intro/useDealIntro', () => ({
+  useDealIntro: ({ onDone }: { onDone: () => void }) => {
+    useEffect(onDone, [onDone])
+    return {
+      active: false,
+      beat: null,
+      shadow: null,
+      staged: [],
+      overlays: null,
+      gapAt: null,
+      gapSize: 0,
+      faceDown: () => false,
+    }
+  },
+}))
 
 // Task A4's fix round 1: the unpicked cards never leave the projection
 // (`decks.discard` still holds them, and `_Board.tsx` renders the heap off
@@ -211,4 +229,35 @@ describe('changing a pick before confirming', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
     expect(onResolve).toHaveBeenCalledWith({ kind: 'pickFromDiscard', card: 'c1' })
   })
+})
+
+it('returns unpicked cards only after the engine accepts the local pick', async () => {
+  mockReducedMotion(false)
+  exits.items = []
+  const onResolve = vi.fn()
+  const base = makeBoardProps()
+  const pending = cherryPending([
+    { uid: 'a', id: 'attack-bug' },
+    { uid: 'b', id: 'release-frontend' },
+  ])
+  const props = { ...base, state: { ...base.state, pending }, actions: { onResolve } }
+  const { rerender } = render(<Board {...props} />)
+  fireEvent.click(screen.getByTestId('cherry-cell-b'))
+  fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
+  expect(exits.items.flat()).not.toContain('a')
+  rerender(
+    <Board
+      {...props}
+      state={{ ...base.state, pending: null }}
+      intro={{
+        gameId: null,
+        view: null,
+        onDone: () => {},
+        events: [
+          { id: 1, type: 'takenFromDiscard', player: 'you', card: 'release-frontend', to: 'hand' },
+        ],
+      }}
+    />,
+  )
+  await vi.waitFor(() => expect(exits.items.flat()).toContain('a'), { timeout: 3000 })
 })

@@ -393,3 +393,8 @@ export interface BoardProps {
     onDone: () => void
   }
 }
+
+export interface DiscardPickHandoff {
+  card: string
+  run: () => Promise<void>
+}

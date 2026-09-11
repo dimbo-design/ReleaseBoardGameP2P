@@ -9,6 +9,7 @@ import type {
   IntroBeat,
   StagedHandoff,
 } from '~/entities/game/board'
+import type { DiscardPickHandoff } from '~/entities/game/board/types'
 import { useReducedMotion } from '~/shared/lib/useReducedMotion'
 import { useAiBeat } from './aiBeat'
 import { useComboBeat } from './comboBeat'
@@ -120,6 +121,7 @@ export interface Beats {
 }
 
 export function useBeats(args: {
+  discardPick?: RefObject<DiscardPickHandoff | null>
   live: BoardState
   events: Event[]
   anchors: BoardAnchors
@@ -159,6 +161,7 @@ export function useBeats(args: {
     clearPaidCost,
     takeStagedRelease,
     handLimit,
+    discardPick,
   } = args
   const reduced = useReducedMotion()
   const [running, setRunning] = useState<Beat | null>(null)
@@ -188,7 +191,7 @@ export function useBeats(args: {
   const handLimits = useHandLimitBeat(anchors, handLimit)
   const transfers = useTransferBeat(anchors)
   const ais = useAiBeat(anchors)
-  const upgrades = useUpgradeBeat(anchors)
+  const upgrades = useUpgradeBeat(anchors, staging)
 
   // `intro` rides along because the arming effect below reads the beat from here
   // rather than from its own closure: the effect fires on the match key, and the
@@ -420,7 +423,14 @@ export function useBeats(args: {
           // `aiEvent` just above.
           exclusive: false,
           alarm: false,
-          run: (ctx) => ais.runTaken(plan, ctx),
+          run: (ctx) => {
+            const local = discardPick?.current
+            if (discardPick && plan.mine && local?.card === plan.card) {
+              discardPick.current = null
+              return local.run()
+            }
+            return ais.runTaken(plan, ctx)
+          },
         }
       }
       return null
@@ -444,6 +454,7 @@ export function useBeats(args: {
       transfers.runRequested,
       ais.run,
       ais.runTaken,
+      discardPick,
     ],
   )
 
