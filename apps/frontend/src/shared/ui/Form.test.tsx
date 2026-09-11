@@ -30,3 +30,36 @@ it('shakes an empty required field on every submit attempt', () => {
   fireEvent.click(screen.getByText('go'))
   expect(playMock).toHaveBeenCalledTimes(2)
 })
+
+// A form with two submit buttons has to be able to say which one was pressed —
+// standard HTML behaviour, and what the create/solo split below rides on.
+it('reports the submitting button in the submitted data', () => {
+  const onSubmit = vi.fn()
+  render(
+    <Form onSubmit={onSubmit}>
+      <FormField name="name" value="Ann" onChange={() => {}} />
+      <button type="submit" name="intent" value="lobby">
+        lobby
+      </button>
+      <button type="submit" name="intent" value="solo">
+        solo
+      </button>
+    </Form>,
+  )
+  fireEvent.click(screen.getByText('solo'))
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ intent: 'solo' }))
+})
+
+it('still validates required fields before reporting anything', () => {
+  const onSubmit = vi.fn()
+  render(
+    <Form onSubmit={onSubmit} requiredMessage="Required">
+      <FormField name="name" required value="" onChange={() => {}} />
+      <button type="submit" name="intent" value="solo">
+        solo
+      </button>
+    </Form>,
+  )
+  fireEvent.click(screen.getByText('solo'))
+  expect(onSubmit).not.toHaveBeenCalled()
+})

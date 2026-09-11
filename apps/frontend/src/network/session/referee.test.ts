@@ -1,13 +1,16 @@
+import type { GameState } from '@release/engine'
 import { createFakeEngine, FAKE_DECK, FAKE_EVENTS, TURN_ACTION_MS } from '@release/engine/fake'
+import { vi } from 'vitest'
 import {
   ABSENT_GRACE_MS,
   applyIntent,
   createSession,
   disconnect,
-  driveAbsent,
+  driveUnattended,
   rebind,
   type Session,
   type SessionResult,
+  STALL_WARNING_TICKS,
   tick,
 } from './referee'
 
@@ -36,6 +39,144 @@ function twoPlayerSession() {
     events: FAKE_EVENTS,
   })
 }
+
+// A bot seat, and a human who is present. The bot is seated FIRST because the
+// engine starts the match on `seating[0]` — so it owes a move immediately,
+// which is the whole thing under test.
+function botFirstSession(seed = 1) {
+  return createSession({
+    gameId: 'g1',
+    keeperId: 'b',
+    engine: createFakeEngine(),
+    seed,
+    players: [
+      { playerId: 'a', peerId: null, name: 'Bot 1', bot: true },
+      { playerId: 'b', peerId: 'peer-b', name: 'Bo' },
+    ],
+    setup: {},
+    deck: FAKE_DECK,
+    events: FAKE_EVENTS,
+  })
+}
+
+it('drives a bot seat at once: there is no absence to wait out', () => {
+  const { session } = botFirstSession()
+  const driven = driveUnattended(session, 1_000)
+  expect(driven.session).not.toBe(session)
+  expect(driven.outgoing.length).toBeGreaterThan(0)
+})
+
+// Not a recovery — a name. A stall that says nothing costs an hour to find; one
+// that says which seat and which pending costs a minute. But it has to say its
+// piece once, not on every one of the ticker's four-times-a-second ticks —
+// design spec §6 asks for the warning only once the same pending has stood
+// unchanged across N ticks, so this drives the exact same session object
+// through `driveUnattended` repeatedly, the way the real ticker would.
+it('complains once an unattended seat`s stall has stood for the threshold', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const { session } = botFirstSession()
+  // A pending owed by the bot that its policy has no answer for: with the
+  // discard empty, `botAction`'s `pickFromDiscard` branch (bots.ts) offers
+  // `card: ''` — not null, but `onPickFromDiscard` (discard.ts) rejects it
+  // outright as "not on offer", which is exactly the shape of the trigger-card
+  // rejection this task exists to name. Either way `reduce` leaves state
+  // untouched, so this fixture stands in for both without needing a real
+  // trigger card in the discard pile.
+  const stuck: Session = {
+    ...session,
+    state: {
+      ...session.state,
+      // The exact variant from packages/engine/src/state.ts:154 — `source` is
+      // part of it, and `picks` is typed `1 | 2`.
+      pending: {
+        kind: 'pickFromDiscard',
+        player: 'a',
+        options: [],
+        picks: 1,
+        source: 'operation-git-cherry-pick',
+      },
+    } as GameState,
+  }
+
+  // The same `stuck` object every time, exactly as the ticker would hand it
+  // back when nothing about the stall has moved: `driveUnattended` returns the
+  // untouched input session when nothing changes, so this reproduces "the same
+  // pending across N ticks" rather than N unrelated calls.
+  for (let i = 0; i < STALL_WARNING_TICKS - 1; i += 1) {
+    driveUnattended(stuck, 1_000)
+  }
+  expect(warn).not.toHaveBeenCalled()
+
+  driveUnattended(stuck, 1_000)
+  expect(warn).toHaveBeenCalledTimes(1)
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('pickFromDiscard'))
+
+  // And it does not repeat on every tick thereafter — the flood this task exists
+  // to stop.
+  driveUnattended(stuck, 1_000)
+  driveUnattended(stuck, 1_000)
+  expect(warn).toHaveBeenCalledTimes(1)
+
+  warn.mockRestore()
+})
+
+// The flip side of the test above: a bot with nothing to do (someone else's
+// turn, nothing pending on it) returns no action too, and that is not a
+// stall — it is every ordinary tick. `seatOwes` is what tells the two apart;
+// without it this would warn constantly rather than only on a genuine one.
+it('says nothing about a bot that simply has nothing to do right now', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const { session } = botFirstSession()
+  // The same table, turned to `b`'s turn with nothing pending and no window
+  // open — the ordinary shape of a tick where the unattended bot (seat `a`)
+  // legitimately has nothing to answer.
+  const idle: Session = {
+    ...session,
+    state: { ...session.state, turn: { ...session.state.turn, player: 'b' } },
+  }
+
+  // Drive the SAME idle session object STALL_WARNING_TICKS times, exactly the
+  // way the sibling test above drives `stuck`. A single call can never carry a
+  // streak past an 8-tick threshold, so one call would pass here for the wrong
+  // reason — too few ticks to have warned yet — even if `seatOwes` were
+  // replaced outright by `return true`. Looping to the threshold is what turns
+  // "the warning never fires" back into a statement about the predicate rather
+  // than about how many times this test happened to call in.
+  let result: SessionResult = { session: idle, outgoing: [] }
+  for (let i = 0; i < STALL_WARNING_TICKS; i += 1) {
+    result = driveUnattended(idle, 1_000)
+  }
+
+  expect(result.session).toBe(idle)
+  expect(warn).not.toHaveBeenCalled()
+  warn.mockRestore()
+})
+
+// A bot seat's `peerId` is null by construction — exactly the shape `rebind`'s
+// existing "only an absent seat can be claimed" guard admits. Nothing calls
+// `rebind` with a bot seat today, but the spec names bots in a networked lobby
+// as the next design, so the refusal has to live in the code rather than in
+// the accident of no caller reaching it yet.
+it('refuses to hand a bot seat out through rebind', () => {
+  const { session } = botFirstSession()
+  const result = rebind(session, 'a', 'peer-new', 1_000)
+
+  expect(result.session).toBe(session)
+  expect(result.outgoing).toEqual([])
+})
+
+it('still makes a human seat wait out the absence grace', () => {
+  const { session: start } = botFirstSession()
+  // The same table, except seat `a` is a human who dropped rather than a bot.
+  const dropped: Session = {
+    ...start,
+    seats: start.seats.map((s) =>
+      s.playerId === 'a' ? { playerId: 'a', peerId: null, absentSince: 1_000 } : s,
+    ),
+  }
+  expect(driveUnattended(dropped, 1_000 + ABSENT_GRACE_MS - 1).session).toBe(dropped)
+  expect(driveUnattended(dropped, 1_000 + ABSENT_GRACE_MS).session).not.toBe(dropped)
+})
 
 // The referee used to reduce, fan out and forget. That is exactly why a peer
 // which missed a batch could never afterwards be told what was in it.
@@ -454,7 +595,7 @@ it('keeps firing the turn deadline while a release waits for its price', () => {
 
 // The release is TAKEN BACK, not paid for. Paying is the other thing an expiry
 // could plausibly do — it is exactly what `botAction` does with this pending
-// (packages/engine/src/fake/bots.ts), and what `driveAbsent` uses for a seat
+// (packages/engine/src/fake/bots.ts), and what `driveUnattended` uses for a seat
 // that has actually left. A timeout is not a decision to spend a card, so the
 // zone stays empty and the release stays in the hand it never left.
 it('takes the unpaid release back rather than paying for it', () => {
@@ -502,7 +643,7 @@ it('folds every sub-step of the multi-step draw path into one log append', () =>
   expect(grown).toContain('turnEnded') // the PUSH sub-step right after it
 })
 
-it('leaves an expired turn to driveAbsent when its seat is disconnected', () => {
+it('leaves an expired turn to driveUnattended when its seat is disconnected', () => {
   const { session } = twoPlayerSession()
   const started = tick(session, 1_000).session
   const gone: Session = {
@@ -617,7 +758,7 @@ it('never closes a live reaction window on an absent seat`s behalf', () => {
     ),
   }
 
-  const result = driveAbsent(absent, ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(absent, ABSENT_GRACE_MS + 1)
 
   expect(result.session.state.window).not.toBeNull()
   expect(result.session.state.window?.deadline).toBe(window.deadline)
@@ -656,7 +797,7 @@ it('leaves a stalled defence for a disconnected seat to resolve on reconnection'
 
 // The reviewer's scenario on #113, decided as: the absence shield hands the
 // turn BACK on return, it does not spend it. The deadline expires while the
-// seat is empty (tick refuses to fire it — driveAbsent's grace owns absence),
+// seat is empty (tick refuses to fire it — driveUnattended's grace owns absence),
 // and the player comes back inside the grace window. Without the re-stamp the
 // very next tick would see a seated player and an expired clock, and auto-play
 // their whole turn before they get a single frame to act in.
@@ -739,7 +880,7 @@ it('does not drive absent seats when no seat is connected at all', () => {
     ...session,
     seats: session.seats.map((s) => ({ ...s, peerId: null, absentSince: 0 })),
   }
-  const result = driveAbsent(empty, ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(empty, ABSENT_GRACE_MS + 1)
   // A keeper with no audience advances nothing: no state change, no fan-out.
   expect(result.session).toBe(empty)
   expect(result.outgoing).toEqual([])
@@ -753,11 +894,11 @@ it('still drives an absent seat while another seat is connected', () => {
       s.playerId === session.state.turn.player ? { ...s, peerId: null, absentSince: 0 } : s,
     ),
   }
-  const result = driveAbsent(oneGone, ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(oneGone, ABSENT_GRACE_MS + 1)
   expect(result.session).not.toBe(oneGone)
 })
 
-// driveAbsent's OTHER commit (referee.ts, ~232-238): botAction's own
+// driveUnattended's OTHER commit (referee.ts, ~232-238): botAction's own
 // suggestion is accepted on the first try, rather than falling through to the
 // DRAW/PUSH net below it. Staged with a pending `discardForRelease` decision
 // owed by the absent seat itself, so botAction answers it with a RESOLVE that
@@ -772,7 +913,7 @@ it('logs what an absent seat`s own accepted bot suggestion commits', () => {
   const dropped = disconnect(staged, owner?.peerId ?? '', 2_000).session
   const before = dropped.log.length
 
-  const result = driveAbsent(dropped, 2_000 + ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(dropped, 2_000 + ABSENT_GRACE_MS + 1)
 
   // Paying the release's cost discards a card and places the release — losing
   // either this whole append (referee.ts's `log: [...session.log, ...events]`

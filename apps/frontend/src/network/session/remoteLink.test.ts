@@ -95,7 +95,7 @@ it('drives the keeper`s own seat through its link, with no connection to itself'
   // The keeper is a player too. A self-addressed `send` is dropped by PeerJS
   // (`connections.get(self)` is undefined), so if this seat had to go over the
   // transport the host could never take its own turn and every other player
-  // would wait on it forever — `driveAbsent` never covers a seat that is
+  // would wait on it forever — `driveUnattended` never covers a seat that is
   // *connected*.
   const { ref, keeper } = twoPeerGame()
   const seen: Sync[] = []
@@ -305,7 +305,7 @@ it('stamps a buffered intent with the clock at release, not at arrival', () => {
 
 it('does not tick while the gate is shut', () => {
   // Only meaningful if the tick would otherwise move the game: seat 'b' holds
-  // the turn and has dropped, so `driveAbsent` is past its grace period and one
+  // the turn and has dropped, so `driveUnattended` is past its grace period and one
   // tick away from playing a seat while everyone is still watching cards fly.
   const ticks: (() => void)[] = []
   const ticker = { start: (fn: () => void) => ticks.push(fn), stop: () => {} }

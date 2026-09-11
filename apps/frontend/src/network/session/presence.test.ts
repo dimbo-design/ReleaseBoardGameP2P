@@ -5,7 +5,7 @@ import {
   applyIntent,
   createSession,
   disconnect,
-  driveAbsent,
+  driveUnattended,
   rebind,
   type Session,
 } from './referee'
@@ -69,7 +69,7 @@ it('refuses to rebind a seat that is still connected', () => {
 
 it('leaves an absent seat alone inside the grace period', () => {
   const dropped = disconnect(session(), 'peer-a', 1_000).session
-  const result = driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS - 1)
+  const result = driveUnattended(dropped, 1_000 + ABSENT_GRACE_MS - 1)
 
   expect(result.session).toBe(dropped)
 })
@@ -78,7 +78,7 @@ it('drives an absent seat once the grace period expires, so the game cannot stal
   // 'a' holds the turn and vanishes: without the keeper acting, nothing can
   // ever advance and every other player waits forever.
   const dropped = disconnect(session(), 'peer-a', 1_000).session
-  const result = driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(dropped, 1_000 + ABSENT_GRACE_MS + 1)
 
   expect(result.session.state).not.toBe(dropped.state)
 })
@@ -143,18 +143,18 @@ it('falls back to DRAW/PUSH when an absent seat holds the turn but its bot sugge
   }
   const dropped = disconnect(forced, 'peer-a', 1_000).session
 
-  const result = driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(dropped, 1_000 + ABSENT_GRACE_MS + 1)
 
   // botAction's first (and only) suggestion for this hand is PLAY
   // release-frontend#0, which the engine rejects. Without the fallback,
-  // driveAbsent gives up here. With it, the turn ends via PUSH (hasDrawn is
+  // driveUnattended gives up here. With it, the turn ends via PUSH (hasDrawn is
   // already true) and passes to 'b'.
   expect(result.session.state).not.toBe(dropped.state)
   expect(result.session.state.turn.player).toBe('b')
 })
 
 // Same fixture and the same rejected bot suggestion, but pinning the log
-// append at referee.ts's driveAbsent fallback (~256-267) specifically: the
+// append at referee.ts's driveUnattended fallback (~256-267) specifically: the
 // PUSH that resolves the fallback emits its own `turnEnded`/`turnStarted`
 // pair, and this is the only test in the suite reaching that particular
 // `log: [...session.log, ...retried.events]` line. Losing it would leave
@@ -184,7 +184,7 @@ it('logs the fallback PUSH`s events, not just the state it changed', () => {
   const dropped = disconnect(forced, 'peer-a', 1_000).session
   const before = dropped.log.length
 
-  const result = driveAbsent(dropped, 1_000 + ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(dropped, 1_000 + ABSENT_GRACE_MS + 1)
 
   const grown = result.session.log.slice(before).map((e) => e.type)
   expect(grown).toContain('turnEnded')
@@ -196,7 +196,7 @@ it('drives the absent seat that owes the action even when an earlier absent seat
   // assuming a's and b's turns each end with a bare draw + push, which is a
   // fact about whatever those seats happen to draw — a trigger drawn on the way
   // opens a pending, refuses the push, and the turn never arrives. What this
-  // test is about is which absent seat `driveAbsent` picks, so the turn is set
+  // test is about is which absent seat `driveUnattended` picks, so the turn is set
   // and the deal left out of it.
   const rotated = threeSeatSession()
   let s: typeof rotated = {
@@ -211,7 +211,7 @@ it('drives the absent seat that owes the action even when an earlier absent seat
   s = disconnect(s, 'peer-a', 1_000).session
   s = disconnect(s, 'peer-c', 1_000).session
 
-  const result = driveAbsent(s, 1_000 + ABSENT_GRACE_MS + 1)
+  const result = driveUnattended(s, 1_000 + ABSENT_GRACE_MS + 1)
 
   expect(result.session.state).not.toBe(s.state)
 })

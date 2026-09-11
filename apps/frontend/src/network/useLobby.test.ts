@@ -5,6 +5,7 @@ import {
   clearKeeper,
   clearSession,
   getClientId,
+  readSession,
   type StoredKeeper,
   type StoredSession,
 } from '~/shared/lib/persistence'
@@ -68,6 +69,11 @@ vi.mock('./transport/peer', () => ({
 
 beforeEach(() => {
   transports.length = 0
+  // createTransport is one shared vi.fn() for the whole file, so its call
+  // history accumulates across every test unless cleared here — without this,
+  // a solo test asserting `.not.toHaveBeenCalled()` would see every networked
+  // test that ran before it and fail no matter what it does itself.
+  vi.mocked(createTransport).mockClear()
   // The hook writes `release:session` / `release:keeper` now, so a record left
   // by the previous test would be read as this one's — and now that the mount
   // effect restores from one automatically (host restore, below), a leftover
@@ -1005,7 +1011,7 @@ it('recovers a returning seat even when its JOIN_REQUEST beats onDisconnect ther
   // in the rejoin branch, the referee's seat still names the dead peer id,
   // `rebind` refuses the claim, and the seat is soft-locked with no
   // self-healing path: every later intent from RETURNED fails seat
-  // resolution, and driveAbsent never engages because the referee still
+  // resolution, and driveUnattended never engages because the referee still
   // believes the seat is connected.
   rejoin()
 
@@ -2009,4 +2015,128 @@ it("retry() firing while an earlier attempt's dial is still inside createTranspo
   // even though the connection the player is actually looking at (this
   // transport) succeeded.
   expect(result.current.reconnect.status).toBe('idle')
+})
+
+it('starts a solo match with no transport and no room', () => {
+  const { result } = renderHook(() => useLobby())
+  act(() => {
+    result.current.startSolo('Ann', ['Bot 1', 'Bot 2'], {})
+  })
+
+  // The room is what solo does without. `gameId` is what carries the player to
+  // the board (FollowGameStart watches it).
+  expect(createTransport).not.toHaveBeenCalled()
+  expect(result.current.roomCode).toBeNull()
+  expect(result.current.gameId).toMatch(/^solo-\d+$/)
+  expect(result.current.isHost).toBe(true)
+  expect(result.current.gameLink).not.toBeNull()
+
+  // Three seats, the human first, and every one of them in the roster — the
+  // board reads both, and reads a seat missing from the roster as dropped.
+  expect(result.current.seats.map((s) => s.playerId)).toEqual(['p1', 'p2', 'p3'])
+  expect(Object.keys(result.current.state?.peers ?? {})).toHaveLength(3)
+})
+
+it('deals the solo match, so the board has a hand and a deal to replay', () => {
+  const { result } = renderHook(() => useLobby())
+  act(() => {
+    result.current.startSolo('Ann', ['Bot 1'], {})
+  })
+  expect(result.current.gameSync?.view).toBeTruthy()
+  expect(result.current.gameSync?.events.length).toBeGreaterThan(0)
+})
+
+it('stores the solo match as resumable, with no room to resume into', () => {
+  const { result } = renderHook(() => useLobby())
+  act(() => {
+    result.current.startSolo('Ann', ['Bot 1'], {})
+  })
+  const stored = readSession()
+  expect(stored?.role).toBe('solo')
+  expect(stored?.roomCode).toBeNull()
+  expect(stored?.gameId).toBe(result.current.gameId)
+})
+
+it("gates the solo table on the human's intro alone, not the bots sitting with it", () => {
+  // The turn clock is the tell: `tick` (session/referee.ts) stamps it on the
+  // very first tick the keeper's ticker runs after the gate opens — before
+  // that, `gated()` (session/remoteLink.ts) short-circuits the ticker and
+  // nothing about the session changes. So an undefined deadline that turns
+  // into a real one, purely from ticking, is proof the gate opened; and if it
+  // stays undefined after the human alone has reported, the gate was still
+  // waiting on someone else — exactly what waiting on the bots would look
+  // like, since neither ever calls introReady.
+  vi.useFakeTimers()
+  try {
+    const { result } = renderHook(() => useLobby())
+    act(() => {
+      result.current.startSolo('Ann', ['Bot 1', 'Bot 2'], {})
+    })
+    expect(result.current.gameSync?.view.turn.deadline).toBeUndefined()
+
+    // Ticks land, but the gate is still shut: nobody has reported yet.
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.gameSync?.view.turn.deadline).toBeUndefined()
+
+    // The human's own seat reports its intro. If the gate's `expect` named the
+    // bots too — the copy-paste `startGame`'s own list invites — this alone
+    // would not be enough to open it.
+    act(() => {
+      result.current.introReady()
+    })
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.gameSync?.view.turn.deadline).toBeDefined()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('restores a solo match on mount, with no transport to rebuild', async () => {
+  // Fake timers per-test in a try/finally, matching this file's own pattern
+  // (see "cancels the start gate when the session is torn down").
+  vi.useFakeTimers()
+  try {
+    const first = renderHook(() => useLobby())
+    act(() => {
+      first.result.current.startSolo('Ann', ['Bot 1'], {})
+    })
+    const gameId = first.result.current.gameId
+    // The snapshot is written on a trailing edge one ticker cadence wide.
+    act(() => {
+      vi.advanceTimersByTime(KEEPER_SAVE_MS + 1)
+    })
+    first.unmount()
+
+    const second = renderHook(() => useLobby())
+    // The mount effect AWAITS restoreHost's decline before it reaches solo, so
+    // the restore lands a microtask after render rather than during it. Without
+    // this flush every assertion below reads the pre-restore hook.
+    await act(async () => {})
+
+    expect(second.result.current.gameId).toBe(gameId)
+    expect(second.result.current.seats.map((s) => s.playerId)).toEqual(['p1', 'p2'])
+    expect(second.result.current.gameSync?.view).toBeTruthy()
+    expect(createTransport).not.toHaveBeenCalled()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+// The dead-button trap: `leaveGame` blanks a record's gameId, which is right
+// for a room that outlives its match. A solo record walked back that way keeps
+// role 'solo' with nothing left to resume, and the start screen goes on
+// offering it.
+it('forgets a solo session entirely when the match is left', () => {
+  const { result } = renderHook(() => useLobby())
+  act(() => {
+    result.current.startSolo('Ann', ['Bot 1'], {})
+  })
+  act(() => {
+    result.current.leaveGame()
+  })
+  expect(readSession()).toBeNull()
 })

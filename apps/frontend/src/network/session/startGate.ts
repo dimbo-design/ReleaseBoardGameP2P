@@ -17,7 +17,7 @@ export interface StartGate {
 
 // Who still has to finish their opening before the game may move.
 //
-// The keeper's ticker runs `tick` and `driveAbsent`, so without this an absent
+// The keeper's ticker runs `tick` and `driveUnattended`, so without this an absent
 // seat could be played by the engine while every human is still watching cards
 // fly — and a host whose intro finished first could act into a guest's
 // animation. Neither is a clock the engine owns: nothing at the deal carries a

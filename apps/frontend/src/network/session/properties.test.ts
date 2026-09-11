@@ -8,7 +8,7 @@ import {
   applyIntent,
   createSession,
   disconnect,
-  driveAbsent,
+  driveUnattended,
   rebind,
   type Session,
   tick,
@@ -103,8 +103,8 @@ function playOutWithHistory(
 ): PlayOut {
   const sent: { outgoing: Outgoing; state: Session['state'] }[] = []
   // The keeper reads one clock, so the harness advances one clock: `tick`,
-  // `driveAbsent` and every stamped intent all see the same `now` within a
-  // step. Handing driveAbsent a forged future time instead would make every
+  // `driveUnattended` and every stamped intent all see the same `now` within a
+  // step. Handing driveUnattended a forged future time instead would make every
   // seat's grace period elapse instantly, which is the one thing this timing
   // is here to exercise.
   let now = 1_000
@@ -133,7 +133,7 @@ function playOutWithHistory(
     // Mirrors attachKeeper's ticker: the keeper owns the clock, so it both
     // expires deadlines and plays seats that have gone silent. Without this a
     // seat that leaves on its own turn stalls every other player forever.
-    const driven = driveAbsent(session, now)
+    const driven = driveUnattended(session, now)
     if (driven.session !== session) {
       session = driven.session
       record(session, driven.outgoing)
@@ -392,7 +392,7 @@ it('never lets one seat stall the whole game', () => {
   // restoring: with the refill disabled this property still passes on 55, so
   // its current trajectory never reaches exhaustion and it would witness
   // nothing. The refill's own guard is packages/engine/src/fake/reshuffle.test.ts.
-  // Seed 4 is kept for the reasons that outlived #79 — driveAbsent genuinely
+  // Seed 4 is kept for the reasons that outlived #79 — driveUnattended genuinely
   // fires, the game reaches `over` on its own, and it steers clear of #80.
   const abandoned = disconnect(start(4), 'peer-a', 1_000).session
   const { session, exhausted } = playOut(abandoned)

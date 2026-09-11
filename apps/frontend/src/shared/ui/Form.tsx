@@ -51,7 +51,17 @@ export default function Form({ onSubmit, requiredMessage = 'Required', ...rest }
             return
           }
           setErrors({})
-          onSubmit(Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>)
+          // Merged in by hand rather than passed to `new FormData(form,
+          // submitter)`: that two-argument constructor is a Safari 16.4
+          // addition, and `browserslist` here declares `safari >= 15`. On an
+          // older Safari the extra argument is silently discarded rather than
+          // throwing, so `data.intent` would come back `undefined` and a form
+          // with two submit buttons (create/solo) could never tell which one
+          // fired — this is not a stylistic choice to "simplify" away.
+          const data = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>
+          const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null
+          if (submitter?.name) data[submitter.name] = submitter.value
+          onSubmit(data)
         }}
         onChange={(e) => {
           const input = e.target as unknown as HTMLInputElement

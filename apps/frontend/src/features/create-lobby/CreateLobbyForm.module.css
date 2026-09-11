@@ -27,6 +27,10 @@
   color: var(--fg);
 }
 
+.botsRow {
+  margin-block-start: 12px;
+}
+
 .note {
   margin: auto 0 0;
   line-height: 1.55; /* rhythm nuance for the footnote */

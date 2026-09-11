@@ -25,6 +25,12 @@ export default function StartPage() {
   const hasSession = (session.status === 'in-lobby' && !!session.state) || !!stored
 
   const resume = () => {
+    // A solo match has no room to return to — the stored record IS the match,
+    // and the board is the only place it can be resumed.
+    if (stored?.role === 'solo' && stored.gameId) {
+      void navigate(`/board/${stored.gameId}`)
+      return
+    }
     const code = session.roomCode ?? stored?.roomCode
     if (!code) return
     // A stored match goes back to the board; a stored lobby goes to the lobby.
@@ -69,6 +75,9 @@ export default function StartPage() {
           </MenuButton>
           <MenuButton autoFocus value="create" onClick={handleMenuClick}>
             {t('start.createGame')}
+          </MenuButton>
+          <MenuButton value="create" onClick={handleMenuClick}>
+            {t('start.soloCta')}
           </MenuButton>
           <MenuButton value="join" onClick={handleMenuClick}>
             {t('start.joinGame')}

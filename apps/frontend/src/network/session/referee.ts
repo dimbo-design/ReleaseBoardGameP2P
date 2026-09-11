@@ -1,5 +1,6 @@
 import type { Action, DeckEntry, Engine, Event, GameState, PlayerId, Setup } from '@release/engine'
 import { botAction, drawObligationMet } from '@release/engine/fake'
+import { IS_DEV } from '~/shared/config'
 import type { Intent, Message } from '../types'
 import { forViewer, rejectionsIn } from './audience'
 
@@ -9,6 +10,10 @@ export interface Seat {
   // why PlayerId is a persisted client id rather than a PeerJS peer id.
   peerId: string | null
   absentSince: number | null
+  // A seat nobody is coming back to. The absence grace below is a rule about
+  // humans who might return; a bot never was one, so it is played from the
+  // first tick instead of after 30 seconds of waiting for nobody.
+  bot?: boolean
 }
 
 export interface Session {
@@ -70,7 +75,7 @@ export function createSession(args: {
   keeperId: PlayerId
   engine: Engine
   seed: number
-  players: { playerId: PlayerId; peerId: string | null; name: string }[]
+  players: { playerId: PlayerId; peerId: string | null; name: string; bot?: boolean }[]
   setup: Setup
   deck: DeckEntry[]
   events: DeckEntry[]
@@ -97,6 +102,7 @@ export function createSession(args: {
       playerId: p.playerId,
       peerId: p.peerId,
       absentSince: null,
+      ...(p.bot ? { bot: true as const } : {}),
     })),
     // The deal is the first thing that happened in this game, so it is the
     // first thing in the log too — a peer restoring the match needs it to draw
@@ -160,6 +166,10 @@ export function rebind(
   const seat = session.seats.find((s) => s.playerId === playerId)
   if (!seat) return { session, outgoing: [] }
 
+  // A seat nobody is coming back to cannot be come back to. Its peerId is null
+  // by construction, which is exactly the shape the guard below admits.
+  if (seat.bot) return { session, outgoing: [] }
+
   // Only an absent seat can be claimed. Nothing authenticates a PlayerId — it
   // is a uuid the client persists and announces — so a peer naming someone
   // else's would otherwise take a seat that is still connected: the fan-out
@@ -218,6 +228,36 @@ export function rebind(
   }
 }
 
+// Whether the table is actually waiting on this seat, as opposed to the seat
+// simply having nothing to do right now (not its turn, no window open).
+function seatOwes(state: GameState, playerId: PlayerId): boolean {
+  if (state.over) return false
+  // `player` is read as OPTIONAL on purpose, and that is the whole subtlety.
+  // Every Pending variant carries one today, so `state.pending.player` would
+  // compile — but a pending owed to several seats at once carries none, and
+  // this predicate is exactly the code that would then stop compiling. Reading
+  // it optionally answers "not this seat" for such a pending, which is the
+  // right answer for a warning: a roster-wide pending is nobody's solo stall.
+  const owed = (state.pending as { player?: PlayerId } | null)?.player
+  if (state.pending) return owed === playerId
+  return state.turn.player === playerId
+}
+
+// How many consecutive ticks the same stalled seat/pending has to be observed
+// before the dev warning below actually fires, keyed on the `session` object's
+// own identity. Every commit in this file hands back a freshly built session
+// the moment anything actually changes (`{ ...session, state, log: [...] }`),
+// and the identical reference otherwise — the `state === session.state` checks
+// throughout are exactly that convention. So a genuine stall calls in with the
+// SAME session tick after tick, and the count below resets to zero on its own
+// the instant anything moves, with nothing here to clean up. 8 ticks is 2
+// seconds at the ticker's 250ms interval: comfortably longer than a bot's
+// whole ordinary turn (roughly three quarters of a second end to end, design
+// spec §6), so a merely slow beat can never trip it, while a real stall is
+// still named within a couple of seconds rather than piling up warnings.
+export const STALL_WARNING_TICKS = 8
+const stallStreaks = new WeakMap<Session, number>()
+
 // The engine has no concept of a player who left, so a pending owed by one
 // would stall the game permanently. Past the grace period the keeper plays that
 // seat with the engine's own opponent policy.
@@ -226,7 +266,7 @@ export function rebind(
 // owed by the *human* and must never front a live UI, because it would silently
 // answer the reaction window for someone sitting right there. Here the seat is
 // empty, so there is no decision to take away.
-export function driveAbsent(session: Session, now: number): SessionResult {
+export function driveUnattended(session: Session, now: number): SessionResult {
   // A keeper with nobody connected has no table to keep moving: every SYNC it
   // produced would be addressed to a seat that cannot receive it, and the
   // match would advance for no one. Not reachable for a host-keeper, which
@@ -234,61 +274,92 @@ export function driveAbsent(session: Session, now: number): SessionResult {
   // keeper itself is the peer whose seat dropped.
   if (!session.seats.some((s) => s.peerId !== null)) return { session, outgoing: [] }
 
-  const expired = session.seats.filter(
-    (s) => s.peerId === null && s.absentSince !== null && now - s.absentSince >= ABSENT_GRACE_MS,
+  // A seat with nobody behind it: a bot, which never had anybody, or a human
+  // past the grace. Everything below this line treats the two identically —
+  // the difference is only in how long the table waits before giving up on
+  // somebody arriving.
+  const unattended = session.seats.filter(
+    (s) =>
+      s.peerId === null &&
+      (s.bot || (s.absentSince !== null && now - s.absentSince >= ABSENT_GRACE_MS)),
   )
 
-  // Scan every expired-absent seat rather than picking the first: an absent
+  // Scan every unattended seat rather than picking the first: an unattended
   // seat that currently owes nothing (not its turn, nothing pending on it)
   // must not shadow a later seat that does — with two or more seats gone,
   // the one the game is actually waiting on need not be seated first.
-  for (const seat of expired) {
+  for (const seat of unattended) {
     const action = botAction(session.engine, session.state, seat.playerId, now)
-    if (!action) continue
 
     // `tick` owns the window deadline, and it is the only thing that owns it.
-    // When the absent seat holds the open window, botAction answers with
+    // When an unattended seat holds the open window, botAction answers with
     // WINDOW_EXPIRED stamped at `Math.max(at, deadline)` (bots.ts) — a forged
     // future time that would close the window for everyone still sitting
-    // there, the moment this seat's grace period runs out. The keeper's clock
-    // is the only clock (spec decision 6), so the suggestion is dropped and
-    // the window expires on its own deadline, through `tick`, or not at all.
-    if (action.type === 'WINDOW_EXPIRED') continue
+    // there, whether that seat is a bot that was never going to answer or a
+    // human whose grace period just ran out. The keeper's clock is the only
+    // clock (spec decision 6), so the suggestion is dropped and the window
+    // expires on its own deadline, through `tick`, or not at all.
+    if (action?.type === 'WINDOW_EXPIRED') continue
 
-    const { state, events } = session.engine.reduce(session.state, action)
-    if (state !== session.state) {
-      const next: Session = { ...session, state, log: [...session.log, ...events] }
-      return { session: next, outgoing: syncAll(next, events) }
+    if (action) {
+      const { state, events } = session.engine.reduce(session.state, action)
+      if (state !== session.state) {
+        const next: Session = { ...session, state, log: [...session.log, ...events] }
+        return { session: next, outgoing: syncAll(next, events) }
+      }
+
+      // botAction's suggestion was rejected outright. An absent seat still owes
+      // the table forward progress, so on its own uninterrupted turn fall back
+      // to the same escape hatch a human out of moves would take: draw if it
+      // hasn't, or end the turn if it has. Anything still rejected means there
+      // is truly nothing to do, and the next expired seat gets a turn instead.
+      //
+      // This covers a proactive turn only, and deliberately so: it is a net for
+      // a `playable` list that offers more than `onPlay` accepts, and `playable`
+      // is only consulted on a seat's own turn. A pending is answered from the
+      // option list the engine itself publishes on the pending view, so its
+      // answer is legal by construction and there is nothing to fall back to —
+      // which is why an option list the engine cannot answer has to be fixed in
+      // the engine rather than papered over here. `playableFor`
+      // (packages/engine/src/fake/project.ts) checking the release cost is that
+      // fix for the case this net was written against.
+      const { turn, pending, window, over } = session.state
+      if (turn.player === seat.playerId && !pending && !window && !over) {
+        const fallback: Action = drawObligationMet(session.state)
+          ? { type: 'PUSH', player: seat.playerId, at: now }
+          : { type: 'DRAW', player: seat.playerId, at: now }
+        const retried = session.engine.reduce(session.state, fallback)
+        if (retried.state !== session.state) {
+          const next: Session = {
+            ...session,
+            state: retried.state,
+            log: [...session.log, ...retried.events],
+          }
+          return { session: next, outgoing: syncAll(next, retried.events) }
+        }
+      }
     }
 
-    // botAction's suggestion was rejected outright. An absent seat still owes
-    // the table forward progress, so on its own uninterrupted turn fall back
-    // to the same escape hatch a human out of moves would take: draw if it
-    // hasn't, or end the turn if it has. Anything still rejected means there
-    // is truly nothing to do, and the next expired seat gets a turn instead.
-    //
-    // This covers a proactive turn only, and deliberately so: it is a net for
-    // a `playable` list that offers more than `onPlay` accepts, and `playable`
-    // is only consulted on a seat's own turn. A pending is answered from the
-    // option list the engine itself publishes on the pending view, so its
-    // answer is legal by construction and there is nothing to fall back to —
-    // which is why an option list the engine cannot answer has to be fixed in
-    // the engine rather than papered over here. `playableFor`
-    // (packages/engine/src/fake/project.ts) checking the release cost is that
-    // fix for the case this net was written against.
-    const { turn, pending, window, over } = session.state
-    if (turn.player === seat.playerId && !pending && !window && !over) {
-      const fallback: Action = drawObligationMet(session.state)
-        ? { type: 'PUSH', player: seat.playerId, at: now }
-        : { type: 'DRAW', player: seat.playerId, at: now }
-      const retried = session.engine.reduce(session.state, fallback)
-      if (retried.state !== session.state) {
-        const next: Session = {
-          ...session,
-          state: retried.state,
-          log: [...session.log, ...retried.events],
-        }
-        return { session: next, outgoing: syncAll(next, retried.events) }
+    // Getting here means nothing above moved the table forward for this seat:
+    // botAction had no answer at all (the exhaustive switch's `default` in
+    // bots.ts, kept for a Pending kind not yet wired into it), or the answer it
+    // gave was rejected outright — including, on a proactive turn, the
+    // draw/push net just above that exists for exactly this. A seat that owes
+    // the table an answer and has none is a stall: nothing else can move until
+    // it resolves, and with no human in that seat nobody will resolve it by
+    // hand. A pending is answered from the option list the engine itself
+    // publishes on the pending view, so its answer is legal by construction —
+    // an option list the engine still refuses is an engine bug to fix rather
+    // than something to paper over here.
+    if (IS_DEV && seatOwes(session.state, seat.playerId)) {
+      const streak = (stallStreaks.get(session) ?? 0) + 1
+      stallStreaks.set(session, streak)
+      // Fires once, on the tick the streak first crosses the threshold — not on
+      // every tick after, which is exactly the flood this guard exists to stop.
+      if (streak === STALL_WARNING_TICKS) {
+        console.warn(
+          `[referee] ${seat.playerId} owes ${session.state.pending?.kind ?? 'a move'} and its policy has no answer — the table cannot advance`,
+        )
       }
     }
   }
@@ -495,7 +566,7 @@ export function tick(session: Session, now: number): SessionResult {
 
     if (now >= turn.deadline) {
       // The same rule as the stalled defence above: a deadline never fires
-      // against a seat with nobody in it — driveAbsent's grace period owns a
+      // against a seat with nobody in it — driveUnattended's grace period owns a
       // disconnected seat's forward progress.
       const seat = session.seats.find((s) => s.playerId === turn.player)
       if (!seat?.peerId) return { session, outgoing: [] }
