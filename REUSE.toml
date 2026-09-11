@@ -13,7 +13,7 @@ version = 1
 # Everything not claimed by a table below: the source code.
 [[annotations]]
 path = "**"
-SPDX-FileCopyrightText = "2026 Dmitry Togulev"
+SPDX-FileCopyrightText = ["2026 Dmitry Togulev", "2026 Andrey Konnov"]
 SPDX-License-Identifier = "AGPL-3.0-or-later"
 
 # The game: card art, card texts, rules text, and the rules owner's answers the
@@ -42,6 +42,27 @@ path = [
   "apps/ui/src/assets/favicons/**",
   "apps/frontend/public/*.png",
   "apps/ui/src/assets/home/photo.jpg",
+]
+SPDX-FileCopyrightText = "2026 Dmitry Togulev"
+SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
+
+# The Release любой ценой logo: the same terms as the rest of the brand, with
+# two holders.
+[[annotations]]
+path = [
+  "apps/ui/src/assets/brand/release_logo.svg",
+  "apps/ui/src/brand/release_logo.svg",
+  "apps/ui/src/brand/release_logo.en.svg",
+]
+SPDX-FileCopyrightText = ["2026 Dmitry Togulev", "2026 Alexey Shtyrnyaev"]
+SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
+
+# The loader's sounds — the line tick and the logo's sound. Synthesized for this
+# project with Claude Code (Anthropic): generated from code, not recorded.
+[[annotations]]
+path = [
+  "apps/ui/src/assets/audio/tick.wav",
+  "apps/ui/src/assets/audio/logo-theme.wav",
 ]
 SPDX-FileCopyrightText = "2026 Dmitry Togulev"
 SPDX-License-Identifier = "LicenseRef-AllRightsReserved"

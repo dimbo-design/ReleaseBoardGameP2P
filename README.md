@@ -109,22 +109,24 @@ under which is mapped path by path in [`REUSE.toml`](./REUSE.toml); the licence 
 |------|-------|---------|
 | **Source code** | everything not listed below | [AGPL-3.0-or-later](./LICENSE) |
 | **The game** — card art, card texts, rules text | `apps/ui/src/assets/cards/`, `apps/ui/src/cards/content.ts`, `packages/translation/src/locales/*/rules.json`, `docs/rules/` | [CC BY-NC-SA 4.0](./LICENSES/CC-BY-NC-SA-4.0.txt) |
-| **The brand** — logos, favicons, app icons, the start-screen photo | `apps/ui/src/assets/brand/`, `apps/ui/src/brand/*.svg`, `apps/ui/src/assets/favicons/`, `apps/frontend/public/*.png`, `apps/ui/src/assets/home/photo.jpg` | All rights reserved, except in unmodified copies — [terms](./LICENSES/LicenseRef-AllRightsReserved.txt) |
+| **The brand** — logos, favicons, app icons, the start-screen photo, the loader's sounds | `apps/ui/src/assets/brand/`, `apps/ui/src/brand/*.svg`, `apps/ui/src/assets/favicons/`, `apps/frontend/public/*.png`, `apps/ui/src/assets/home/photo.jpg`, `apps/ui/src/assets/audio/` | All rights reserved, except in unmodified copies — [terms](./LICENSES/LicenseRef-AllRightsReserved.txt) |
 | **Third-party media** | the files marked so in `REUSE.toml` | their own — listed there with their source |
 
-Copyright (C) 2026 Dmitry Togulev ([@dimbo-design](https://github.com/dimbo-design)).
+Copyright (C) 2026 the authors named below for each part, and file by file in `REUSE.toml`.
 
-**The code.** Building other projects on top of this is welcome — keep the attribution and,
-per the AGPL, keep your version's source open (this closes the "fork, change a couple of
-lines, ship it closed/hosted for profit" loophole).
+**The code** is by Dmitry Togulev ([@dimbo-design](https://github.com/dimbo-design)) and Andrey
+Konnov ([@ditayler](https://github.com/ditayler)). Building other projects on top of this is
+welcome — keep the attribution and, per the AGPL, keep your version's source open (this closes
+the "fork, change a couple of lines, ship it closed/hosted for profit" loophole).
 
 **The game** is by Dmitry Togulev and Alexey Shtyrnyaev. The art, the card texts and the rules
 may be shared and adapted for non-commercial use, with attribution and under the same licence.
 Commercial use — printing and selling the cards, or putting the art or the texts into a paid
 product — is not covered by this licence.
 
-**The brand.** The logos of Release любой ценой and MythHand, and the icons made from them,
-may be kept only in an unmodified copy of this project; a modified version replaces them. How
-the name and logos may be referred to: [`TRADEMARKS.md`](./TRADEMARKS.md).
+**The brand** belongs to Dmitry Togulev, and the Release любой ценой logo to him and Alexey
+Shtyrnyaev. The logos of Release любой ценой and MythHand, and the icons made from them, may be
+kept only in an unmodified copy of this project; a modified version replaces them. How the name
+and logos may be referred to: [`TRADEMARKS.md`](./TRADEMARKS.md).
 
 Third-party notice: Deploy or Die — MIT License, see [`LICENSE-deployordie`](./LICENSE-deployordie).
