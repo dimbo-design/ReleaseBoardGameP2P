@@ -81,20 +81,23 @@ export function stealRandom(
 export function resolveDdos(
   state: GameState,
   log: Log,
-  // Unused today — neither `monitoringDestroyed` nor `releaseReturned` records
-  // who threw the DDoS; kept in the signature so a future task can attribute it
-  // without changing every call site.
+  // Unused here — neither `monitoringDestroyed` nor `releaseReturned` records
+  // who threw the DDoS. The thrower is reachable through `parent`, which names
+  // the `attacked` event that carries `attacker`.
   _actor: PlayerId,
   target: Target,
+  // The `attacked` this DDoS was logged as. The effect is where the thrower's
+  // choice of target shows, and nothing ever answers a DDoS, so the effect is
+  // what names the throw.
+  parent?: number,
 ): GameState {
   if (target.kind === 'monitoring') {
     const mon = state.players[target.player].release.monitoring
     if (!mon) return { ...state, eventSeq: log.seq }
-    const destroyedId = log.add({
-      type: 'monitoringDestroyed',
-      player: target.player,
-      card: mon.id,
-    })
+    const destroyedId = log.add(
+      { type: 'monitoringDestroyed', player: target.player, card: mon.id },
+      parent,
+    )
     // The Monitoring goes to the discard, and the feed has to say so. It used
     // to be banked by a direct write, which left everything derived from the
     // feed a card behind the projection's discardCount — the board's heap had
@@ -125,12 +128,10 @@ export function resolveDdos(
   const released = state.players[target.player].release[target.slot]
   if (!released) return { ...state, eventSeq: log.seq }
 
-  const returnedId = log.add({
-    type: 'releaseReturned',
-    player: target.player,
-    slot: target.slot,
-    card: released.card.id,
-  })
+  const returnedId = log.add(
+    { type: 'releaseReturned', player: target.player, slot: target.slot, card: released.card.id },
+    parent,
+  )
   const zone = { ...state.players[target.player].release }
   delete zone[target.slot]
   const owner = state.players[target.player]

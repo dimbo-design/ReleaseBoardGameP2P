@@ -129,3 +129,51 @@ describe('an attack and the defence that answered it, as the engine logs them', 
     expect(defenceRow?.redirect).toBe('Bo')
   })
 })
+
+const DDOS: CardInstance = { uid: 'attack-ddos#0', id: 'attack-ddos' }
+const MON: CardInstance = { uid: 'protection-monitoring#0', id: 'protection-monitoring' }
+
+// A DDoS is never answered, so the row under it is not a defence but what it
+// hit. The target is the thrower's choice, and that choice reaches the table
+// only through the consequence — so the consequence has to hang off the throw.
+describe('a DDoS and what it hit, as the engine logs them', () => {
+  it('nests the destroyed Monitoring under the DDoS that destroyed it', () => {
+    const engine = createFakeEngine()
+    const game = engine.createGame({
+      gameId: 'g1',
+      seed: 4242,
+      players: [
+        { id: 'p1', name: 'Ann' },
+        { id: 'p2', name: 'Bo' },
+      ],
+      setup: EASY,
+      deck: FAKE_DECK,
+      events: FAKE_EVENTS,
+    })
+    const primed: GameState = {
+      ...game,
+      players: {
+        ...game.players,
+        p1: { ...game.players.p1, hand: [DDOS] },
+        p2: { ...game.players.p2, release: { monitoring: MON } },
+      },
+    }
+    const { state, events } = engine.reduce(primed, {
+      type: 'PLAY',
+      player: 'p1',
+      card: DDOS.uid,
+      target: { kind: 'monitoring', player: 'p2' },
+      at: T0,
+    })
+    const rejected = events.find((e) => e.type === 'rejected')
+    if (rejected) throw new Error(`PLAY was rejected: ${(rejected as { reason: string }).reason}`)
+
+    const table = toBoardState(project(state), events, labels)
+    const attacked = events.find((e) => e.type === 'attacked')
+    const destroyed = events.find((e) => e.type === 'monitoringDestroyed')
+
+    expect(table.history.some((e) => e.id === destroyed?.id)).toBe(false)
+    const attackRow = table.history.find((e) => e.id === attacked?.id)
+    expect(attackRow?.children?.map((c) => c.id)).toContain(destroyed?.id)
+  })
+})

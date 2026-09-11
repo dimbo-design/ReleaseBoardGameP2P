@@ -438,3 +438,65 @@ it('parents a taken hand hit to the attack that landed it', () => {
   expect(attack?.id).toBeDefined()
   expect(hit?.parent).toBe(attack?.id)
 })
+
+// A DDoS is the one attack whose target is the thrower's choice — any
+// opponent's Monitoring or release (cards.md, DDoS) — and it is never answered,
+// so nothing arrives later to carry that choice. It reaches the table only
+// through what the attack DID. Unless the consequence names its cause, the move
+// history shows a DDoS and what it hit as two unrelated rows.
+it('parents a Monitoring a DDoS destroyed to the attack', () => {
+  const s = table([DDOS], [])
+  const guarded: GameState = {
+    ...s,
+    players: { ...s.players, p2: { ...s.players.p2, release: { monitoring: MON } } },
+  }
+  const r = reduce(guarded, {
+    type: 'PLAY',
+    player: 'p1',
+    card: DDOS.uid,
+    target: { kind: 'monitoring', player: 'p2' },
+    at: 1000,
+  })
+  const attack = r.events.find((e) => e.type === 'attacked')
+  expect(attack?.id).toBeDefined()
+  expect(r.events.find((e) => e.type === 'monitoringDestroyed')?.parent).toBe(attack?.id)
+})
+
+it('parents a release a DDoS returned to the attack', () => {
+  const s = table([DDOS], [])
+  const guarded: GameState = {
+    ...s,
+    players: { ...s.players, p2: { ...s.players.p2, release: { frontend: { card: FE } } } },
+  }
+  const r = reduce(guarded, {
+    type: 'PLAY',
+    player: 'p1',
+    card: DDOS.uid,
+    target: { kind: 'release', player: 'p2', slot: 'frontend' },
+    at: 1000,
+  })
+  const attack = r.events.find((e) => e.type === 'attacked')
+  expect(attack?.id).toBeDefined()
+  expect(r.events.find((e) => e.type === 'releaseReturned')?.parent).toBe(attack?.id)
+})
+
+// Every other spent attack card hangs off its cause — the defence or the hit
+// that answered it. A DDoS has no answer, so its own card hangs off the throw.
+it('parents the spent DDoS card to the attack', () => {
+  const s = table([DDOS], [])
+  const guarded: GameState = {
+    ...s,
+    players: { ...s.players, p2: { ...s.players.p2, release: { monitoring: MON } } },
+  }
+  const r = reduce(guarded, {
+    type: 'PLAY',
+    player: 'p1',
+    card: DDOS.uid,
+    target: { kind: 'monitoring', player: 'p2' },
+    at: 1000,
+  })
+  const attack = r.events.find((e) => e.type === 'attacked')
+  const spent = r.events.find((e) => e.type === 'discarded' && e.reason === 'attackSpent')
+  expect(attack?.id).toBeDefined()
+  expect(spent?.parent).toBe(attack?.id)
+})

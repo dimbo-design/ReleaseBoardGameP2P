@@ -364,10 +364,12 @@ function toDiscardHeap(log: Event[], top: CardData | undefined, count: number): 
  * says — it does not infer a link the engine never emitted.
  *
  * What the engine links, and therefore all this can assemble: an answer to an
- * attack (`defended`, `tookHit`) names the `attacked` it answered, and a
- * `discarded` names what spent the card — `eliminated`, `defended`, `revealed`,
- * `neutralized`, `aiRevealed`, `tookHit`, `monitoringDestroyed` or
- * `releaseReturned`. Nothing else carries a parent, so nothing else nests.
+ * attack (`defended`, `tookHit`) names the `attacked` it answered, what a DDoS
+ * did (`monitoringDestroyed`, `releaseReturned`) names the `attacked` that did
+ * it, and a `discarded` names what spent the card — `eliminated`, `defended`,
+ * `revealed`, `neutralized`, `aiRevealed`, `tookHit`, `attacked` (a spent DDoS),
+ * `monitoringDestroyed` or `releaseReturned`. Nothing else carries a parent, so
+ * nothing else nests.
  *
  * The first of those links did not exist until #138: both `defended` emission
  * sites called `log.add` with no parent, so `attackerOf` always took its

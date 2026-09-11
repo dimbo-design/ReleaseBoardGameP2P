@@ -236,7 +236,12 @@ export function onPlay(state: GameState, action: Action & { type: 'PLAY' }): Red
       // left the move history without the throw and the results screen without
       // the attack: the one card the "King of DDoS" plate is about was the one
       // attack nothing counted.
-      log.add({
+      //
+      // The consequence is where the thrower's choice of target becomes visible
+      // — a Monitoring destroyed or a release returned — and a DDoS is never
+      // answered, so nothing arriving later could carry that link. Everything
+      // this throw causes names it: the spent card and the effect alike.
+      const attackedId = log.add({
         type: 'attacked',
         attacker: action.player,
         card: card.id,
@@ -244,14 +249,20 @@ export function onPlay(state: GameState, action: Action & { type: 'PLAY' }): Red
         target: action.target.player,
       })
       for (const c of spentCards) {
-        log.add({ type: 'discarded', player: action.player, card: c.id, reason: 'attackSpent' })
+        log.add(
+          { type: 'discarded', player: action.player, card: c.id, reason: 'attackSpent' },
+          attackedId,
+        )
       }
       const banked = {
         ...spent,
         decks: { ...spent.decks, discard: [...spent.decks.discard, ...spentCards] },
         eventSeq: log.seq,
       }
-      return { state: resolveDdos(banked, log, action.player, action.target), events: log.events }
+      return {
+        state: resolveDdos(banked, log, action.player, action.target, attackedId),
+        events: log.events,
+      }
     }
 
     if (action.target.kind !== 'player') return reject(state, action, 'illegal target')
