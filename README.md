@@ -118,7 +118,7 @@ Copyright (C) 2026 Dmitry Togulev ([@dimbo-design](https://github.com/dimbo-desi
 per the AGPL, keep your version's source open (this closes the "fork, change a couple of
 lines, ship it closed/hosted for profit" loophole).
 
-**The game** is by Dmitry Togulev and Алексей Штырняев. The art, the card texts and the rules
+**The game** is by Dmitry Togulev and Alexey Shtyrnyaev. The art, the card texts and the rules
 may be shared and adapted for non-commercial use, with attribution and under the same licence.
 Commercial use — printing and selling the cards, or putting the art or the texts into a paid
 product — is not covered by this licence.

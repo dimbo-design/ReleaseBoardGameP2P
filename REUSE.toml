@@ -30,7 +30,7 @@ path = [
   "docs/rules/**",
   "docs/specs/*-rules-decisions.md",
 ]
-SPDX-FileCopyrightText = ["2026 Dmitry Togulev", "2026 Алексей Штырняев"]
+SPDX-FileCopyrightText = ["2026 Dmitry Togulev", "2026 Alexey Shtyrnyaev"]
 SPDX-License-Identifier = "CC-BY-NC-SA-4.0"
 
 # The brand: the logos, the favicons and app icons made from them, and the
@@ -79,3 +79,14 @@ path = [
 ]
 SPDX-FileCopyrightText = "NONE"
 SPDX-License-Identifier = "LicenseRef-PD-US-government"
+
+# Elimination clip: the "67" meme, performed in a duck costume, by Bitterbutter
+# on Wikimedia Commons — https://commons.wikimedia.org/wiki/File:67_meme_gesture.webm
+# Changed here: scaled to 480px high, sound removed, re-encoded as MP4.
+[[annotations]]
+path = [
+  "apps/frontend/src/features/board-beats/eliminate/duck-six-seven.mp4",
+  "apps/playground/stories/interactive/eliminate/duck-six-seven.mp4",
+]
+SPDX-FileCopyrightText = "2025 Bitterbutter"
+SPDX-License-Identifier = "CC-BY-SA-4.0"

@@ -1503,14 +1503,21 @@ its own number, derived from the rule the beat already plays by — loop to the 
 pass you are in finish. That is `idealEndMsFor`: `ceil(ELIM_MIN_MS / duration) * duration`, the
 first whole loop at or past the floor, which is what a healthy clip takes IN THE IDEAL.
 
+**The floor is counted in passes, not on the clock.** Every seam makes real playback run a little
+long, so a clip whose passes land just under the floor — two passes of 2.466s are 4.932s — would
+reach it on the clock a pass early whenever the seams added up, and play a different number of
+times on different screens. `onEnded` counts the passes played against the clip's own length
+instead, so every screen plays exactly the ideal. The playground scene counts the same way, from
+the video's own `duration`.
+
 **…plus room for the seams that end really contains.** Real playback runs a little longer than the
 ideal: `ended` fires, the handler rewinds to 0, `play()` is called and a frame decodes, every time
 round. Armed on the ideal number exactly, the timer beats the last `ended` to the exit on every clip
 that loops — and the beat goes back to ending on a number instead of on a loop boundary, which is
 the thing the per-clip guard exists to stop. Worse, it never surfaces as a failure, only as a clip
 that ends a few frames early. So `guardMsFor` adds `ELIM_GUARD_SLACK_MS` **per loop** — what varies
-between clips is the number of seams, not a fixed overhead, and these clips are expected to be
-replaced, so the shape has to survive a shorter one arriving. The guard is there for a stalled
+between clips is the number of seams, not a fixed overhead, and the set of clips changes, so the
+shape has to survive a shorter one arriving. The guard is there for a stalled
 stream: it should fire well after any honest end, and a stall waiting a few hundred ms longer costs
 nothing.
 
@@ -1520,15 +1527,17 @@ Two conditions make that number honest, and both are pinned:
   first `playing` counts; a stall that resumes must not hand the clip a fresh budget.
 - **the lengths live beside the clip list** (`CLIP_MS`), and `eliminateClips.test.ts` reads each
   file's real duration out of its own `moov/mvhd` box and fails if the table disagrees or a clip
-  ships without an entry. That matters here specifically: the clips ship with unconfirmed rights and
-  are expected to be replaced, so a swap has to fail loudly rather than quietly mis-time the beat.
+  ships without an entry. That matters here specifically: the set of clips changes (each one's
+  licence and source are in `REUSE.toml`), so a swap has to fail loudly rather than quietly
+  mis-time the beat.
 
 `performance.now()`, as in the source.
 
 **Four ways it ends, one way out**
 `finish()` is the single exit — the overlay goes, whichever guard is armed is disarmed, the beat's
 promise resolves once — and four things reach it:
-- `ended` past `ELIM_MIN_MS`. Before the floor, `ended` replays the clip instead.
+- `ended` once the passes played reach `ELIM_MIN_MS`. Before that, `ended` replays the clip
+  instead.
 - `error` — a missing file, a refused codec. Nothing is put in its place: the board is already in
   its eliminated state, which is what carries the news; the clip was the punctuation, not the
   sentence.
@@ -1558,7 +1567,7 @@ Decided, not emergent: a full-screen autoplaying video is exactly what the prefe
 |---|---|
 | the emptied table holds before the clip covers it | `ELIM_DELAY = 400` |
 | the clip loops at least | `ELIM_MIN_MS = 5000` |
-| its ideal end, the first whole loop past that | 6.10 / 6.53 / 6.47 / 9.40s for the current four |
+| its ideal end, the first whole loop past that | 7.40 / 8.00 / 7.47 / 9.87s for the current four |
 | the guard, which is that plus room per seam | `+ ELIM_GUARD_SLACK_MS = 250` per loop |
 | a clip that never starts playing at all | `ELIM_START_MS = 10000` (a loading guard, not a clip one) |
 | fade in | 260ms, over a clip that is ALREADY playing — the fade does not hold it back |

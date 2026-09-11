@@ -192,6 +192,7 @@ export default function Error503Story() {
   gifPickRef.current = gifPick
   const eliminating = useRef(false) // one elimination at a time
   const gifStart = useRef(0)
+  const gifPasses = useRef(0)
   const gifResolve = useRef<(() => void) | null>(null)
 
   // Hand owns its hover internally; after a card leaves the hand the pointer is
@@ -225,15 +226,26 @@ export default function Error503Story() {
       : ELIM_VIDEOS[Math.floor(Math.random() * ELIM_VIDEOS.length)]
     await wait(GIF_DELAY)
     gifStart.current = performance.now()
+    gifPasses.current = 0
     setGif(src)
     return new Promise((res) => {
       gifResolve.current = res
     })
   }
-  // one loop finished: replay until the minimum time is reached, then fade out
+  // one pass finished: replay until the minimum time is reached, then fade out.
+  // Counted in passes of the clip's own length rather than on the clock — every
+  // seam makes real playback run a little long, and a clip whose passes land
+  // just under the floor would otherwise play a pass fewer some of the time.
+  // The board beat counts the same way (eliminateBeat.tsx).
   function onGifEnded(e: React.SyntheticEvent<HTMLVideoElement>) {
     const v = e.currentTarget
-    if (performance.now() - gifStart.current < ELIM_MIN_MS) {
+    gifPasses.current += 1
+    const one = v.duration * 1000
+    const short =
+      Number.isFinite(one) && one > 0
+        ? gifPasses.current * one < ELIM_MIN_MS
+        : performance.now() - gifStart.current < ELIM_MIN_MS
+    if (short) {
       v.currentTime = 0
       void v.play()
       return
