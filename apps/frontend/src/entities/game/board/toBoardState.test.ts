@@ -719,3 +719,17 @@ describe('the discard heap', () => {
     expect(heap).toHaveLength(1)
   })
 })
+
+it.each([
+  'upgradeThrown',
+  'upgradeTaken',
+] as const)('renders %s with its actor and card', (type) => {
+  const events: Event[] = [{ id: 1, type, player: 'p2', card: 'attack-bug' }]
+  const state = toBoardState(view, events, { ...labels, [type]: 'Upgrade action' })
+  expect(state.history[0]).toMatchObject({
+    id: 1,
+    who: 'bot',
+    kind: 'Upgrade action',
+    card: cardById('attack-bug')?.name,
+  })
+})
