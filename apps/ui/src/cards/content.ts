@@ -9,37 +9,12 @@
 // @release/ui stays i18n-agnostic: this is DATA that carries BOTH locales side
 // by side. The composed CardFace never reads a locale — the consumer picks one
 // (`CARD_CONTENT[id][lang]`) and passes a single CardContent in as a prop.
+//
+// The card text is game content, licensed CC BY-NC-SA 4.0 rather than the
+// code's AGPL (see REUSE.toml) — which is why its types live in types.ts and
+// this file stays data.
 
-// One paragraph of a card's description.
-export interface CardParagraph {
-  text: string
-  // substrings of `text` to bold — names of other cards, or a sudo prefix
-  bold?: string[]
-  // callout background: 'sudo' = yellow (Git Operation sudo effect),
-  // 'defense' = green (Defense "works against …", whole line bold)
-  highlight?: 'sudo' | 'defense'
-  // render `text` (e.g. "ИЛИ") as a centred divider — a thin rule to each side
-  divider?: boolean
-}
-
-// Text shown on a composed card face. Minimal on purpose — fields are added as
-// real cards are authored and we learn what each face actually needs.
-export interface CardContent {
-  // headline on the face (may differ per locale, e.g. transliterated names)
-  title: string
-  // type / category line under the title
-  typeLine: string
-  // description body — one or more paragraphs
-  paragraphs: CardParagraph[]
-  // optional flavour line
-  flavor?: string
-}
-
-// Both locales for one card, authored together.
-export interface LocalizedCardContent {
-  ru: CardContent
-  en: CardContent
-}
+import type { CardContent, CardParagraph, LocalizedCardContent } from './types'
 
 // Keyed by Card.id (see catalogue.ts). Authored incrementally — start with the
 // one representative card that validates the composed face, then fill the rest.

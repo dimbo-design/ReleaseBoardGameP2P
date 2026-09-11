@@ -48,7 +48,7 @@ The last pile is never pruned: with nothing left anywhere, answer 7's first case
 
 Slice A left a question the rules do not answer and this slice makes reachable: **under Base, if a player draws and then splits a pile, does the obligation re-open?** `drawObligationMet` currently says yes — the new pile has cards and has not been drawn from — which means splitting after drawing would owe another card.
 
-That is an accident of the predicate, not a decision, and it is the kind of thing [`2026-08-11-rules-ambiguities-open-questions.md`](./2026-08-11-rules-ambiguities-open-questions.md) exists for. Until it is answered, this slice keeps the predicate as it stands and states the consequence here rather than quietly picking the other reading.
+That is an accident of the predicate, not a decision, and it is the kind of thing [`2026-08-11-rules-ambiguities-open-questions.md`](../rules/decisions/2026-08-11-rules-ambiguities-open-questions.md) exists for. Until it is answered, this slice keeps the predicate as it stands and states the consequence here rather than quietly picking the other reading.
 
 ## Definition of done
 

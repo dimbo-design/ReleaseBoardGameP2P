@@ -1,6 +1,6 @@
 # Git operations — rules decisions
 
-Answers from the game's owner to the twelve questions in [`2026-08-01-git-operations-open-questions.md`](./2026-08-01-git-operations-open-questions.md), given on [GitHub/PR #77](https://github.com/MythHand/ReleaseBoardGameP2P/pull/77#issuecomment-5153415444). These supersede the questions and the recommendations in them; the questions file stays only as the record of what was asked.
+Answers from the game's owner to the twelve questions in [`2026-08-01-git-operations-open-questions.md`](../rules/decisions/2026-08-01-git-operations-open-questions.md), given on [GitHub/PR #77](https://github.com/MythHand/ReleaseBoardGameP2P/pull/77#issuecomment-5153415444). These supersede the questions and the recommendations in them; the questions file stays only as the record of what was asked.
 
 Numbering matches the questions.
 

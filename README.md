@@ -83,17 +83,48 @@ Architecture, per-app conventions, and the styling / i18n / signaling rules live
 CSS-Modules + i18n-agnostic (copy via props); the frontend uses CSS Modules + design tokens;
 the signaling server holds no game rules.
 
+## Origin & attribution
+
+"Release любой ценой" was inspired by the card game
+[Deploy or Die](https://www.deployordie.com/)
+([deployordie/card-game](https://github.com/deployordie/card-game)), which gave us the core
+idea and the general mechanics framework. From there it grew into a separate game: all card
+and rule texts are in our own words, the card set and mechanics were reworked, and the balance
+and deck size are designed for 2–6 players (instead of 2–4).
+
+Deploy or Die® is a trademark of Kreativní Laboratoř s.r.o.; "Release любой ценой" is not
+affiliated with its rights holders.
+
+Thanks to the Deploy or Die team for the inspiration! The copyright notice and MIT license text
+from the Deploy or Die repository are preserved in
+[`LICENSE-deployordie`](./LICENSE-deployordie).
+
 ## License
 
-Licensed under the **GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later) —
-see [`LICENSE`](./LICENSE).
+This repository holds three kinds of material under three sets of terms. Which file falls
+under which is mapped path by path in [`REUSE.toml`](./REUSE.toml); the licence texts are in
+[`LICENSES/`](./LICENSES).
+
+| What | Where | Licence |
+|------|-------|---------|
+| **Source code** | everything not listed below | [AGPL-3.0-or-later](./LICENSE) |
+| **The game** — card art, card texts, rules text | `apps/ui/src/assets/cards/`, `apps/ui/src/cards/content.ts`, `packages/translation/src/locales/*/rules.json`, `docs/rules/` | [CC BY-NC-SA 4.0](./LICENSES/CC-BY-NC-SA-4.0.txt) |
+| **The brand** — logos, favicons, app icons, the start-screen photo | `apps/ui/src/assets/brand/`, `apps/ui/src/brand/*.svg`, `apps/ui/src/assets/favicons/`, `apps/frontend/public/*.png`, `apps/ui/src/assets/home/photo.jpg` | All rights reserved, except in unmodified copies — [terms](./LICENSES/LicenseRef-AllRightsReserved.txt) |
+| **Third-party media** | the files marked so in `REUSE.toml` | their own — listed there with their source |
 
 Copyright (C) 2026 Dmitry Togulev ([@dimbo-design](https://github.com/dimbo-design)).
 
-Building other projects on top of this is welcome — keep the attribution and, per the AGPL,
-keep your version's source open (this closes the "fork, change a couple of lines, ship it
-closed/hosted for profit" loophole).
+**The code.** Building other projects on top of this is welcome — keep the attribution and,
+per the AGPL, keep your version's source open (this closes the "fork, change a couple of
+lines, ship it closed/hosted for profit" loophole).
 
-> **TODO (before the final release):** add per-file SPDX headers
-> (`// SPDX-License-Identifier: AGPL-3.0-or-later`) across the source. Not required for the
-> license to apply, but recommended for AGPL — do a dedicated pass before release.
+**The game.** The art, the card texts and the rules may be shared and adapted for
+non-commercial use, with attribution and under the same licence. Commercial use — printing
+and selling the cards, or putting the art or the texts into a paid product — is not covered
+by this licence.
+
+**The brand.** The logos of Release любой ценой and MythHand, and the icons made from them,
+may be kept only in an unmodified copy of this project; a modified version replaces them. How
+the name and logos may be referred to: [`TRADEMARKS.md`](./TRADEMARKS.md).
+
+Third-party notice: Deploy or Die — MIT License, see [`LICENSE-deployordie`](./LICENSE-deployordie).

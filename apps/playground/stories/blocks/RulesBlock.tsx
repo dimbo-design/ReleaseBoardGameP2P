@@ -1,5 +1,4 @@
-import enCommon from '@release/translation/locales/en/common.json'
-import ruCommon from '@release/translation/locales/ru/common.json'
+import { en as enCommon, ru as ruCommon } from '@release/translation/catalog'
 import Rules from '@/blocks/Rules'
 import { pick, useLang } from '../../Playground/lang'
 import { KitPage, KitSection } from '../kit/KitShell'

@@ -113,6 +113,10 @@ describe('the elimination clips and the times the guard trusts', () => {
       'doc_2026-07-31_23-09-35.mp4': 6534,
       'gato-truco-gato.mp4': 6467,
       'IHa0T7Ffr43z1kTd.mp4': 9400,
+      // Longer than the floor on its own, so it plays exactly once.
+      'keaton-falling-house.mp4': 8000,
+      'mic-drop.mp4': 7466,
+      'pie-in-the-face.mp4': 9866,
     })
   })
 

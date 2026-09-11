@@ -1,6 +1,6 @@
 # Game screen — gap audit
 
-What stands between `game-page-wiring` ([#65](https://github.com/MythHand/ReleaseBoardGameP2P/pull/65)) and a finished game screen. Written against the branch as merged-to-be, excluding [#61](https://github.com/MythHand/ReleaseBoardGameP2P/issues/61)'s card effects, which are tracked separately in [`2026-08-01-git-operations-open-questions.md`](./2026-08-01-git-operations-open-questions.md).
+What stands between `game-page-wiring` ([#65](https://github.com/MythHand/ReleaseBoardGameP2P/pull/65)) and a finished game screen. Written against the branch as merged-to-be, excluding [#61](https://github.com/MythHand/ReleaseBoardGameP2P/issues/61)'s card effects, which are tracked separately in [`2026-08-01-git-operations-open-questions.md`](../rules/decisions/2026-08-01-git-operations-open-questions.md).
 
 The task this compares against is [#18](https://github.com/MythHand/ReleaseBoardGameP2P/issues/18) — engine contract, fake reducer, page wiring — and the two plans that implement it: [`2026-07-31-table-interaction-plan.md`](./2026-07-31-table-interaction-plan.md) (tasks 1–17) and [`2026-08-01-game-page-wiring-plan.md`](./2026-08-01-game-page-wiring-plan.md), which supersedes its tasks 13–17.
 

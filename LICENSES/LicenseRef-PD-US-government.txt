@@ -1,0 +1,10 @@
+Public domain in the United States: a work of the United States federal
+government.
+
+The files this identifier is applied to in REUSE.toml were prepared by an officer
+or employee of the United States federal government as part of their official
+duties, and are therefore not subject to copyright in the United States
+(17 U.S.C. § 105). The source of each file is noted beside it in REUSE.toml.
+
+Being free of copyright does not release the rights of the people shown in them
+(personality and publicity rights), which are not covered here.

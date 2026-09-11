@@ -12,10 +12,10 @@
 **Где ещё смотреть.** Уже принятые решения по спорным местам —
 [`2026-08-02-git-operations-rules-decisions.md`](../specs/2026-08-02-git-operations-rules-decisions.md);
 открытые вопросы прошлых заходов —
-[`2026-08-01-git-operations-open-questions.md`](../specs/2026-08-01-git-operations-open-questions.md).
+[`2026-08-01-git-operations-open-questions.md`](./decisions/2026-08-01-git-operations-open-questions.md).
 
 **Ещё один список вопросов лежит не здесь и уже закрыт:**
-[`2026-08-11-rules-ambiguities-open-questions.md`](../specs/2026-08-11-rules-ambiguities-open-questions.md)
+[`2026-08-11-rules-ambiguities-open-questions.md`](./decisions/2026-08-11-rules-ambiguities-open-questions.md)
 задавал одиннадцать. Восемь ответила спека, последние три — владелец правил 22.08.2026: DDoS не
 отбивается, запрос Security Bug публичен и при промахе тоже, AI Release лимит «один релиз за ход» не
 тратит. Все ответы уехали в спеку, файл оставлен как запись о том, что спрашивали.

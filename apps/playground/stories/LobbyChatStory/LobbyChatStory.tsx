@@ -1,5 +1,4 @@
-import enCommon from '@release/translation/locales/en/common.json'
-import ruCommon from '@release/translation/locales/ru/common.json'
+import { en as enCommon, ru as ruCommon } from '@release/translation/catalog'
 import { useState } from 'react'
 import Chat, { type ChatMessage, type ChatRole } from '@/blocks/Chat'
 import { CHAT_SELF, makeChat } from '@/mocks/chat'

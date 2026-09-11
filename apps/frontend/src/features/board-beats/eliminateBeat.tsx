@@ -50,6 +50,9 @@ export const CLIP_MS: Record<string, number> = {
   'doc_2026-07-31_23-09-35.mp4': 3267,
   'freshleb-whistlindiesel.mp4': 2034,
   'gato-truco-gato.mp4': 6467,
+  'keaton-falling-house.mp4': 8000,
+  'mic-drop.mp4': 3733,
+  'pie-in-the-face.mp4': 4933,
 }
 
 /**

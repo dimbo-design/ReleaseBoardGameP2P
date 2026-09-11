@@ -195,11 +195,16 @@ it('gives the table back on its own when a playing clip stalls', async () => {
 // different number. So nothing is counted until playback really starts.
 it('does not spend the clip’s own time while it is still loading', async () => {
   const run = await start()
-  await run.tick(run.guard() + 100) // longer than the clip's whole budget…
-  expect(run.isDone()).toBe(false) // …and it has not started, so nothing is spent
+  // Loading for most of the loading window before the clip really begins. Had
+  // any of it been taken from the clip's own budget, the clip would run out
+  // below. Measured against the loading window rather than against the clip,
+  // because which clip comes up depends on how many ship, and the longest of
+  // them no longer fits its whole budget inside that window.
+  await run.tick(ELIM_START_MS - 500)
+  expect(run.isDone()).toBe(false) // it has not started, so nothing is spent
   run.playing()
   await run.tick(run.guard() - 100)
-  expect(run.isDone()).toBe(false) // the clip's own time is only now running out
+  expect(run.isDone()).toBe(false) // the clip's whole budget is still its own
   await run.tick(200)
   await run.finished
   expect(run.isDone()).toBe(true)
