@@ -162,26 +162,38 @@ export default function CherryPick({ selector }: { selector: ReactNode }) {
     return { handUid: null as string | null, deckUid: null as string | null }
   }
 
+  const max = sudo ? 2 : 1
+
+  // A trigger may only ever hold the DECK slot, and that slot exists only when
+  // two cards are taken (base: the only slot is the hand → forbidden). Stated
+  // over the resulting SET rather than per candidate, because a swap has to be
+  // judged the same way an addition is: by what the player is left holding.
+  const legal = (set: string[]) =>
+    set.filter((u) => {
+      const c = discard.find((x) => x.uid === u)?.card
+      return c && isTrigger(c)
+    }).length <= (max === 2 ? 1 : 0)
+
+  // What one click does. A picked card is released; an unpicked one joins while
+  // there is room, and once there is none it takes the OLDEST pick's place
+  // instead of being ignored — ignoring it is what made a mis-click
+  // uncorrectable unless the player guessed that clicking the CHOSEN card
+  // releases it. Returns `p` ITSELF when nothing changes, which is what lets
+  // `canSelect` be "would this click do anything?" rather than a second copy of
+  // these rules that can drift. Mirrors `_useCherryPickStaging.tsx` on the board.
+  function nextPicks(p: string[], uid: string): string[] {
+    if (p.includes(uid)) return p.filter((u) => u !== uid)
+    const grown = p.length < max ? [...p, uid] : [...p.slice(1), uid]
+    return legal(grown) ? grown : p
+  }
+
   function canSelect(d: DiscardCard): boolean {
-    if (picks.includes(d.uid)) return true // always allow deselect
-    const max = sudo ? 2 : 1
-    if (picks.length >= max) return false
-    if (isTrigger(d.card)) {
-      if (!sudo) return false // base: the only slot is the hand → forbidden
-      // one trigger max (the single deck slot); the hand card must be a non-trigger
-      return !picks.some((u) => {
-        const c = discard.find((x) => x.uid === u)?.card
-        return c && isTrigger(c)
-      })
-    }
-    return true
+    return nextPicks(picks, d.uid) !== picks
   }
 
   function pickCard(d: DiscardCard) {
     if (phase !== 'choose') return
-    if (picks.includes(d.uid)) return setPicks((p) => p.filter((u) => u !== d.uid))
-    if (!canSelect(d)) return
-    setPicks((p) => [...p, d.uid])
+    setPicks((p) => nextPicks(p, d.uid))
   }
 
   const roles = rolesOf(picks)
