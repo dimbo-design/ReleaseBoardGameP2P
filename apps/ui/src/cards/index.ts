@@ -6,9 +6,5 @@ export {
   cardById,
 } from './catalogue'
 export { CATEGORIES } from './categories'
-export {
-  CARD_CONTENT,
-  type CardContent,
-  cardContentById,
-  type LocalizedCardContent,
-} from './content'
+export { CARD_CONTENT, cardContentById } from './content'
+export type { CardContent, CardParagraph, LocalizedCardContent } from './types'

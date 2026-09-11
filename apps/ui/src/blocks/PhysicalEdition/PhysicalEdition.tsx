@@ -1,3 +1,4 @@
+import duckArt from '@/assets/cards/parallax/illustration/rubber-ducky.png'
 import styles from './PhysicalEdition.module.css'
 
 // Текст блока приходит пропсом (компонент i18n-agnostic). Дефолт — русский.
@@ -35,7 +36,7 @@ export default function PhysicalEdition({ href, copy, className = '' }: Physical
           </a>
         </p>
       </div>
-      <div className={styles.image} role="img" aria-label={copy.imageAlt} />
+      <img className={styles.image} src={duckArt} alt={copy.imageAlt} />
     </div>
   )
 }

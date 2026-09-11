@@ -9,7 +9,9 @@ canon and lives in the translation catalog (`rulesBlock.text`); `docs/rules/rule
 that same text as md. Everything else in the folder is the **technical spec** of the same rules —
 what happens, in what order, under which card id: `general` (frame of a match), `cards` (every card
 with its id, print run, effect, what cancels it), `resolution` (order of resolution — windows,
-priority, when a win is final), `modes` (the five mode axes), `backlog` (disputed and undecided).
+priority, when a win is final), `modes` (the five mode axes), `backlog` (disputed and undecided),
+`decisions/` (the questions put to the rules owner and his answers, which the spec is built on —
+moving here from `docs/specs/` in parts; the `*-rules-decisions.md` files are still there).
 Do not "improve" the rules text from the spec; a disagreement means the text wins and the finding
 goes to `docs/rules/backlog.md`.
 
@@ -156,6 +158,12 @@ Styling is uniform across all packages: **CSS Modules + design tokens.**
   `react-i18next` directly**.
 - Translation catalogs live under `packages/translation/src/locales/en/common.json` and
   `…/ru/common.json`. A key must exist in **both** — a key missing from one silently falls back.
+- **The rules text is split out into `…/<lang>/rules.json`** (`rules.meta`/`sections`,
+  `rulesBlock.meta`/`text`), because it is licensed separately from the code (CC BY-NC-SA 4.0,
+  see `REUSE.toml`). `src/catalog.ts` folds it back into one catalog per locale, so key paths do
+  not change. New rules text goes into `rules.json`, UI copy into `common.json`. Anything that
+  reads a catalog directly (playground stories, kit fixtures) imports
+  `@release/translation/catalog`, never the JSON — the JSON alone is missing the rules text.
 - **No string literals in `.tsx` files** — all user-visible text must go through `t()` or translation keys.
 - **`@release/ui`** is i18n-agnostic — it does not import or use i18next. All display copy is passed in as props by the consuming app.
 

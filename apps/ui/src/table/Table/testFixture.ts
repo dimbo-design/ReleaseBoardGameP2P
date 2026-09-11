@@ -1,4 +1,4 @@
-import enCommon from '@release/translation/locales/en/common.json'
+import { en as enCommon } from '@release/translation/catalog'
 import { makeTable } from '@/mocks/table'
 import type { TableProps } from './types'
 

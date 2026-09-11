@@ -1,0 +1,113 @@
+# Which licence covers which file.
+#
+# The source code is AGPL-3.0-or-later. The game itself — its art, the text on
+# its cards and its rules — is CC BY-NC-SA 4.0, so the game cannot be used
+# commercially outside the code. The brand is not licensed beyond unmodified
+# copies of this project (see TRADEMARKS.md).
+#
+# Format: REUSE specification 3.3 (https://reuse.software/spec-3.3/). When
+# several tables match one file, only the last of them applies — so the default
+# comes first and the exceptions follow it.
+version = 1
+
+# Everything not claimed by a table below: the source code.
+[[annotations]]
+path = "**"
+SPDX-FileCopyrightText = ["2026 Dmitry Togulev", "2026 Andrey Konnov"]
+SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+# The game: card art, card texts, rules text, and the rules owner's answers the
+# rules spec is built on.
+#
+# TODO: the answers still in docs/specs/ (`*-rules-decisions.md`) move to
+# docs/rules/decisions/, where the folder alone covers them. They wait for #134,
+# which adds one more of them and links to the other.
+[[annotations]]
+path = [
+  "apps/ui/src/assets/cards/**",
+  "apps/ui/src/cards/content.ts",
+  "packages/translation/src/locales/*/rules.json",
+  "docs/rules/**",
+  "docs/specs/*-rules-decisions.md",
+]
+SPDX-FileCopyrightText = ["2026 Dmitry Togulev", "2026 Alexey Shtyrnyaev"]
+SPDX-License-Identifier = "CC-BY-NC-SA-4.0"
+
+# The brand: the logos, the favicons and app icons made from them, and the
+# start-screen photo.
+[[annotations]]
+path = [
+  "apps/ui/src/assets/brand/**",
+  "apps/ui/src/brand/*.svg",
+  "apps/ui/src/assets/favicons/**",
+  "apps/frontend/public/*.png",
+  "apps/ui/src/assets/home/photo.jpg",
+]
+SPDX-FileCopyrightText = "2026 Dmitry Togulev"
+SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
+
+# The Release любой ценой logo: the same terms as the rest of the brand, with
+# two holders.
+[[annotations]]
+path = [
+  "apps/ui/src/assets/brand/release_logo.svg",
+  "apps/ui/src/brand/release_logo.svg",
+  "apps/ui/src/brand/release_logo.en.svg",
+]
+SPDX-FileCopyrightText = ["2026 Dmitry Togulev", "2026 Alexey Shtyrnyaev"]
+SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
+
+# The loader's sounds — the line tick and the logo's sound. Synthesized for this
+# project with Claude Code (Anthropic): generated from code, not recorded.
+[[annotations]]
+path = [
+  "apps/ui/src/assets/audio/tick.wav",
+  "apps/ui/src/assets/audio/logo-theme.wav",
+]
+SPDX-FileCopyrightText = "2026 Dmitry Togulev"
+SPDX-License-Identifier = "LicenseRef-AllRightsReserved"
+
+# Elimination clip: Buster Keaton's falling house, from Steamboat Bill, Jr.
+# (1928), converted from the GIF on Wikimedia Commons —
+# https://commons.wikimedia.org/wiki/File:GIF_of_Buster_Keaton_in_%22Steamboat_Bill_Jr%22_1928.gif
+[[annotations]]
+path = [
+  "apps/frontend/src/features/board-beats/eliminate/keaton-falling-house.mp4",
+  "apps/playground/stories/interactive/eliminate/keaton-falling-house.mp4",
+]
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "LicenseRef-PD-US-expired"
+
+# Elimination clip: a pie in the face, converted from the GIF on Wikimedia
+# Commons by Gregari34432 —
+# https://commons.wikimedia.org/wiki/File:Pie_in_the_face.gif
+[[annotations]]
+path = [
+  "apps/frontend/src/features/board-beats/eliminate/pie-in-the-face.mp4",
+  "apps/playground/stories/interactive/eliminate/pie-in-the-face.mp4",
+]
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Elimination clip: Barack Obama drops the mic at the White House
+# Correspondents' Association Dinner (video: The White House), converted from
+# the GIF on Wikimedia Commons —
+# https://commons.wikimedia.org/wiki/File:Barack_Obama_drops_the_mic.gif
+[[annotations]]
+path = [
+  "apps/frontend/src/features/board-beats/eliminate/mic-drop.mp4",
+  "apps/playground/stories/interactive/eliminate/mic-drop.mp4",
+]
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "LicenseRef-PD-US-government"
+
+# Elimination clip: the "67" meme, performed in a duck costume, by Bitterbutter
+# on Wikimedia Commons — https://commons.wikimedia.org/wiki/File:67_meme_gesture.webm
+# Changed here: scaled to 480px high, sound removed, re-encoded as MP4.
+[[annotations]]
+path = [
+  "apps/frontend/src/features/board-beats/eliminate/duck-six-seven.mp4",
+  "apps/playground/stories/interactive/eliminate/duck-six-seven.mp4",
+]
+SPDX-FileCopyrightText = "2025 Bitterbutter"
+SPDX-License-Identifier = "CC-BY-SA-4.0"

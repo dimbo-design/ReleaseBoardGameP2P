@@ -11,8 +11,8 @@ import {
 // The guard is armed with a number this table supplies, so the table has to be
 // true about the files. Swap a clip for one of a different length and this test
 // fails, instead of the guard silently cutting the new clip short — which
-// matters here specifically: the clips ship with unconfirmed rights and are
-// expected to be replaced (docs/animations/backlog.md).
+// matters here specifically: the set of clips changes (each one's licence and
+// source are in REUSE.toml).
 //
 // The clips reach this test as data URIs (`?inline`), not through `node:fs`:
 // this package keeps a browser-only type surface, the same constraint the
@@ -102,17 +102,18 @@ describe('the elimination clips and the times the guard trusts', () => {
     }
   })
 
-  // The four the reviewer settled on (#126), pinned as values rather than as a
-  // formula — if the formula and the intent ever part company, this says so.
+  // The four that ship, pinned as values rather than as a formula — if the
+  // formula and the intent ever part company, this says so.
   it('comes out at the times the decision named', () => {
     const byName = Object.fromEntries(
       ELIMINATION_CLIPS.map((u) => [nameOf(u), Math.round(idealEndMsFor(u))]),
     )
     expect(byName).toEqual({
-      'freshleb-whistlindiesel.mp4': 6102,
-      'doc_2026-07-31_23-09-35.mp4': 6534,
-      'gato-truco-gato.mp4': 6467,
-      'IHa0T7Ffr43z1kTd.mp4': 9400,
+      'duck-six-seven.mp4': 7398,
+      // Longer than the floor on its own, so it plays exactly once.
+      'keaton-falling-house.mp4': 8000,
+      'mic-drop.mp4': 7466,
+      'pie-in-the-face.mp4': 9866,
     })
   })
 

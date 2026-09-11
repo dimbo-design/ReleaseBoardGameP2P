@@ -1,5 +1,5 @@
 import { type CSSProperties, type ReactNode, useMemo } from 'react'
-import type { CardParagraph } from '../content'
+import type { CardParagraph } from '../types'
 import styles from './CardParallax.module.css'
 import {
   BASE_W,

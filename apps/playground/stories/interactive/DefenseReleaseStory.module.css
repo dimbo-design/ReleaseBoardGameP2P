@@ -69,6 +69,26 @@
   transform: translateX(-50%);
 }
 
+/* the decks — left of centre, vertically centred. Canonical Table values
+   (Table.module.css .decks / .pileRow), copied rather than approximated. */
+.decks {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  transform: translateY(-50%);
+}
+
+/* the draw piles sit side by side: a split can put more than one out, and a
+   column would run off the top and bottom of a vertically-centred block */
+.pileRow {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
 /* discard — right of centre, before the right rail. Only its place lives here;
    the pile itself is the Pile primitive. */
 .discard {

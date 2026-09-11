@@ -31,6 +31,10 @@ function collectVars(sheet: CSSStyleSheet, into: Map<string, string>): void {
     if (rule instanceof CSSImportRule && rule.styleSheet) {
       collectVars(rule.styleSheet, into)
     } else if (rule instanceof CSSStyleRule) {
+      // Only the ROOT declarations are the palette. A colour-valued variable on
+      // a class is a component's own (`--a` on a button, `--ph` on Reconnect) —
+      // it is not a colour of the project and has no place on this page.
+      if (!rule.selectorText.split(',').some((sel) => sel.trim() === ':root')) continue
       const { style } = rule
       for (let i = 0; i < style.length; i++) {
         const prop = style[i]
@@ -99,6 +103,7 @@ const NAMED_HUES = [
   '--coral',
   '--gold',
   '--periwinkle',
+  '--violet',
   '--gray',
   '--charcoal',
 ]
@@ -112,6 +117,7 @@ const DISCRETE_SECTIONS: { title: string; pick: (n: string) => boolean }[] = [
   { title: 'Named hues', pick: (n) => NAMED_HUES.includes(n) },
   { title: 'State accents', pick: (n) => n.endsWith('-accent') },
   { title: 'Highlight fills', pick: (n) => /^--(yellow|amber|orange)-/.test(n) },
+  { title: 'Card graphics', pick: (n) => n.startsWith('--card-') },
 ]
 
 // ---- alpha ramps (one base colour at many opacities) ------------------------
@@ -253,11 +259,21 @@ export default function TokenPreview() {
 
   const gradients = tokens.filter((t) => t.isGradient)
 
+  // Whatever no group claimed. The page used to drop such a token silently — it
+  // was counted in the header and drawn nowhere — so a new colour was invisible
+  // until somebody noticed the number did not add up. This is what makes the
+  // page show the palette whole: a token nobody classified still appears, and
+  // its being here is the signal that it wants a group of its own.
+  const grouped = new Set([
+    ...discrete.flatMap((g) => g.items.map((t) => t.name)),
+    ...ramps.flatMap((r) => r.steps.map((t) => t.name)),
+    ...gradients.map((t) => t.name),
+  ])
+  const ungrouped = tokens.filter((t) => !grouped.has(t.name))
+
   return (
     <section className={styles.root}>
-      <h2 className={styles.h}>
-        colors <span className={styles.note}>{`// ${tokens.length}`}</span>
-      </h2>
+      <h2 className={styles.h}>colors</h2>
       <p className={styles.intro}>click any value to copy · click a ramp step for its token</p>
       {/* Foundations pages carry no technical bar — this belongs to the document,
           not to a control line the group does not have. */}
@@ -291,6 +307,23 @@ export default function TokenPreview() {
           {ramps.map((r) => (
             <Ramp key={r.base} def={r} steps={r.steps} bg={bg} />
           ))}
+        </div>
+      )}
+
+      {/* anything no group claimed — see the note where `ungrouped` is built */}
+      {ungrouped.length > 0 && (
+        <div className={styles.section}>
+          <div className={styles.sectionH}>Ungrouped</div>
+          <div className={styles.swatchGrid}>
+            {ungrouped.map((t) => (
+              <div key={t.name} className={styles.swatch}>
+                <div className={styles.chip} data-bg={bg}>
+                  <div className={styles.fill} style={{ background: `var(${t.name})` }} />
+                </div>
+                <Fields t={t} />
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -90,6 +90,11 @@ const ELIM_VIDEOS = Object.values(
 // alarm is shown neutralized, held, and goes.
 const COVER_DX = 16 // the cover sits a touch off the alarm — or it just hides it
 const COVER_DY = -12
+// …and it lies at a tilt, like every other card put down on the table: an answer
+// laid perfectly straight over the alarm reads as one tidy stack instead of two
+// separate plays. The offset is already in `coverRect()`, so the pose carries
+// only the rotation — the same one Defense Release rests its cover at.
+const COVER_POSE = { rot: 6, dx: 0, dy: 0 }
 const COVER_HOLD = 1200 // the answer and the alarm stand open, читаемые всеми
 const GIF_DELAY = 400 // a beat after the table empties, before the video comes in
 const GATHER_HOLD = 1500 // the swept cards are held open at the centre before they scatter
@@ -187,6 +192,7 @@ export default function Error503Story() {
   gifPickRef.current = gifPick
   const eliminating = useRef(false) // one elimination at a time
   const gifStart = useRef(0)
+  const gifPasses = useRef(0)
   const gifResolve = useRef<(() => void) | null>(null)
 
   // Hand owns its hover internally; after a card leaves the hand the pointer is
@@ -220,15 +226,26 @@ export default function Error503Story() {
       : ELIM_VIDEOS[Math.floor(Math.random() * ELIM_VIDEOS.length)]
     await wait(GIF_DELAY)
     gifStart.current = performance.now()
+    gifPasses.current = 0
     setGif(src)
     return new Promise((res) => {
       gifResolve.current = res
     })
   }
-  // one loop finished: replay until the minimum time is reached, then fade out
+  // one pass finished: replay until the minimum time is reached, then fade out.
+  // Counted in passes of the clip's own length rather than on the clock — every
+  // seam makes real playback run a little long, and a clip whose passes land
+  // just under the floor would otherwise play a pass fewer some of the time.
+  // The board beat counts the same way (eliminateBeat.tsx).
   function onGifEnded(e: React.SyntheticEvent<HTMLVideoElement>) {
     const v = e.currentTarget
-    if (performance.now() - gifStart.current < ELIM_MIN_MS) {
+    gifPasses.current += 1
+    const one = v.duration * 1000
+    const short =
+      Number.isFinite(one) && one > 0
+        ? gifPasses.current * one < ELIM_MIN_MS
+        : performance.now() - gifStart.current < ELIM_MIN_MS
+    if (short) {
       v.currentTime = 0
       void v.play()
       return
@@ -419,7 +436,9 @@ export default function Error503Story() {
     const rect503 = centerRef.current?.getBoundingClientRect()
     const leaving: Leaving[] = []
     if (rect503) leaving.push({ key: 'e503', card: ERROR503_CARD, from: rect503, layer: 0 })
-    leaving.push({ key: 'def', card: answer, aux, el, from, layer: 1 })
+    // the answer leaves from the pose it was standing in, so the step unwinds the
+    // tilt during the flight instead of straightening the card on hand-off
+    leaving.push({ key: 'def', card: answer, aux, el, from, pose: COVER_POSE, layer: 1 })
     return sendToDiscard(leaving)
   }
 
@@ -434,9 +453,12 @@ export default function Error503Story() {
     if (to) {
       const [el] = await raise([{ key: 'cover', card, at: fromRect }])
       if (el) {
-        const anim = play('playToCenter', el, { from: fromRect, to })
+        const anim = play('playToCenter', el, { from: fromRect, to, rotate: COVER_POSE.rot })
         if (anim) await anim.finished
-        pin('cover', to) // I4 — it covers the alarm and stands there
+        // I4 is declined here on purpose: the landing tilt lives in the filled
+        // animation, and pinning cancels it — the card would straighten for the
+        // whole time it stands over the alarm. It is dropped after the exit
+        // instead, which is the documented way out (see useFlyer).
       }
       await wait(COVER_HOLD)
       setCenterCard(null)
@@ -525,10 +547,12 @@ export default function Error503Story() {
       // the dragged card finishes its own journey: it settles over the alarm at the
       // cover spot and at the normal width (a quick drag can end mid-resize)
       el.style.transition =
-        'left 240ms var(--ease-out), top 240ms var(--ease-out), width 240ms var(--ease-out)'
+        'left 240ms var(--ease-out), top 240ms var(--ease-out), width 240ms var(--ease-out), transform 240ms var(--ease-out)'
       el.style.left = `${to.left}px`
       el.style.top = `${to.top}px`
       el.style.width = `${CARD_W}px`
+      // the tilt arrives WITH the card rather than a frame after it stops (I7)
+      el.style.transform = restTransform(COVER_POSE)
       await wait(300)
       await wait(COVER_HOLD) // …and both stand open, exactly as long as any answer
     }
@@ -537,15 +561,15 @@ export default function Error503Story() {
     // back to a card box (I6) and unwinds the tilt DURING the flight. Feeding it
     // two straightened rects instead is what made the Code Review shift — the
     // trimmed box was right, but the card still snapped upright on hand-off.
-    const mainRect = d.aux
-      ? ((el?.querySelector('[data-main]') as HTMLElement | null)?.getBoundingClientRect() ??
-        el?.getBoundingClientRect())
-      : el?.getBoundingClientRect()
-
+    //
+    // What it is handed as `from` is the COVER BOX, not the element's rect: the
+    // card now rests at a tilt, so its bounding rect is the box around the tilt
+    // and would start the flight one size too big. The tilt itself travels as
+    // `pose`, which is what the step wants — a card box plus the pose it stands in.
     setAlert(false)
     // the pair is still ON SCREEN while the step measures it (Combo's rule) — only
     // then is the drag taken down, in the same turn React commits
-    const gone = mainRect ? discardExchange(d.main, mainRect, d.aux, el) : Promise.resolve()
+    const gone = to ? discardExchange(d.main, to, d.aux, el) : Promise.resolve()
 
     // debugger leaves the hand → the fan closes the gap (like Deck animations);
     // tell the fan the mouse left so it doesn't leave a card lit up

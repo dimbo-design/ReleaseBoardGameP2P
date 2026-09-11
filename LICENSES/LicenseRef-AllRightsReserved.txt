@@ -1,0 +1,11 @@
+All rights reserved by the copyright holders named for each file in REUSE.toml.
+
+The files this identifier is applied to in REUSE.toml are not covered by the
+AGPL-3.0-or-later that applies to the source code, nor by the CC BY-NC-SA 4.0
+that applies to the game content.
+
+They may be redistributed only as part of an unmodified copy of this project.
+A modified version must remove or replace them. No other use is permitted.
+
+How the project's name and logos may be referred to is described in
+TRADEMARKS.md.

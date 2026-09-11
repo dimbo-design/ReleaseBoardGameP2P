@@ -44,12 +44,18 @@
   text-decoration: underline;
 }
 
-/* плейсхолдер под PNG коробки — квадрат, поднят над верхней гранью плашки */
+/* the card's rubber duck, in the square that used to be the placeholder.
+   It grows from its own centre (1.625x) rather than from a bigger box: the 128px
+   box is what the plate lays out around — the gap to the text and the -94px
+   lift are measured against it — so scaling the box instead would push the
+   text and make the plate taller. The transform leaves the layout untouched
+   and moves only the pixels, so the duck stays centred exactly where the
+   square was and overflows the plate on every side. */
 .image {
   flex: none;
   inline-size: 128px;
   block-size: 128px;
   margin-block-start: -94px;
-  background: var(--white-06);
-  border: 1px dashed var(--white-22);
+  object-fit: contain;
+  transform: scale(1.625);
 }

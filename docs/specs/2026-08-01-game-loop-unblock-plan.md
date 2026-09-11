@@ -643,6 +643,6 @@ If every step passed, note it on the PR description with the two-peer detail —
 
 ## Not in this plan
 
-The rest of the audit: the invisible Code Review protection, silent rejected actions, the unbound `?panel=` drawer, the sudo attack that cannot enter a reaction window, session lifecycle ([#58](https://github.com/MythHand/ReleaseBoardGameP2P/issues/58)), animations ([#23](https://github.com/MythHand/ReleaseBoardGameP2P/issues/23)), and [#61](https://github.com/MythHand/ReleaseBoardGameP2P/issues/61)'s card effects, which are blocked on the rules questions in [`2026-08-01-git-operations-open-questions.md`](./2026-08-01-git-operations-open-questions.md).
+The rest of the audit: the invisible Code Review protection, silent rejected actions, the unbound `?panel=` drawer, the sudo attack that cannot enter a reaction window, session lifecycle ([#58](https://github.com/MythHand/ReleaseBoardGameP2P/issues/58)), animations ([#23](https://github.com/MythHand/ReleaseBoardGameP2P/issues/23)), and [#61](https://github.com/MythHand/ReleaseBoardGameP2P/issues/61)'s card effects, which are blocked on the rules questions in [`2026-08-01-git-operations-open-questions.md`](../rules/decisions/2026-08-01-git-operations-open-questions.md).
 
 Task 12 of [`2026-07-31-table-interaction-plan.md`](./2026-07-31-table-interaction-plan.md) — the solo-playable `TableStory` — stays open. Task 4 above is the two-peer version of the same gate.

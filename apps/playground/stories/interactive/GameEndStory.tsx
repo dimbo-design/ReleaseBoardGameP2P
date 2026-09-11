@@ -362,10 +362,13 @@ export default function GameEndStory() {
         {flyerOverlay}
 
         {/* the game-over window — it covers the table area, which is the screen
-          being shown; the playground's technical line is outside it */}
+          being shown; the playground's technical line is outside it.
+          The winner is named, not addressed: «ты» / «you» made the window speak
+          about whoever is looking instead of saying who won — the same slip the
+          Stats screen already dropped in favour of nicknames. */}
         {over && (
           <GameOver
-            winner={{ name: pick(lang, { ru: 'ты', en: 'you' }) }}
+            winner={{ name: 'Dimbo' }}
             condition="release"
             copy={copy.gameOver}
             onContinue={restart}

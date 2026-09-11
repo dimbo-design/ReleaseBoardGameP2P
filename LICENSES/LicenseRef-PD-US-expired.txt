@@ -1,0 +1,6 @@
+Public domain in the United States.
+
+The files this identifier is applied to in REUSE.toml are in the public domain in
+the United States because they were published before January 1, 1931, and their
+copyright has expired. No claim is made about their status outside the United
+States. The source of each file is noted beside it in REUSE.toml.

@@ -1,5 +1,4 @@
-import enCommon from '@release/translation/locales/en/common.json'
-import ruCommon from '@release/translation/locales/ru/common.json'
+import { en as enCommon, ru as ruCommon } from '@release/translation/catalog'
 import { useEffect, useMemo, useState } from 'react'
 import { makeTable } from '@/mocks/table'
 import Table from '@/table/Table'

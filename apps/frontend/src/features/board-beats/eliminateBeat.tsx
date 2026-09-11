@@ -40,23 +40,22 @@ export const ELIM_MIN_MS = 5000
  *
  * `eliminateClips.test.ts` reads the real duration out of each file's own
  * `moov/mvhd` box and fails if this table disagrees, or if a clip ships with no
- * entry. That check is the point rather than a formality: these clips ship with
- * unconfirmed rights and are expected to be replaced
- * (docs/animations/backlog.md), and a swap must fail loudly here instead of
- * quietly mis-timing the beat.
+ * entry. That check is the point rather than a formality: the set of clips
+ * changes (each one's licence and source are in REUSE.toml), and a swap must
+ * fail loudly here instead of quietly mis-timing the beat.
  */
 export const CLIP_MS: Record<string, number> = {
-  'IHa0T7Ffr43z1kTd.mp4': 4700,
-  'doc_2026-07-31_23-09-35.mp4': 3267,
-  'freshleb-whistlindiesel.mp4': 2034,
-  'gato-truco-gato.mp4': 6467,
+  'duck-six-seven.mp4': 2466,
+  'keaton-falling-house.mp4': 8000,
+  'mic-drop.mp4': 3733,
+  'pie-in-the-face.mp4': 4933,
 }
 
 /**
  * How long a healthy clip is on screen IN THE IDEAL: the first whole loop at or
  * past the floor, since the beat loops until `ELIM_MIN_MS` and then lets the
- * pass it is in finish. This is the number the review settled on — 6.10 / 6.53 /
- * 6.47 / 9.40s for the four clips here — and it is what the beat aims at.
+ * pass it is in finish — 7.40 / 8.00 / 7.47 / 9.87s for the four clips here —
+ * and it is what the beat aims at.
  *
  * It is NOT what the guard is armed with; see `guardMsFor` below.
  *
@@ -83,11 +82,11 @@ export function idealEndMsFor(src: string): number {
  * either.
  *
  * Per loop rather than one flat allowance, because what differs between clips is
- * the number of seams, not a fixed overhead: the 2.034s clip runs three passes
- * and crosses two seams, the 6.467s clip runs one and crosses none. A single
- * number would have to be sized for the worst case and would then be far too
- * generous for the clip needing it least — and these clips are expected to be
- * replaced, so the shape has to survive a shorter one arriving.
+ * the number of seams, not a fixed overhead: the 2.466s clip runs three passes
+ * and crosses two seams, the 8s clip runs one and crosses none. A single number
+ * would have to be sized for the worst case and would then be far too generous
+ * for the clip needing it least — and the set of clips changes, so the shape has
+ * to survive a shorter one arriving.
  */
 export const ELIM_GUARD_SLACK_MS = 250
 
@@ -167,6 +166,7 @@ export function useEliminationPreload(enabled: boolean): void {
 export function useEliminateBeat() {
   const [clip, setClip] = useState<string | null>(null)
   const started = useRef(0)
+  const played = useRef(0)
   const resolve = useRef<(() => void) | null>(null)
   // Whichever guard is currently armed: the loading one until playback starts,
   // the clip's own from then on. One ref, because only ever one is running.
@@ -193,6 +193,7 @@ export function useEliminateBeat() {
       // NOT started here — the clock starts when the clip really plays
       // (`onPlaying`). Until then only the loading guard is running.
       started.current = 0
+      played.current = 0
       setClip(src)
       return new Promise<void>((res) => {
         resolve.current = res
@@ -202,10 +203,9 @@ export function useEliminateBeat() {
     [finish],
   )
 
-  // Playback really began. This is where both clocks start: the floor the loop
-  // is measured against, and the clip's own guard — so a slow load spends
-  // neither. Only the first one counts; a stall that resumes fires `playing`
-  // again and must not hand the clip a fresh budget.
+  // Playback really began. This is where the clip's own guard starts, so a slow
+  // load does not spend it. Only the first one counts; a stall that resumes
+  // fires `playing` again and must not hand the clip a fresh budget.
   const onPlaying = useCallback(
     (e: React.SyntheticEvent<HTMLVideoElement>) => {
       if (started.current !== 0) return
@@ -216,11 +216,22 @@ export function useEliminateBeat() {
     [finish],
   )
 
-  // one loop finished: play it again until the floor is reached, then leave
+  // One pass finished: play it again until the floor is reached, then leave.
+  // Counted in passes of the clip's own length, not on the clock: every seam
+  // (`ended`, the rewind, `play()`, a frame) makes real playback run a little
+  // long, and a clip whose passes land just under the floor would then play a
+  // pass fewer on one screen than on another. Counted, it plays exactly
+  // `idealEndMsFor` everywhere. A clip the table does not know falls back to
+  // the clock.
   const onEnded = useCallback(
     (e: React.SyntheticEvent<HTMLVideoElement>) => {
-      if (performance.now() - started.current < ELIM_MIN_MS) {
-        const v = e.currentTarget
+      const v = e.currentTarget
+      played.current += 1
+      const own = CLIP_MS[(v.getAttribute('src') ?? '').split('/').pop() ?? '']
+      const short = own
+        ? played.current * own < ELIM_MIN_MS
+        : performance.now() - started.current < ELIM_MIN_MS
+      if (short) {
         v.currentTime = 0
         void v.play()
         return

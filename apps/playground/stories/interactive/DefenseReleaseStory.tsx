@@ -26,6 +26,7 @@ import type { HandItem, HandPlayDrop } from '@/table/Hand/Hand'
 import ReleaseZone from '@/table/ReleaseZone'
 import type { ReleaseSlots } from '@/table/ReleaseZone/ReleaseZone'
 import Seat from '@/table/Seat'
+import { PILE_WIDTH } from '@/table/Table/piles'
 import AskLine from '@/table/TableCentre/AskLine'
 import { centrePlaceStyle } from '@/table/TableCentre/centre'
 import TurnDock from '@/table/TurnDock/TurnDock'
@@ -928,6 +929,30 @@ export default function DefenseReleaseStory() {
             en: 'a release costs one card — pull any of them out of the hand',
           })}
         </AskLine>
+
+        {/* the decks — left of centre, the Table screen's own column: the draw
+            pile in its row, the AI events deck under it. Nothing is drawn from
+            them in this scene; they are here because the table the scene shows
+            is the table with its decks on it. Counts are the mock table's own
+            (`@/mocks/table`), so the scene reads like the screen. */}
+        <div className={styles.decks}>
+          <div className={styles.pileRow}>
+            <Pile
+              label={pick(lang, { ru: 'колода', en: 'deck' })}
+              deck="base"
+              count={78}
+              width={PILE_WIDTH}
+              countPos="tl"
+            />
+          </div>
+          <Pile
+            label={pick(lang, { ru: 'события', en: 'events' })}
+            deck="ai"
+            count={21}
+            width={150}
+            countPos="tl"
+          />
+        </div>
 
         {/* discard — right of centre; cards lie scattered (a tossed heap) */}
         <div className={styles.discard}>

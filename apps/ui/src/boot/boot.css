@@ -30,37 +30,100 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
   align-items: center;
-  inline-size: max-content;
-  block-size: max-content;
-  padding: 14px 22px;
-  margin: auto;
-  font-family: inherit;
-  font-size: 18px;
+  justify-content: center;
   color: #fff;
   text-transform: uppercase;
   letter-spacing: 0.18em;
+}
+
+/* the question reads first: larger than the answers. `pre` keeps a typed
+   space from collapsing, so the cursor never jumps back over it */
+.boot .start-gate .start-question {
+  min-block-size: 1.2em;
+  font-size: 28px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: pre;
+}
+
+.boot .start-gate .start-green {
+  color: var(--cat-release);
+}
+
+/* the logo's cursor: its green, its 1.2s blink — solid while it types */
+.boot .start-gate .start-cursor {
+  display: inline-block;
+  inline-size: 0.55em;
+  block-size: 0.9em;
+  margin-inline-start: 0.1em;
+  vertical-align: -0.08em;
+  background: var(--cat-release);
+  animation: boot-blink 1.2s steps(1, end) infinite;
+}
+
+.boot .start-gate .start-cursor[data-typing] {
+  animation: none;
+}
+
+/* the answers grow out from under the question: the block gets taller around
+   its own centre, so the question rises as they arrive */
+.boot .start-gate .start-answers {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition:
+    grid-template-rows 420ms ease-out,
+    opacity 420ms ease-out,
+    transform 420ms ease-out;
+}
+
+.boot .start-gate .start-answers[data-shown] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: none;
+}
+
+/* apart, but close enough to read as one pair — narrower than the question */
+.boot .start-gate .start-answers-row {
+  display: flex;
+  gap: 48px;
+  justify-content: center;
+  min-block-size: 0;
+  padding-block-start: 32px;
+  overflow: hidden;
+}
+
+.boot .start-gate .start-answer {
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 18px;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
   cursor: pointer;
   background: transparent;
   border: 0;
 }
 
-.boot .start-gate .bracket-l,
-.boot .start-gate .bracket-r {
+.boot .start-answer .bracket-l,
+.boot .start-answer .bracket-r {
   opacity: 0.5;
 }
 
-.boot .start-gate .start-hint {
-  margin-block-start: 8px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.25em;
-  opacity: 0.4;
+.boot .start-gate .start-struck {
+  text-decoration: line-through;
 }
 
-.boot .start-gate:hover {
+.boot .start-gate .start-answer:not([data-crossed]):hover {
   opacity: 0.8;
+}
+
+/* NO, once it has been said three times: struck out and gone dim */
+.boot .start-gate .start-answer[data-crossed] {
+  cursor: default;
+  opacity: 0.35;
 }
 
 /* ---------- Terminal ---------- */

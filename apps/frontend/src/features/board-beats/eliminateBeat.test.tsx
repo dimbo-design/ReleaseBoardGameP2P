@@ -4,6 +4,7 @@ import type { BeatRun, BoardState } from '~/entities/game/board'
 import {
   CLIP_MS,
   ELIM_DELAY,
+  ELIM_GUARD_SLACK_MS,
   ELIM_MIN_MS,
   ELIM_START_MS,
   ELIMINATION_CLIPS,
@@ -149,16 +150,56 @@ it('loops a clip that ends before the floor', async () => {
   await run.settle()
 })
 
-it('leaves once a loop finishes past the floor', async () => {
+it('leaves once the passes it has played reach the floor', async () => {
   const run = await start()
   run.playing()
-  await run.tick(ELIM_MIN_MS + 100)
+  const one = CLIP_MS[(run.video()?.getAttribute('src') ?? '').split('/').pop() as string]
+  const passes = Math.ceil(ELIM_MIN_MS / one)
+  for (let pass = 1; pass <= passes; pass++) {
+    expect(run.isDone()).toBe(false)
+    await run.tick(one)
+    act(() => {
+      fireEvent.ended(run.video() as HTMLVideoElement)
+    })
+  }
+  await run.finished
+  expect(run.isDone()).toBe(true)
+  expect(run.video()).toBeNull()
+  vi.useRealTimers()
+})
+
+// The floor is counted in passes of the clip's own length, not on the clock.
+// Real playback runs a little long at every seam, and a clip whose passes land
+// just under the floor would otherwise play a pass fewer whenever the seams
+// added up past it — a different number of times on different screens. Driven
+// on the clip closest to the floor, with seams just big enough to carry the
+// clock past it a pass early.
+it('counts passes rather than the clock, so a clip plays the same number of times everywhere', async () => {
+  const closest = ELIMINATION_CLIPS.map((url, i) => {
+    const d = CLIP_MS[url.split('/').pop() as string]
+    const n = Math.ceil(ELIM_MIN_MS / d)
+    // the seam per pass that puts the clock past the floor one pass early
+    const seam = n > 1 ? Math.ceil((ELIM_MIN_MS - (n - 1) * d) / (n - 1)) + 1 : Infinity
+    return { i, d, n, seam }
+  }).reduce((a, b) => (b.seam < a.seam ? b : a))
+  expect(closest.seam).toBeLessThan(ELIM_GUARD_SLACK_MS) // else the guard, not the count, decides
+
+  const run = await start(closest.i)
+  run.playing()
+  for (let pass = 1; pass < closest.n; pass++) {
+    await run.tick(closest.d + closest.seam)
+    act(() => {
+      fireEvent.ended(run.video() as HTMLVideoElement)
+    })
+    // the clock is past the floor on the last of these, and it replays anyway
+    expect(run.isDone()).toBe(false)
+  }
+  await run.tick(closest.d + closest.seam)
   act(() => {
     fireEvent.ended(run.video() as HTMLVideoElement)
   })
   await run.finished
   expect(run.isDone()).toBe(true)
-  expect(run.video()).toBeNull()
   vi.useRealTimers()
 })
 
@@ -195,11 +236,16 @@ it('gives the table back on its own when a playing clip stalls', async () => {
 // different number. So nothing is counted until playback really starts.
 it('does not spend the clip’s own time while it is still loading', async () => {
   const run = await start()
-  await run.tick(run.guard() + 100) // longer than the clip's whole budget…
-  expect(run.isDone()).toBe(false) // …and it has not started, so nothing is spent
+  // Loading for most of the loading window before the clip really begins. Had
+  // any of it been taken from the clip's own budget, the clip would run out
+  // below. Measured against the loading window rather than against the clip,
+  // because which clip comes up depends on how many ship, and the longest of
+  // them no longer fits its whole budget inside that window.
+  await run.tick(ELIM_START_MS - 500)
+  expect(run.isDone()).toBe(false) // it has not started, so nothing is spent
   run.playing()
   await run.tick(run.guard() - 100)
-  expect(run.isDone()).toBe(false) // the clip's own time is only now running out
+  expect(run.isDone()).toBe(false) // the clip's whole budget is still its own
   await run.tick(200)
   await run.finished
   expect(run.isDone()).toBe(true)

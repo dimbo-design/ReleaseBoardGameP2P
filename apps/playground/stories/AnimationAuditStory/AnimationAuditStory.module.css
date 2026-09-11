@@ -41,7 +41,7 @@
 
 /* таблица */
 .section {
-  margin-block-end: 40px;
+  margin-block-end: 90px;
 }
 
 .sectionTitle {
@@ -56,9 +56,13 @@
   color: var(--white-45);
 }
 
+/* The columns are set, not negotiated: with auto layout every table worked out
+   its own widths from its own text, so the same column was one width here and
+   another one section below. `fixed` makes the widths below the whole rule. */
 .table {
   inline-size: 100%;
   font-size: 12.5px;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 
@@ -79,15 +83,34 @@
   border-block-end: 1px solid var(--white-07);
 }
 
+/* column 1 — the name; column 2 — the prose. Both sit in the same place in all
+   three tables, so they are addressed by position and come out identical across
+   them instead of each table inventing its own. */
+.table th:nth-child(1),
+.table td:nth-child(1) {
+  inline-size: 240px;
+}
+
+.table th:nth-child(2),
+.table td:nth-child(2) {
+  inline-size: 38vw;
+}
+
 .table tr:hover td {
   background: var(--white-03);
 }
 
+/* The column has a width now, so a long line wraps inside it instead of pushing
+   the table wider than the page — which is what `nowrap` did in the findings
+   table, where this cell holds a sentence rather than a name. `anywhere` and
+   not `break-word`, because what lies here is code: `scatterAt() /
+   restTransform()` has no space to break at, and without it the name simply
+   runs out of its cell. */
 .mod {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--fg);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* имя модуля + микро-кнопка копирования */
@@ -127,17 +150,28 @@
   opacity: 1;
 }
 
+/* Prose breaks at spaces; the code names inside it (`playToCenter`, file paths)
+   break wherever they must rather than running past the cell. */
 .what {
-  max-inline-size: 420px;
   line-height: 1.5;
   color: var(--white-80);
+  overflow-wrap: anywhere;
 }
 
+/* Paths have no spaces at all, so this column breaks anywhere or not at all. */
 .where {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.6;
   color: var(--white-55);
+  overflow-wrap: anywhere;
+}
+
+/* The status column holds one tag and nothing else, so its width is the widest
+   tag there can be — «есть готовое», the longest of the four labels — rather
+   than whatever the rows in front of it happen to leave over. */
+.status {
+  inline-size: 130px;
 }
 
 /* бейдж статуса */

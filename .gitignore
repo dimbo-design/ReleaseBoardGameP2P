@@ -3,6 +3,9 @@
 # We only copy OUT of it into the project — it must never reach GitHub.
 user_input/
 
+# --- Articles: local drafts, never committed ---
+articles/
+
 # --- OS / editor cruft ---
 .DS_Store
 Thumbs.db

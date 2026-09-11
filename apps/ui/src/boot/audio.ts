@@ -1,7 +1,7 @@
-import themeWavUrl from '../assets/audio/theme.wav'
+import themeWavUrl from '../assets/audio/logo-theme.wav'
 // Loader audio (порт из user_input/Loader): tickThink() — клик строки;
 // playTheme() — тема лого-фазы (~3с). Семплы в assets/audio/.
-import toneUrl from '../assets/audio/tone2a.wav'
+import toneUrl from '../assets/audio/tick.wav'
 
 // webkitAudioContext is non-standard; declare it to satisfy strict TS
 declare global {
