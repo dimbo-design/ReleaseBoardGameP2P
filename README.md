@@ -1,6 +1,6 @@
 # Release любой ценой
 
-A peer-to-peer web version of the **Release любой ценой** board card game — a strategic
+A peer-to-peer web version of the **Release любой ценой™** board card game — a strategic
 card game about the real grind of software development (bugs, surprise events, rivals'
 attacks; release first to win).
 
@@ -118,10 +118,10 @@ Copyright (C) 2026 Dmitry Togulev ([@dimbo-design](https://github.com/dimbo-desi
 per the AGPL, keep your version's source open (this closes the "fork, change a couple of
 lines, ship it closed/hosted for profit" loophole).
 
-**The game.** The art, the card texts and the rules may be shared and adapted for
-non-commercial use, with attribution and under the same licence. Commercial use — printing
-and selling the cards, or putting the art or the texts into a paid product — is not covered
-by this licence.
+**The game** is by Dmitry Togulev and Алексей Штырняев. The art, the card texts and the rules
+may be shared and adapted for non-commercial use, with attribution and under the same licence.
+Commercial use — printing and selling the cards, or putting the art or the texts into a paid
+product — is not covered by this licence.
 
 **The brand.** The logos of Release любой ценой and MythHand, and the icons made from them,
 may be kept only in an unmodified copy of this project; a modified version replaces them. How

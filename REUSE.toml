@@ -30,7 +30,7 @@ path = [
   "docs/rules/**",
   "docs/specs/*-rules-decisions.md",
 ]
-SPDX-FileCopyrightText = "2026 Dmitry Togulev"
+SPDX-FileCopyrightText = ["2026 Dmitry Togulev", "2026 Алексей Штырняев"]
 SPDX-License-Identifier = "CC-BY-NC-SA-4.0"
 
 # The brand: the logos, the favicons and app icons made from them, and the
