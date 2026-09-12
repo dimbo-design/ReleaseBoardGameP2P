@@ -52,6 +52,7 @@ import { useUpgradeBeat } from './upgradeBeat'
 // gets remembered nine times out of ten.
 
 interface Beat {
+  target?: BoardState
   key: string
   /**
    * The projection this beat animates AWAY from — the board while it runs.
@@ -278,7 +279,7 @@ export function useBeats(args: {
           // — yet the table still has to see that a 503 landed. The plan
           // carries the fact; this is the same field, and the same reason, the
           // defenceless sweep lights its own glow with.
-          alarm: plan.draws.some((d) => d.reveal?.neutralized === true),
+          alarm: false,
           run: (ctx) => draws.run(plan, ctx),
         }
       }
@@ -427,7 +428,7 @@ export function useBeats(args: {
             const local = discardPick?.current
             if (discardPick && plan.mine && local?.card === plan.card) {
               discardPick.current = null
-              return local.run()
+              return local.run(ctx.after ?? ctx.base)
             }
             return ais.runTaken(plan, ctx)
           },
@@ -507,7 +508,7 @@ export function useBeats(args: {
         // the finally below regardless, so a failure costs the animation and
         // never the state.
         try {
-          await next.run({ base: next.base, publish })
+          await next.run({ base: next.base, after: next.target ?? latest.current.live, publish })
         } catch (err) {
           if (import.meta.env.DEV) console.error('[beats] %s failed', next.key, err)
         }
@@ -672,6 +673,7 @@ export function useBeats(args: {
       if (!beat) continue
       beat.after = previous
       previous = beat
+      beat.target = live
       queue.current.push(beat)
     }
     void drain()
@@ -732,11 +734,13 @@ export function useBeats(args: {
     // out of the discard (#106) — and never more than one of them is open at
     // once, because one beat runs at a time. So this is a choice between
     // them, not a merge of them.
-    gapAt: draws.gapAt ?? transfers.gapAt ?? ais.gapAt,
+    gapAt: draws.gapAt ?? transfers.gapAt ?? ais.gapAt ?? upgrades.gapAt,
     gapSize:
       draws.gapAt == null
         ? transfers.gapAt == null
-          ? ais.gapSize
+          ? ais.gapAt == null
+            ? upgrades.gapSize
+            : ais.gapSize
           : transfers.gapSize
         : draws.gapSize,
   }

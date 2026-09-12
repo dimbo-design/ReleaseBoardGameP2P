@@ -14,6 +14,7 @@ import type { RefObject } from 'react'
 import { useCallback, useRef } from 'react'
 import type { BeatRun, BoardAnchors, StagedHandoff } from '~/entities/game/board'
 import { ATTACK_POSE, COVER_POSE, SHOW_HOLD } from '~/entities/game/board'
+import { aiCauseExit, withoutAiCause } from './aiCauseExit'
 import type { BeatPlan } from './planBeats'
 
 // The answer to an attack (#101): a defence covers what is standing at the
@@ -187,6 +188,9 @@ export function useDefenseBeat(anchors: BoardAnchors, staging?: RefObject<Staged
           })?.finished
         }
       }
+      // The local gesture owns its incoming flight. The reading interval
+      // starts when that flight lands, just as it does for the remote cover.
+      if (mine && handoff) await handoff.whenLanded?.()
       await wait(SHOW_HOLD)
 
       // the actor's own answer was already standing where the cover goes —
@@ -357,6 +361,7 @@ export function useDefenseBeat(anchors: BoardAnchors, staging?: RefObject<Staged
           })?.finished
         }
       }
+      if (mine && handoff) await handoff.whenLanded?.()
       await wait(SHOW_HOLD)
 
       // released HERE, immediately ahead of the exit rather than before the
@@ -451,13 +456,22 @@ export function useDefenseBeat(anchors: BoardAnchors, staging?: RefObject<Staged
       // nothing hands its own base on untouched, so the draw that a resumed
       // sequence puts in the same batch used to animate against a board that
       // still had the alarm standing on it (#103 testing, problem 1).
-      ctx.publish({ ...ctx.base, pending: null })
-      await Promise.all([items.length > 0 ? latest.current.send(items) : undefined, sacrificedHome])
+      const cause = aiCauseExit(plan.causeward, a)
+      const decks = ctx.base.decks
+      ctx.base = withoutAiCause(ctx.base, cause.length > 0 ? plan.causeward : undefined)
+      ctx.publish(ctx.base)
+      await Promise.all([
+        items.length + cause.length > 0
+          ? latest.current.send([...items, ...cause]).then(() => {
+              if (cause.length === 0) return
+              ctx.base = { ...ctx.base, decks }
+              ctx.publish(ctx.base)
+            })
+          : undefined,
+        sacrificedHome,
+        plan.homeward ? sendHomeward(plan.homeward) : undefined,
+      ])
       flyer.drop('cover')
-
-      // The AI card that raised this prompt goes home now that the batch has
-      // answered it — its own road, not this exchange's (#106).
-      if (plan.homeward) await sendHomeward(plan.homeward)
     },
     [flyer.raise, flyer.patch, flyer.drop, sendHomeward],
   )

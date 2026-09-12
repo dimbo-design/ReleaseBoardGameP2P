@@ -17,9 +17,9 @@ const played = vi.hoisted(() => ({
   // every preset name `play()` was called with, in order — the road home's
   // own test tells `returnToDeck` apart from the grid's `playToCenter` legs.
   names: [] as string[],
-  calls: [] as { name: string; params: Record<string, unknown> }[],
+  calls: [] as { name: string; params: Record<string, unknown>; at: number }[],
 }))
-const exits = vi.hoisted(() => ({ items: [] as Leaving[] }))
+const exits = vi.hoisted(() => ({ items: [] as Leaving[], holdMs: 0, startedAt: 0 }))
 const order = vi.hoisted(() => ({ calls: [] as string[] }))
 const resets = vi.hoisted(() => ({ flyer: 0, exit: 0 }))
 vi.mock('@release/ui/animations', async (importOriginal) => {
@@ -45,7 +45,7 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
     play: (...args: Parameters<typeof real.play>) => {
       const [name, , params = {}] = args
       played.names.push(name)
-      played.calls.push({ name, params })
+      played.calls.push({ name, params, at: Date.now() })
       if (name === 'playToCenter') {
         order.calls.push('move')
         played.moves.push({ from: params.from as Rect, to: params.to as Rect })
@@ -57,7 +57,10 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
       send: (items: Leaving[]) => {
         order.calls.push('send')
         exits.items.push(...items)
-        return Promise.resolve()
+        exits.startedAt = Date.now()
+        return exits.holdMs
+          ? new Promise<void>((resolve) => window.setTimeout(resolve, exits.holdMs))
+          : Promise.resolve()
       },
       reset: () => {
         resets.exit += 1
@@ -158,6 +161,7 @@ function harness(handoff?: HandLimitHandoff | null, overrides: Partial<BoardAnch
     // Distinctive rects — the road home's own test tells `effect`'s box
     // apart from `eventsBox`'s by these.
     effect: { current: nodeAt({ left: 450, top: 300, width: 150, height: 210 }) },
+    cause: { current: nodeAt({ left: 250, top: 300, width: 150, height: 210 }) },
     // The board's own `picked` place (`centrePlaceStyle('aiPick', 'picked')`),
     // nowhere near the grid's own centred cell — Decision 6's test tells the
     // two apart by these.
@@ -400,6 +404,74 @@ it('sends the AI card standing behind the prompt home once this batch answers it
     from: { left: effectBox?.left, top: effectBox?.top },
     to: { left: eventsBox?.left, top: eventsBox?.top },
   })
+})
+
+it('clears Bad Vibe’s standing pair and sends all three cards away together', async () => {
+  raises.keys.length = 0
+  exits.items.length = 0
+  played.calls.length = 0
+  exits.holdMs = 1000
+  const published: BoardState[] = []
+  const trigger = cardById('trigger-ai')
+  if (!trigger) throw new Error('missing AI trigger')
+  let bankedAt = 0
+  const standing: BoardState = {
+    ...base,
+    decks: {
+      ...base.decks,
+      discard: trigger,
+      discardCount: 1,
+      discardHeap: [{ uid: 'd3', card: trigger, ...scatterAt(3) }],
+    },
+    aiCause: { card: 'trigger-ai', eventId: 3 },
+    pending: {
+      kind: 'handLimit',
+      player: 'p1',
+      excess: 1,
+      options: [],
+      source: 'ai-bad-vibe-coding',
+    },
+  }
+  const { api, Probe } = harness(null)
+  render(<Probe />)
+  try {
+    await drive(() =>
+      api.beat?.run(
+        {
+          ...plan(),
+          cards: [plan().cards[0]],
+          picked: true,
+          homeward: 'ai-bad-vibe-coding',
+          causeward: { card: 'trigger-ai', eventId: 3 },
+        },
+        {
+          base: standing,
+          publish: (state) => {
+            published.push(state)
+            if (!state.aiCause && state.decks.discardHeap?.some((card) => card.uid === 'd3'))
+              bankedAt = Date.now()
+          },
+        },
+      ),
+    )
+    expect(exits.items.map((item) => item.key)).toEqual(['d4', 'd3'])
+    expect(exits.items[1]).toMatchObject({
+      card: { id: 'trigger-ai' },
+      from: { left: 250, top: 300, width: 150, height: 210 },
+      scatter: scatterAt(3),
+    })
+    const home = played.calls.find((call) => call.name === 'returnToDeck')
+    expect(home).toBeDefined()
+    expect(home?.at).toBeLessThan(exits.startedAt + exits.holdMs)
+    expect(bankedAt).toBeGreaterThanOrEqual(exits.startedAt + exits.holdMs)
+    expect(published.find((state) => state.pending === null)?.decks.discardHeap).toEqual([])
+    expect(published.at(-1)?.decks.discardCount).toBe(1)
+    expect(published.at(-1)?.pending).toBeNull()
+    expect(published.at(-1)?.aiCause).toBeUndefined()
+    expect(published.at(-1)?.you.hand.map((card) => card.uid)).toEqual(['u2'])
+  } finally {
+    exits.holdMs = 0
+  }
 })
 
 it('adds no road home when the batch answered nobody’s AI card', async () => {

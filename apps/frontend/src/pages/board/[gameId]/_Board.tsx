@@ -78,7 +78,6 @@ import { useBeats, useEliminationPreload } from '~/features/board-beats'
 import { useDealIntro } from '~/features/game-intro/useDealIntro'
 import { useHandOrder } from '~/features/hand-order/useHandOrder'
 import opening from './_Board.module.css'
-import { useBoardInteractions } from './_useBoardInteractions'
 import { useBoardStaging } from './_useBoardStaging'
 import { useCherryPickStaging } from './_useCherryPickStaging'
 import { useDefenseStaging } from './_useDefenseStaging'
@@ -319,11 +318,6 @@ export default function Board({
   const controlled = panelProp !== undefined
   const panel = controlled ? panelProp : ownPanel
 
-  // gesture machine: turns clicks into completed intents. Legality is always
-  // the engine's answer (state.playable / state.targets) — Table only renders
-  // what the hook decided, never re-derives it.
-  const gestures = useBoardInteractions({ state, actions })
-
   // the staging gesture: pulling a card that needs a target out of the fan —
   // stands it at the centre, aims the arrow, dispatches on a lit target. Inert
   // under the same gate the click actions already have: the deal or an
@@ -422,6 +416,7 @@ export default function Board({
   // no dedicated slot of its own on this branch).
   const pendingSource = state.pending && 'source' in state.pending ? state.pending.source : null
   const pendingSourceCard = pendingSource ? (cardById(pendingSource) ?? null) : null
+  const aiCauseCard = state.aiCause ? cardById(state.aiCause.card) : null
   const aiStanding = pendingSourceCard?.deck === 'ai' ? pendingSourceCard : null
   // …or a sweep is running, which is the defenceless path's own alarm: it
   // raises no `pending` at all (the engine eliminates in the same batch as
@@ -523,6 +518,7 @@ export default function Board({
     },
     enabled: !(deal.active || beats.exclusive),
   })
+  const neutralizeOwnsHand = alarmMineOpen || neutralizing.staged != null
   // the answer once its own flight has landed (or at once under reduced
   // motion) — the same gate, and the same reason, as `stagedCover` above.
   const stagedNeutralize =
@@ -581,14 +577,14 @@ export default function Board({
     ? handLimit.gapAt
     : defenseOwnsHand
       ? defenseStaging.gapAt
-      : alarmMineOpen
+      : neutralizeOwnsHand
         ? neutralizing.gapAt
         : staging.gapAt
   const liveGapSize = discarding
     ? handLimit.gapSize
     : defenseOwnsHand
       ? defenseStaging.gapSize
-      : alarmMineOpen
+      : neutralizeOwnsHand
         ? neutralizing.gapSize
         : staging.gapSize
 
@@ -732,6 +728,7 @@ export default function Board({
         supportUid: answeringStaged.support?.uid,
         el: coverStagedRef.current,
         release: defenseStaging.release,
+        whenLanded: defenseStaging.whenLanded,
       }
       return
     }
@@ -742,13 +739,14 @@ export default function Board({
     // Monitoring stages nothing — it answers from where it stands — so there
     // is nothing to hand over and this stays null for it, which is exactly
     // what the beat's own `!(mine && handoff)` check wants.
-    if (alarmMineOpen) {
+    if (neutralizeOwnsHand) {
       const nz = neutralizing.staged
       handoffRef.current = nz
         ? {
             mainUid: nz.home.kind === 'hand' ? nz.home.uid : (you.releaseUid?.[nz.home.slot] ?? ''),
             el: coverStagedRef.current,
             release: neutralizing.release,
+            whenLanded: neutralizing.whenLanded,
           }
         : null
       return
@@ -762,6 +760,7 @@ export default function Board({
               supportUid: ds.support?.uid,
               el: coverStagedRef.current,
               release: defenseStaging.release,
+              whenLanded: defenseStaging.whenLanded,
             }
           : null
       return
@@ -785,6 +784,7 @@ export default function Board({
     defenseStaging.overlay,
     defenseStaging.release,
     alarmMineOpen,
+    neutralizeOwnsHand,
     neutralizing.staged,
     neutralizing.landed,
     neutralizing.overlay,
@@ -1209,10 +1209,14 @@ export default function Board({
         <div className={enter} ref={anchors.discard}>
           <Pile
             label={copy.table.discard}
-            heap={cherry.grid ? [] : decks.discardHeap}
+            heap={
+              cherry.grid
+                ? []
+                : decks.discardHeap?.filter((c) => c.uid !== `d${state.aiCause?.eventId}`)
+            }
             heapShow={HEAP_SHOW}
-            topCard={cherry.grid ? null : decks.discard}
-            count={cherry.grid ? 0 : decks.discardCount}
+            topCard={cherry.grid || state.aiCause ? null : decks.discard}
+            count={cherry.grid ? 0 : Math.max(0, decks.discardCount - (state.aiCause ? 1 : 0))}
             width={116}
             boxRef={anchors.discardBox}
           />
@@ -1255,7 +1259,9 @@ export default function Board({
         data-centre-slot="cause"
         style={centrePlaceStyle('ai', 'cause')}
         ref={anchors.cause}
-      />
+      >
+        {aiCauseCard && <Card card={aiCauseCard} interactive={false} width="100%" />}
+      </div>
       <div
         className={opening.aiSlot}
         data-centre-slot="effect"
@@ -1406,9 +1412,8 @@ export default function Board({
                     `comboBeat.runPairOut` measures — a rotated node's bounding
                     rect is the box AROUND the tilted card (I6). Same shape as
                     the cover and sudo slots.
-                    The ARRIVAL still does not carry the tilt: `foldIn` is
-                    translate+scale only, so the rest pose is what supplies it
-                    — recorded in docs/animations/backlog.md. */}
+                    Single attacks arrive at this tilt through `landInPose`;
+                    Sudo attacks use `playToCenter` on the whole CardPair. */}
                 <div className={opening.pose} style={{ transform: restTransform(ATTACK_POSE) }}>
                   {aux ? (
                     <CardPair main={data} aux={aux} width="100%" />
@@ -1512,7 +1517,11 @@ export default function Board({
           `.glowBounds` and its hardcoded tech-bar offsets stay in the
           playground — that story is explicitly not the reference here (Page
           Shell Rule, apps/playground/CLAUDE.md). */}
-      {glowStrong && <EdgeGlow visible intensity="strong" data-testid="board-glow-strong" />}
+      <EdgeGlow
+        visible={glowStrong}
+        intensity="strong"
+        data-testid={glowStrong ? 'board-glow-strong' : undefined}
+      />
 
       <div className={kit.you} data-testid="board-you">
         {youEliminated ? (
@@ -1594,7 +1603,7 @@ export default function Board({
                       ? handLimit.handItems
                       : defenseOwnsHand
                         ? defenseStaging.handItems
-                        : alarmMineOpen
+                        : neutralizeOwnsHand
                           ? neutralizing.handItems
                           : staging.handItems
                 }
@@ -1635,7 +1644,7 @@ export default function Board({
                     ? handLimit.stateAt
                     : defenseOwnsHand
                       ? defenseStaging.stateAt
-                      : alarmMineOpen
+                      : neutralizeOwnsHand
                         ? neutralizing.stateAt
                         : staging.stateAt
                 }
@@ -1647,7 +1656,7 @@ export default function Board({
                     ? handLimit.accentAt
                     : defenseOwnsHand
                       ? defenseStaging.accentAt
-                      : alarmMineOpen
+                      : neutralizeOwnsHand
                         ? undefined
                         : staging.accentAt
                 }
@@ -1671,22 +1680,12 @@ export default function Board({
                     ? undefined
                     : defenseOwnsHand
                       ? (i) => defenseStaging.onCardClick(i)
-                      : alarmMineOpen
+                      : neutralizeOwnsHand
                         ? // a 503 is answered by a PULL, never by a click —
                           // one gesture per step, the same discipline the
                           // defence's own `askPartner` line records
                           undefined
-                        : (i) => {
-                            if (staging.onCardClick(i)) return
-                            // resolved against the array the fan actually
-                            // RENDERED, and handed on as a uid: `handItems` is
-                            // `you.hand` minus whatever is staged, so an index
-                            // that crossed this seam pointed at a different card
-                            // the whole time anything stood on the table (#101,
-                            // Fix D round 2).
-                            const item = staging.handItems[i]
-                            if (item) gestures.onCardClick(item.uid)
-                          }
+                        : staging.onCardClick
                 }
                 // drag-mode: a card that needs a target — or a legal defence
                 // answering an open `defend` pending — is pulled out of the
@@ -1701,7 +1700,7 @@ export default function Board({
                         ? handLimit.onHandPlay
                         : defenseOwnsHand
                           ? defenseStaging.onHandPlay
-                          : alarmMineOpen
+                          : neutralizeOwnsHand
                             ? neutralizing.onHandPlay
                             : staging.onHandPlay
                 }
@@ -1719,7 +1718,7 @@ export default function Board({
                             ? handLimit.handItems
                             : defenseOwnsHand
                               ? defenseStaging.handItems
-                              : alarmMineOpen
+                              : neutralizeOwnsHand
                                 ? neutralizing.handItems
                                 : staging.handItems,
                           uid,

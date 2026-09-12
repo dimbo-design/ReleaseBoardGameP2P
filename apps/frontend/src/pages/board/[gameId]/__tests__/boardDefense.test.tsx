@@ -16,6 +16,7 @@ import type { CardData, TableActions } from '@release/ui'
 import { cardById } from '@release/ui'
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
+import pairFoldStyles from '@/animations/usePairFold.module.css'
 import arrowStyles from '@/primitives/Arrow/Arrow.module.css'
 import { useBoardAnchors } from '~/entities/game/board'
 import Board from '../_Board'
@@ -616,6 +617,41 @@ it("the standing Sudo and the flyer's own pair swap in the SAME commit", async (
   await act(async () => {
     await new Promise((r) => setTimeout(r, 700))
   })
+})
+
+it('does not show the defense pair already folded before its entry poses are painted', async () => {
+  const geometry = vi
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(100, 100, 150, 210))
+  render(
+    defenceBoard({
+      options: ['defense-hotfix#0'],
+      combos: { 'support-sudo#0': ['defense-hotfix#0'] },
+    }),
+  )
+  await pullFromFan('support-sudo#0')
+  const slot = document.querySelectorAll<HTMLElement>('[data-hand-slot]')[0]
+  fireEvent.mouseDown(slot, { clientX: 0, clientY: 0 })
+  fireEvent.mouseUp(window, { clientX: 0, clientY: 0 })
+  const carrier = document.querySelector<HTMLElement>(`.${pairFoldStyles.flyer}`)
+  expect(carrier).not.toBeNull()
+  expect(carrier?.dataset.shown).not.toBe('true')
+  const entryPoses: string[] = []
+  const observer = new MutationObserver(() => {
+    if (carrier?.dataset.shown !== 'true' || entryPoses.length > 0) return
+    entryPoses.push(
+      carrier.querySelector<HTMLElement>('[data-main]')?.style.transform ?? '',
+      carrier.querySelector<HTMLElement>('[data-aux]')?.style.transform ?? '',
+    )
+  })
+  if (carrier) observer.observe(carrier, { attributes: true, attributeFilter: ['data-shown'] })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80))
+  })
+  observer.disconnect()
+  geometry.mockRestore()
+  expect(entryPoses).toHaveLength(2)
+  expect(entryPoses.every(Boolean)).toBe(true)
 })
 
 // Fix round 1 (Important 3): mechanic 3 (the fold lock) had no test at all.

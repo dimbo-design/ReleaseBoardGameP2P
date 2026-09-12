@@ -457,7 +457,7 @@ it('a release partner dispatches without a target', async () => {
 it.each([
   false,
   true,
-])('clicking Code Review starts a legal pair (reduced motion: %s)', async (reduced) => {
+])('pulling Code Review starts a legal pair (reduced motion: %s)', async (reduced) => {
   const motion = mockReducedMotion(reduced)
   const onPlay = vi.fn()
   comboOut = []
@@ -476,7 +476,7 @@ it.each([
     />,
   )
   try {
-    await clickComboFanCard('support-code-review#0')
+    await pullFromComboFan('support-code-review#0')
     expect(onPlay).not.toHaveBeenCalled()
     expect(comboAccentOf('release-frontend#0')).toBe('var(--cat-support)')
     await clickComboFanCard('release-frontend#0')

@@ -346,6 +346,16 @@ function toDiscardHeap(log: Event[], top: CardData | undefined, count: number): 
   if (count === 0) return []
   const heap: HeapCard[] = []
   for (const e of log) {
+    if (e.type === 'takenFromDiscard') {
+      // Events identify the public card type, not a physical uid. Removing one
+      // matching copy preserves the visible inventory even with duplicates.
+      for (let i = heap.length - 1; i >= 0; i--) {
+        if (heap[i].card.id !== e.card) continue
+        heap.splice(i, 1)
+        break
+      }
+      continue
+    }
     if (e.type !== 'discarded') continue
     // The event id IS the stable integer `scatterAt` asks for — the engine's own
     // monotonic sequence, identical on every peer. No stringifying: `scatterAt`
@@ -433,6 +443,18 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
   const byId = new Map(visible.map((e) => [e.id, e]))
   const history = buildHistoryTree(visible.map((e) => toHistoryEntry(e, labels, nameOf, byId)))
 
+  const source = view.pending && 'source' in view.pending ? view.pending.source : null
+  const reveal =
+    source && cardById(source)?.deck === 'ai'
+      ? [...visible].reverse().find((e) => e.type === 'aiRevealed' && e.eventCard === source)
+      : undefined
+  const filed =
+    reveal?.type === 'aiRevealed'
+      ? visible.find((e) => e.id > reveal.id && e.type === 'discarded' && e.card === reveal.aiCard)
+      : undefined
+  const aiCause =
+    reveal?.type === 'aiRevealed' && filed ? { card: reveal.aiCard, eventId: filed.id } : undefined
+
   return {
     you: {
       name: view.self.name,
@@ -485,6 +507,7 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
     // Structural passthrough — licensed by the Exact<> assertions in
     // contract.test-d.ts. Both carry openedAt alongside deadline already.
     pending: view.pending,
+    ...(aiCause ? { aiCause } : {}),
     window: view.window,
     // Structural passthrough — the engine's own answer to which pairs a
     // support may start. participants/spectators are room facts and are

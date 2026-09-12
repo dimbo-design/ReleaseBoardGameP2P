@@ -87,8 +87,13 @@ describe('the row that answers Git Rebase', () => {
       { timeout: 2000 },
     )
     // Move the third card to the front, then commit.
-    fireEvent.keyDown(screen.getByTestId('rebase-move-r2'), { key: 'ArrowLeft' })
-    fireEvent.keyDown(screen.getByTestId('rebase-move-r2'), { key: 'ArrowLeft' })
+    const last = screen.getByTestId('rebase-card-r2')
+    last.getBoundingClientRect = () => new DOMRect(760, 200, 150, 210)
+    if (last.parentElement)
+      last.parentElement.getBoundingClientRect = () => new DOMRect(400, 200, 510, 210)
+    fireEvent.pointerDown(last, { button: 0, clientX: 780, clientY: 230 })
+    fireEvent.pointerMove(window, { clientX: 420, clientY: 230 })
+    fireEvent.pointerUp(window, { clientX: 420, clientY: 230 })
     fireEvent.click(screen.getByRole('button', { name: /confirm|подтвердить/i }))
     // The answer waits for the last card to land (task D2's own divergence from
     // Cherry-pick, reasoned in `_useRebaseStaging.tsx`'s header), so this is a

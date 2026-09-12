@@ -37,20 +37,21 @@ function showOperation(id: string, sudo = false) {
   return onPlay
 }
 
-function clickFirstCard() {
+function clickFirstCard(pull = false) {
   const slot = document.querySelector('[data-hand-slot]')
   if (!slot) throw new Error('missing hand card')
   fireEvent.mouseDown(slot, { clientX: 0, clientY: 0 })
-  fireEvent.mouseUp(window, { clientX: 0, clientY: 0 })
+  if (pull) fireEvent.mouseMove(window, { clientX: 0, clientY: -200 })
+  fireEvent.mouseUp(window, { clientX: 0, clientY: pull ? -200 : 0 })
 }
 
 describe('Git pile choice', () => {
   it.each([
     'operation-git-branch',
     'operation-git-rebase',
-  ])('stages %s on click and sends the selected second pile', (id) => {
+  ])('stages %s on pull and sends the selected second pile', (id) => {
     const onPlay = showOperation(id)
-    clickFirstCard()
+    clickFirstCard(true)
     expect(onPlay).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /deck 2/i }))
     expect(onPlay).toHaveBeenCalledWith('op', { kind: 'pile', pile: 1 }, undefined)
@@ -58,7 +59,7 @@ describe('Git pile choice', () => {
 
   it('still chooses a pile when Branch is paired with Sudo', () => {
     const onPlay = showOperation('operation-git-branch', true)
-    clickFirstCard()
+    clickFirstCard(true)
     clickFirstCard()
     expect(onPlay).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /deck 2/i }))
@@ -67,7 +68,7 @@ describe('Git pile choice', () => {
 
   it('plays Sudo Rebase against every pile without asking for one', () => {
     const onPlay = showOperation('operation-git-rebase', true)
-    clickFirstCard()
+    clickFirstCard(true)
     clickFirstCard()
     expect(onPlay).toHaveBeenCalledWith('op', undefined, 'sudo')
     expect(screen.queryByRole('button', { name: /deck 2/i })).toBeNull()

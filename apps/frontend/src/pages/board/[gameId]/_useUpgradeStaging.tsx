@@ -1,9 +1,12 @@
 import type { Event } from '@release/engine'
 import type { HandPlayDrop, TableActions } from '@release/ui'
-import { Card, ConfirmAction, cardById } from '@release/ui'
+import { Card, ConfirmAction, cardById, Typography } from '@release/ui'
 import { play, useFlyer } from '@release/ui/animations'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BoardAnchors, BoardState } from '~/entities/game/board'
+import { upgradeSlot } from '~/entities/game/board/upgradeSlot'
+import { useReducedMotion } from '~/shared/lib/useReducedMotion'
+import opening from './_Board.module.css'
 import { useResolveFeedback } from './_useResolveFeedback'
 import styles from './_useUpgradeStaging.module.css'
 
@@ -16,8 +19,8 @@ import styles from './_useUpgradeStaging.module.css'
 //                       what the table is still waiting for
 //
 // The standing cards come from `pending.thrown`, which is public and survives
-// every batch boundary — so no beat has to hold them, and the arrival beat only
-// ever animates a card coming in and hands over to this (I7).
+// every batch boundary. The beat hands its arrivals over to these same slots
+// and, on the final base answer, sends the standing row to discard (I7).
 export function useUpgradeStaging(args: {
   state: BoardState
   anchors: BoardAnchors
@@ -32,22 +35,40 @@ export function useUpgradeStaging(args: {
   const asked = pending?.phase === 'discarding' && pending.owed.includes(state.selfId)
   const picking = pending?.phase === 'picking' && pending.actor === state.selfId
 
+  const reduced = useReducedMotion()
   const flyer = useFlyer()
   const [given, setGiven] = useState<string | null>(null)
   const [taken, setTaken] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(false)
+  const attempt = useRef(0)
+  const inFlight = useRef(false)
+  const current = useRef({ pending, asked, enabled })
+  current.current = { pending, asked, enabled }
+  useLayoutEffect(
+    () => () => {
+      attempt.current += 1
+    },
+    [],
+  )
 
   // Nothing armed survives the pending it was armed for — the discipline every
   // sibling staging hook keeps, latched on the pending and not on the mount.
   useEffect(() => {
     if (!pending) {
-      setGiven(null)
+      attempt.current += 1
+      inFlight.current = false
+      if (reduced || !confirmed || given == null) {
+        flyer.drop()
+        setGiven(null)
+        setConfirmed(false)
+      }
       setTaken(null)
-      setConfirmed(false)
     }
-  }, [pending])
+  }, [pending, confirmed, given, reduced, flyer.drop])
 
   const resolve = useResolveFeedback(args.events ?? [], state.selfId, actions, () => {
+    attempt.current += 1
+    inFlight.current = false
     setConfirmed(false)
     setGiven(null)
     flyer.drop()
@@ -55,16 +76,30 @@ export function useUpgradeStaging(args: {
 
   const onHandPlay = (uid: string, drop: HandPlayDrop) => {
     const item = state.you.hand.find((c) => c.uid === uid)
-    if (!enabled || !asked || given || !item) return false
+    if (!enabled || !asked || inFlight.current || given || !item) return false
+    inFlight.current = true
+    const token = ++attempt.current
+    const valid = () =>
+      token === attempt.current &&
+      current.current.pending?.actor === pending?.actor &&
+      current.current.pending?.source === pending?.source &&
+      current.current.asked &&
+      current.current.enabled
     setGiven(uid)
     void (async () => {
-      const target = args.anchors.centre.current?.getBoundingClientRect()
-      // `HandPlayDrop.rect` is optional. With no rect there is no leg to fly,
-      // and the answer still goes out — exactly as a missing centre skips it.
-      const from = drop.rect
-      if (target && from) {
-        const [el] = await flyer.raise([{ key: 'upgrade-local', card: item.card, at: from }])
-        if (el) await play('playToCenter', el, { from, to: target, duration: 460 })?.finished
+      const target = upgradeSlot(args.anchors, state.selfId)?.getBoundingClientRect()
+      if (!reduced && target && drop.rect) {
+        const [el] = await flyer.raise([{ key: 'upgrade-local', card: item.card, at: drop.rect }])
+        if (el && valid())
+          await play('playToCenter', el, { from: drop.rect, to: target, duration: 460 })?.finished
+      }
+      if (!valid()) {
+        if (token === attempt.current) {
+          inFlight.current = false
+          setGiven(null)
+          flyer.drop()
+        }
+        return
       }
       setConfirmed(true)
       resolve({ kind: 'upgradeDiscard', card: uid })
@@ -77,36 +112,46 @@ export function useUpgradeStaging(args: {
     handItems: state.you.hand.filter((c) => c.uid !== given),
     stagedUid: given,
     el: () => flyer.elOf('upgrade-local'),
-    release: () => flyer.drop(),
+    release: () => {
+      flyer.drop()
+      setGiven(null)
+      setConfirmed(false)
+      inFlight.current = false
+    },
     overlay: flyer.overlay,
   }
   if (!pending || !enabled) return { surface: null, ...interaction }
 
   const centre = (
     <div className={styles.centre}>
-      {pending.thrown.map((t) => {
-        const data = cardById(t.card.id)
-        if (!data) return null
-        return (
-          <button
-            key={t.card.uid}
-            type="button"
-            data-testid={`upgrade-thrown-${t.card.uid}`}
-            className={styles.thrown}
-            disabled={!picking}
-            onClick={() => picking && setTaken(t.card.uid)}
-          >
-            <Card
-              card={data}
-              interactive={false}
-              width="100%"
-              state={taken === t.card.uid ? 'selected' : 'idle'}
-              // one out of a set — the uniform selection colour
-              accent="var(--select-accent)"
-            />
-          </button>
-        )
-      })}
+      {[...new Set([...pending.owed, ...pending.thrown.map((t) => t.player)])]
+        .sort()
+        .map((player) => {
+          const t = pending.thrown.find((entry) => entry.player === player)
+          if (!t) return <div key={player} data-upgrade-slot={player} className={styles.cell} />
+          const data = cardById(t.card.id)
+          if (!data) return null
+          return (
+            <button
+              key={player}
+              data-upgrade-slot={player}
+              type="button"
+              data-testid={`upgrade-thrown-${t.card.uid}`}
+              className={styles.thrown}
+              disabled={!picking}
+              onClick={() => picking && setTaken(t.card.uid)}
+            >
+              <Card
+                card={data}
+                interactive={false}
+                width="100%"
+                state={taken === t.card.uid ? 'selected' : 'idle'}
+                // one out of a set — the uniform selection colour
+                accent="var(--select-accent)"
+              />
+            </button>
+          )
+        })}
     </div>
   )
 
@@ -118,7 +163,11 @@ export function useUpgradeStaging(args: {
       surface: (
         <div className={styles.surface} data-testid="board-upgrade-ask">
           {centre}
-          <ConfirmAction open={false} label={copy.confirm} caption={copy.prompt} disabled />
+          <div className={opening.ask} data-shown="true" role="status">
+            <Typography as="div" base="label-sm" tk="tk-16" className={opening.askLine}>
+              {copy.prompt}
+            </Typography>
+          </div>
         </div>
       ),
     }
@@ -153,7 +202,11 @@ export function useUpgradeStaging(args: {
     surface: (
       <div className={styles.surface}>
         {centre}
-        <ConfirmAction open={false} label={copy.confirm} caption={copy.waiting} disabled />
+        <div className={opening.ask} data-shown="true" role="status">
+          <Typography as="div" base="label-sm" tk="tk-16" className={opening.askLine}>
+            {copy.waiting}
+          </Typography>
+        </div>
       </div>
     ),
   }

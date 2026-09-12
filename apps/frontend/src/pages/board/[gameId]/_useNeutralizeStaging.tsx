@@ -106,6 +106,8 @@ export interface NeutralizeStaging {
   /** the beat's own clear — no flight, just done (defenseBeat's `runNeutralized`
    *  calls it through the handoff the instant it takes the exchange over) */
   release: () => void
+  /** Resolves once the local answer has landed, before the beat's hold. */
+  whenLanded: () => Promise<void>
 }
 
 export interface Options {
@@ -138,6 +140,8 @@ export function useNeutralizeStaging({
   const flyer = useFlyer()
   const flight = useCoverFlight(flyer)
   const landed = flight.landed
+  const deliveryRef = useRef<Promise<void>>(Promise.resolve())
+  const whenLanded = useCallback(() => deliveryRef.current, [])
 
   // same discipline as its two siblings: handlers that run after an await read
   // refs, not state, so they see this tick's truth (I8).
@@ -205,7 +209,7 @@ export function useNeutralizeStaging({
       setAnswered(true)
       flight.mark(eventsRef.current)
       actions?.onResolve?.(choice)
-      void flight.fly({
+      deliveryRef.current = flight.fly({
         card,
         from,
         to: () => anchors.cover.current?.getBoundingClientRect(),
@@ -464,6 +468,7 @@ export function useNeutralizeStaging({
     returningRef.current = false
     setReturning(false)
     flight.reset()
+    deliveryRef.current = Promise.resolve()
     arrival.reset()
   }, [matchKey])
 
@@ -493,5 +498,6 @@ export function useNeutralizeStaging({
     onHandPlay,
     onSlotDown,
     release,
+    whenLanded,
   }
 }

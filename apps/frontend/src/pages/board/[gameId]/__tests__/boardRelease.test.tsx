@@ -1148,86 +1148,41 @@ it('hands the fan back when a combo cancel’s own flight is refused', async () 
   }
 })
 
-// ===== Fix D, finding 1 — a release played by a CLICK, not a pull =====
-//
-// A release is `playable` with nothing to aim at and no partner to fold with
-// (`fake/project.ts`: `targetsFor` gives a release no targets, and `combosFor`
-// keys only on a SUPPORT's uid, so `comboOptions` never carries a release), and
-// `Hand` turns a press-and-release under the drag threshold into a plain click
-// (`onSlotDown`'s own `armUp`). So a release reaches the table by clicking as
-// well as by pulling — and that road went to `_useBoardInteractions`, which
-// dispatches the play and touches the staging hook not at all. The stage machine
-// stayed at `none`, `stageStanding` was false, `handItems` hid the card because
-// the pending named it, and the release rendered NOWHERE for its whole cost step
-// while the ask line under the centre asked the player to pay for it. The same
-// defect class the user first reported on this plan: the table asking for
-// something while showing nothing.
-it('stands a release played by a click, not a pull, at the stage slot', async () => {
+it('stands a release pulled from the hand, at the stage slot', async () => {
   const onPlay = vi.fn()
   const { rerender } = render(releaseBoard({}, { onPlay }))
-  await clickFanCard('release-frontend#0')
+  await pullCardFromFan('release-frontend#0')
   expect(onPlay).toHaveBeenCalledWith('release-frontend#0', undefined, undefined)
-  // it left the fan the instant the click was taken — not once a round trip
-  // echoes the pending back, exactly as a pulled one does
   expect(document.querySelectorAll('[data-hand-slot]').length).toBe(HAND.length - 1)
-  // …and it is standing where the ask line points, before the pending arrives
   const before = document.querySelector('[data-centre-slot="stage"]') as HTMLElement
   expect(before.querySelector('[data-card="release-frontend"]')).toBeTruthy()
 
-  // and still standing once the referee's answer does arrive
   rerender(releaseBoard({ pending: costPending(['attack-bug#0']) }, { onPlay }))
   const after = document.querySelector('[data-centre-slot="stage"]') as HTMLElement
   expect(after.querySelector('[data-card="release-frontend"]')).toBeTruthy()
 })
 
-// A guard, not evidence — it passes pre-fix, because everything the cost step
-// itself needs is keyed on the projected pending rather than on how the release
-// got played. It is here so the fix cannot later be traded for a parallel
-// half-path that stands the card but forgets the rest of the step.
-it('a click-played release still takes its cost from the fan', async () => {
+it('a pulled release still takes its cost from the fan', async () => {
   const onResolve = vi.fn()
   const { rerender } = render(releaseBoard({}, { onResolve }))
-  await clickFanCard('release-frontend#0')
+  await pullCardFromFan('release-frontend#0')
   rerender(releaseBoard({ pending: costPending(['attack-bug#0']) }, { onResolve }))
   await clickFanCard('attack-bug#0')
   expect(onResolve).toHaveBeenCalledWith({ kind: 'discardForRelease', card: 'attack-bug#0' })
 })
 
-// ===== Fix D round 2 — the fall-through must not dispatch a card nobody clicked
-//
-// `Hand` hands out an index into the array it RENDERS, which is `handItems` —
-// `you.hand` minus whatever is staged and minus the release a cost pending
-// names. The plain click gesture indexed `you.hand` with it. The two agree only
-// while nothing is staged, so the moment anything is, every index past the
-// hidden card points one card too far and the gesture plays a card the player
-// never touched.
-//
-// Pre-existing for a pulled release, and this round opened it for a CLICKED one
-// as well — the same off-by-one class as the defect that started this audit: a
-// fan index used against an array the fan is filtered out of. The seam takes a
-// uid now, so no index crosses it at all.
-//
-// (That a second play dispatches here at all — while the first is still mid
-// round trip — is a separate, older gap, recorded in `docs/animations/backlog.md`
-// with its own one-line fix. This test is about WHICH card, not whether.)
-it('a click after a release is staged plays the card that was clicked', async () => {
+it('a click cannot start another play while a release is staged', async () => {
   const onPlay = vi.fn()
   render(releaseBoard({}, { onPlay }))
-  await clickFanCard('release-frontend#0')
+  await pullCardFromFan('release-frontend#0')
   expect(onPlay).toHaveBeenCalledWith('release-frontend#0', undefined, undefined)
-  // the fan is one shorter now — index 0 of what is RENDERED is the spare,
-  // index 0 of `you.hand` is still the release standing on the table
   expect(document.querySelectorAll('[data-hand-slot]').length).toBe(HAND.length - 1)
 
   await clickFanCard('attack-bug#0')
-  expect(onPlay.mock.calls.at(-1)?.[0]).toBe('attack-bug#0')
+  expect(onPlay).toHaveBeenCalledTimes(1)
 })
 
-// The other half of the routing: a click the staging hook does NOT take must
-// still reach the plain click gesture (`_useBoardInteractions`), or the window's
-// own attack affordance — the one play that is a click by design — dies with
-// this fix. Nothing else in the repo covers `useBoardInteractions` at all.
-it('a window attack is still thrown by a plain click', async () => {
+it('a window attack is thrown by a pull', async () => {
   const onAttack = vi.fn()
   const base = makeBoardProps()
   const props = makeBoardProps({
@@ -1249,7 +1204,10 @@ it('a window attack is still thrown by a plain click', async () => {
     actions: { onAttack },
   } as unknown as Parameters<typeof makeBoardProps>[0])
   render(<Board {...props} />)
-  await clickFanCard('attack-bug#0')
+  await pullCardFromFan('attack-bug#0')
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1600))
+  })
   expect(onAttack).toHaveBeenCalledWith('attack-bug#0', undefined)
 })
 

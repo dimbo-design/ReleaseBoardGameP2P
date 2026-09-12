@@ -711,6 +711,22 @@ describe('the discard heap', () => {
     expect(heap).toHaveLength(1)
   })
 
+  it('removes a picked card while preserving the resting poses of the remaining heap', () => {
+    const log: Event[] = [
+      discardedEvent(1, 'attack-bug'),
+      discardedEvent(2, 'protection-debugger'),
+      discardedEvent(3, 'defense-hotfix'),
+      { id: 4, type: 'takenFromDiscard', player: 'you', card: 'protection-debugger', to: 'hand' },
+    ]
+    const heap = toBoardState(
+      withDecks({ discardCount: 2, discardTop: 'defense-hotfix' }),
+      log,
+      labels,
+    ).decks.discardHeap
+    expect(heap?.map((c) => c.uid)).toEqual(['d1', 'd3'])
+    expect(heap?.[0]).toMatchObject(scatterAt(1))
+  })
+
   it('does not append a top the fold already ends on', () => {
     const log = [discardedEvent(7, 'attack-bug')]
     const heap =
@@ -732,4 +748,27 @@ it.each([
     kind: 'Upgrade action',
     card: cardById('attack-bug')?.name,
   })
+})
+
+it('keeps the AI cause on the table while its event asks for a choice', () => {
+  const log: Event[] = [
+    {
+      id: 10,
+      type: 'aiRevealed',
+      player: 'you',
+      aiCard: 'trigger-ai',
+      eventCard: 'ai-bad-vibe-coding',
+    },
+    { id: 11, type: 'discarded', player: 'you', card: 'trigger-ai', reason: 'effect' },
+  ]
+  const pending: PlayerView['pending'] = {
+    kind: 'handLimit',
+    player: 'you',
+    excess: 1,
+    options: ['c1'],
+    source: 'ai-bad-vibe-coding',
+  }
+  const result = toBoardState({ ...view, pending }, log, labels)
+  expect(result.aiCause).toEqual({ card: 'trigger-ai', eventId: 11 })
+  expect(toBoardState(view, log, labels).aiCause).toBeUndefined()
 })

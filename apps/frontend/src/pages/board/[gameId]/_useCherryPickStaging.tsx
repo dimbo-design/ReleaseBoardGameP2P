@@ -1,7 +1,15 @@
 import type { Event } from '@release/engine'
 import type { TableActions } from '@release/ui'
 import { Card, ConfirmAction, cardById, Typography } from '@release/ui'
-import { HEAP_SHOW, play, scatterAt, useDiscardExit, useHandArrival } from '@release/ui/animations'
+import {
+  HEAP_SHOW,
+  nextFrames,
+  play,
+  scatterAt,
+  useDiscardExit,
+  useHandArrival,
+  wait,
+} from '@release/ui/animations'
 import type { ReactNode, RefObject } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BoardAnchors, BoardState } from '~/entities/game/board'
@@ -23,9 +31,7 @@ const STAGGER_CAP = 40 // don't stagger past this many cards
 const REVEAL_W = 220 // width the chosen card reaches in the centre
 const REVEAL_DUR = 460 // fly-to-centre duration
 const REVEAL_HOLD = 560 // pause in the centre before dropping into the hand
-const HAND_MIN = REVEAL_DUR + REVEAL_HOLD + 520 // total before the round can finish
 const FLIP_DUR = 420 // = the flipCard preset duration (flip before the deck flight)
-const DECK_DUR = 480 // = the returnToDeck preset duration
 const DECK_HOLD = 360 // deck card holds face-down before it merges
 
 // centre-to-centre translate + scale to move an element from one rect to
@@ -108,13 +114,14 @@ export function useCherryPickStaging(args: {
   // the chosen card settles into the hand (the shared step every other
   // arrival on the board uses) — nothing here mirrors the hand locally, the
   // fan already renders straight off the projection's own `you.hand`.
+  const [manualRetry, setManualRetry] = useState(false)
   const exit = useDiscardExit(anchors.discardBox)
   const arrival = useHandArrival(anchors.hand, () => {})
 
-  // Declared above the auto-answer effect below, which lists it as a
-  // dependency. A dependency array is read during render, so a `const`
-  // declared further down would not exist yet at that point.
   const resolve = useResolveFeedback(args.events ?? [], state.selfId, actions, () => {
+    args.handoff.current = null
+    setManualRetry(true)
+    if (ours?.options.length === 1) setPicks([ours.options[0].uid])
     setConfirmed(false)
     setFlying(false)
     setFlipped(new Set())
@@ -132,26 +139,26 @@ export function useCherryPickStaging(args: {
   useEffect(() => {
     if (!ours) {
       answered.current = null
+      setManualRetry(false)
       return
     }
-    if (ours.picks !== 1 || ours.options.length !== 1) return
+    if (manualRetry || ours.picks !== 1 || ours.options.length !== 1) return
     const only = ours.options[0]
     const key = `${ours.player}:${ours.source}:${only.uid}`
     if (answered.current === key) return
     answered.current = key
     resolve({ kind: 'pickFromDiscard', card: only.uid })
-  }, [ours, resolve])
+  }, [ours, resolve, manualRetry])
 
   // Nothing armed survives the pending it was armed for. `flying` is left
   // alone here on purpose — it clears itself once its own flight lands, and a
   // projection tick clearing the pending mid-flight must not cut it short.
   useEffect(() => {
-    if (!ours) {
+    if (!ours && !confirmed && !flying) {
       setPicks([])
-      setConfirmed(false)
       setFlipped(new Set())
     }
-  }, [ours])
+  }, [ours, confirmed, flying])
 
   // deal the offer OUT of the discard pile into the grid: every cell starts
   // at the pile's own rect and flies to its slot, staggered — purely cosmetic,
@@ -271,103 +278,97 @@ export function useCherryPickStaging(args: {
     setConfirmed(true)
     args.handoff.current = {
       card: ours.options.find((o) => o.uid === hand)?.id ?? '',
-      run: () =>
-        new Promise<void>((done) => {
-          setFlying(true)
-          const handData = cardById(ours.options.find((o) => o.uid === hand)?.id ?? '')
-          const deckOpt = deck ? ours.options.find((o) => o.uid === deck) : undefined
-          const deckData = deckOpt ? cardById(deckOpt.id) : undefined
-          const deckRect = anchors.pileBox(0)?.getBoundingClientRect()
+      run: async (after) => {
+        setFlying(true)
+        const handData = cardById(ours.options.find((o) => o.uid === hand)?.id ?? '')
+        const deckOpt = deck ? ours.options.find((o) => o.uid === deck) : undefined
+        const deckData = deckOpt ? cardById(deckOpt.id) : undefined
+        const deckRect = anchors.pileBox(0)?.getBoundingClientRect()
 
-          // pass 1: read EVERY cell's rect first, before touching layout.
-          const rects = new Map<string, DOMRect>()
-          for (const o of ours.options) {
-            const el = cellRefs.current.get(o.uid)
-            if (el) rects.set(o.uid, el.getBoundingClientRect())
-          }
-          // pass 2: pin them all at their captured rects (no more reflow matters)
-          for (const o of ours.options) {
-            const el = cellRefs.current.get(o.uid)
-            const r = rects.get(o.uid)
-            if (!el || !r) continue
-            el.style.position = 'fixed'
-            el.style.left = `${r.left}px`
-            el.style.top = `${r.top}px`
-            el.style.width = `${r.width}px`
-            el.style.margin = '0'
-            el.style.zIndex = '100'
-          }
+        // pass 1: read EVERY cell's rect first, before touching layout.
+        const rects = new Map<string, DOMRect>()
+        for (const o of ours.options) {
+          const el = cellRefs.current.get(o.uid)
+          if (el) rects.set(o.uid, el.getBoundingClientRect())
+        }
+        // pass 2: pin them all at their captured rects (no more reflow matters)
+        for (const o of ours.options) {
+          const el = cellRefs.current.get(o.uid)
+          const r = rects.get(o.uid)
+          if (!el || !r) continue
+          el.style.transition = 'none'
+          el.style.transform = 'none'
+          el.style.position = 'fixed'
+          el.style.left = `${r.left}px`
+          el.style.top = `${r.top}px`
+          el.style.width = `${r.width}px`
+          el.style.margin = '0'
+          el.style.zIndex = '100'
+        }
 
-          // chosen → hand: fly to centre, enlarge, hold, then the shared
-          // useHandArrival drop into the fan — same as taking an opponent card
-          const handEl = cellRefs.current.get(hand)
-          const handRect = rects.get(hand)
-          if (handData && handEl && handRect) {
-            const stage = anchors.centre.current?.getBoundingClientRect()
-            const cx = stage ? stage.left + stage.width / 2 : window.innerWidth / 2
-            const cy = stage ? stage.top + stage.height / 2 : window.innerHeight / 2
-            const dx = cx - (handRect.left + handRect.width / 2)
-            const dy = cy - (handRect.top + handRect.height / 2)
-            handEl.style.zIndex = '130'
-            handEl.style.transition = `transform ${REVEAL_DUR}ms var(--ease-soft)`
-            requestAnimationFrame(() =>
-              requestAnimationFrame(() => {
-                handEl.style.transform = `translate(${dx}px, ${dy}px) scale(${REVEAL_W / handRect.width})`
-              }),
-            )
-            later(() => {
-              const el = cellRefs.current.get(hand)
-              if (!el) return
-              // the card on screen IS the one that flies — the step measures it and
-              // takes it off screen itself, no local copy and no opacity trick
-              void arrival.arrive(
-                [{ key: `cherry-hand-${hand}`, card: handData, el }],
-                state.you.hand.length,
-              )
-            }, REVEAL_DUR + REVEAL_HOLD)
+        const handFlight = (async () => {
+          const el = cellRefs.current.get(hand)
+          const from = rects.get(hand)
+          const centre = anchors.centre.current?.getBoundingClientRect()
+          if (!el || !from || !centre || !handData) return
+          const to = {
+            left: centre.left + (centre.width - REVEAL_W) / 2,
+            top: centre.top + (centre.height - (REVEAL_W * from.height) / from.width) / 2,
+            width: REVEAL_W,
+            height: (REVEAL_W * from.height) / from.width,
           }
-
-          // chosen → deck top: flip face-down in place FIRST, then fly onto the deck
-          if (deck && deckData && deckRect) {
-            const el = cellRefs.current.get(deck)
-            if (el) el.style.zIndex = '120' // above the deck pile — lands on top, not under
-            setFlipped(new Set([deck]))
-            later(() => {
-              const dEl = cellRefs.current.get(deck)
-              const r = rects.get(deck)
-              if (dEl && r) play('returnToDeck', dEl, { from: r, to: deckRect })
-            }, FLIP_DUR)
-          }
-
-          const remaining = ours.options.filter((o) => o.uid !== hand && o.uid !== deck)
-          void exit.send(
-            remaining.flatMap((o, i) => {
-              const card = cardById(o.id)
-              if (!card) return []
-              const rest = state.decks.discardHeap?.find((h) => h.card.id === o.id)
-              return [
-                {
-                  key: o.uid,
-                  card,
-                  node: cellRefs.current.get(o.uid),
-                  scatter: rest ?? scatterAt(i, 116),
-                  fade: i < remaining.length - HEAP_SHOW,
-                  delay: Math.min(i, STAGGER_CAP) * 14,
-                  layer: i,
-                },
-              ]
-            }),
+          el.style.zIndex = '130'
+          await nextFrames()
+          await play('playToCenter', el, { from, to, duration: REVEAL_DUR })?.finished
+          await wait(REVEAL_HOLD)
+          await arrival.arrive(
+            [{ key: `cherry-hand-${hand}`, card: handData, el }],
+            state.you.hand.length,
           )
-          const returnDone = 420 + Math.min(remaining.length, STAGGER_CAP) * 14
-          const deckDone = deck ? FLIP_DUR + DECK_DUR + DECK_HOLD : 0
-          later(
-            () => {
-              setFlying(false)
-              done()
-            },
-            Math.max(returnDone, deckDone, HAND_MIN) + 100,
-          )
-        }),
+        })()
+        const deckFlight = (async () => {
+          if (!deck || !deckData || !deckRect) return
+          const el = cellRefs.current.get(deck)
+          const from = rects.get(deck)
+          if (!el || !from) return
+          el.style.zIndex = '120'
+          setFlipped(new Set([deck]))
+          await wait(FLIP_DUR)
+          await play('returnToDeck', el, { from, to: deckRect })?.finished
+          await wait(DECK_HOLD)
+        })()
+        const remaining = ours.options.filter((o) => o.uid !== hand && o.uid !== deck)
+        const resting = new Map<string, NonNullable<BoardState['decks']['discardHeap']>[number]>()
+        const heap = [...(after.decks.discardHeap ?? [])]
+        for (const option of [...remaining].reverse()) {
+          for (let i = heap.length - 1; i >= 0; i--) {
+            if (heap[i].card.id !== option.id) continue
+            resting.set(option.uid, heap.splice(i, 1)[0])
+            break
+          }
+        }
+        const returnFlight = exit.send(
+          remaining.flatMap((o, i) => {
+            const card = cardById(o.id)
+            if (!card) return []
+            const rest = resting.get(o.uid)
+            return [
+              {
+                key: o.uid,
+                card,
+                node: cellRefs.current.get(o.uid),
+                scatter: rest ?? scatterAt(i, 116),
+                fade: !rest || i < remaining.length - HEAP_SHOW,
+                delay: Math.min(i, STAGGER_CAP) * 14,
+                layer: i,
+              },
+            ]
+          }),
+        )
+        await Promise.all([handFlight, deckFlight, returnFlight])
+        setFlying(false)
+        setConfirmed(false)
+      },
     }
     resolve(choice)
   }
@@ -377,7 +378,9 @@ export function useCherryPickStaging(args: {
 
   if (
     !flying &&
-    (!ours || (confirmed && reduced) || (ours.picks === 1 && ours.options.length < 2))
+    ((!ours && !confirmed) ||
+      (confirmed && reduced) ||
+      (ours?.picks === 1 && ours.options.length < 2 && !manualRetry))
   ) {
     return { grid: null, overlay, ...gaps }
   }

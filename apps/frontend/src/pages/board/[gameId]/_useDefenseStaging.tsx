@@ -53,17 +53,16 @@ import type {
   Point,
   TableActions,
 } from '@release/ui'
-import { CardPair, PAIR_AUX_POSE, useArrow } from '@release/ui'
+import { useArrow } from '@release/ui'
 import {
-  enterPose,
-  nextFrames,
-  play,
   type Rect,
   restTransform,
   useFlyer,
   useHandArrival,
+  usePairFold,
 } from '@release/ui/animations'
 import {
+  Fragment,
   type ReactNode,
   useCallback,
   useEffect,
@@ -151,6 +150,8 @@ export interface DefenseStaging {
    * once, under reduced motion) — gates `_Board.tsx`'s static sudo-slot render
    * the same way `landed` gates the cover slot's. */
   sudoLanded: boolean
+  /** Resolves once the local cover or pair has landed, before the beat's hold. */
+  whenLanded: () => Promise<void>
 }
 
 export interface Options {
@@ -180,6 +181,11 @@ export function useDefenseStaging({
   const [cancelling, setCancelling] = useState(false)
   const reduced = useReducedMotion()
   const flyer = useFlyer()
+  const pair = usePairFold()
+  const pairRef = useRef(pair)
+  pairRef.current = pair
+  const deliveryRef = useRef<Promise<void>>(Promise.resolve())
+  const whenLanded = useCallback(() => deliveryRef.current, [])
   // The stand-a-card-at-a-centre-slot cycle, twice — `_useCoverFlight.ts` owns
   // the flight, the `landed` gate and the dispatch watermark, and nothing
   // else: the dispatch and the way home stay here. Two instances because the
@@ -346,7 +352,7 @@ export function useDefenseStaging({
       // reason that `finally` is load-bearing lives with it in
       // `_useCoverFlight.ts`.
       actions?.onResolve?.({ kind: 'defend', card: uid, combo: undefined })
-      void coverFlight.fly({
+      deliveryRef.current = coverFlight.fly({
         card,
         from,
         to: () => anchors.cover.current?.getBoundingClientRect(),
@@ -474,7 +480,7 @@ export function useDefenseStaging({
       const support = s.support
       const cRect = anchors.cover.current?.getBoundingClientRect()
       const el = anchors.cover.current
-      flyer.drop('fold')
+      pairRef.current.release()
       if (reduced || !cRect) {
         commitStaged(null)
         return
@@ -574,48 +580,25 @@ export function useDefenseStaging({
         // CardPair's own inline pose (identity main, PAIR_AUX_POSE aux) IS the
         // pair at rest, nothing to paint frame by frame.
         coverFlight.settle()
+        deliveryRef.current = Promise.resolve()
         foldingRef.current = false
         return
       }
-      void (async () => {
+      deliveryRef.current = (async () => {
         try {
-          const enterMain = enterPose(fromRect, box)
-          const enterAux = enterPose(sudoBox, box)
-          const [el] = await flyer.raise([
-            {
-              key: 'fold',
-              at: box,
-              content: <CardPair main={item.card} aux={support.card} width="100%" />,
-              pose: restTransform(COVER_POSE),
-            },
-          ])
-          const mainEl = el?.querySelector<HTMLElement>('[data-main]')
-          const auxEl = el?.querySelector<HTMLElement>('[data-aux]')
-          if (!mainEl || !auxEl) {
-            flyer.drop('fold')
-            coverFlight.settle()
-            return
-          }
-          // painted at their entry poses first, so neither half flashes in
-          // its final place before the fold starts
-          mainEl.style.transform = enterMain
-          auxEl.style.transform = enterAux
-          await nextFrames() // both painted at their entry poses first (I2)
-          await Promise.all([
-            play('foldIntoPair', mainEl, { from: fromRect, box, dur: MERGE_MS })?.finished,
-            play('foldIntoPair', auxEl, {
-              from: sudoBox,
-              box,
-              pose: PAIR_AUX_POSE,
-              dur: MERGE_MS,
-              snap: true,
-            })?.finished,
-          ])
-          flyer.drop('fold')
-          // the carrier has dropped it — `_Board.tsx`'s static cover render
-          // may take over now, not a moment before (see `landed`'s comment).
-          coverFlight.settle()
+          await pairRef.current.fold({
+            main: item.card,
+            aux: support.card,
+            mainFrom: fromRect,
+            auxFrom: sudoBox,
+            box,
+            pose: restTransform(COVER_POSE),
+            dur: MERGE_MS,
+          })
         } finally {
+          // The shared fold hides its first frame until both entry poses are
+          // painted. Its carrier and the static cover swap in this commit.
+          pairRef.current.release()
           // every exit clears the lock — the early returns above and a
           // rejecting `.finished` all bypass the success path's own clear.
           foldingRef.current = false
@@ -655,8 +638,6 @@ export function useDefenseStaging({
       coverFlight.mark,
       coverFlight.arm,
       coverFlight.settle,
-      flyer.raise,
-      flyer.drop,
     ],
   )
 
@@ -780,12 +761,18 @@ export function useDefenseStaging({
     sudoFlight.reset()
     arrowCtl.stop()
     flyer.drop()
+    pairRef.current.release()
+    deliveryRef.current = Promise.resolve()
     arrival.reset()
   }, [matchKey])
 
   return {
     staged,
-    overlay: [...flyer.overlay, ...arrival.overlay],
+    overlay: [
+      ...flyer.overlay,
+      ...arrival.overlay,
+      ...(pair.overlay ? [<Fragment key="defense-pair">{pair.overlay}</Fragment>] : []),
+    ],
     gapAt: arrival.gapAt,
     gapSize: arrival.gapSize,
     handItems,
@@ -798,5 +785,6 @@ export function useDefenseStaging({
     release,
     landed,
     sudoLanded,
+    whenLanded,
   }
 }

@@ -245,7 +245,9 @@ the discard on its own.
      no flip, `drop('draw')`, and the shadow's `handCount` for that opponent is bumped and published.
    - **`d.reveal` present** → a trigger, turned up for the whole table (an AI trigger is claimed
      whole by its own beat and never reaches this branch — see the AI recipe below). `wait(BEFORE_FLIP)`
-     → `patch('draw', { faceDown: false })` → `wait(AFTER_FLIP)` → `wait(TABLE_HOLD)` → the flyer
+     → `patch('draw', { faceDown: false })` → `wait(AFTER_FLIP)`. A standing 503 then
+     hands over to its pending/alarm immediately, with no extra `TABLE_HOLD`. A trigger already
+     banked by this batch waits `TABLE_HOLD`, then the flyer
      itself (not a copy) is handed to `useDiscardExit.send`, with `node: elOf('draw')` and
      `scatter: scatterAt(d.reveal.discardId)` — the same scatter the heap rests the card on (**I7**)
      — then `drop('draw')`.
@@ -258,7 +260,7 @@ the discard on its own.
 | pile → centre | `drawToCenter` | 480 ms |
 | stand before flipping | `wait(BEFORE_FLIP)` | 220 ms |
 | flip settle | `wait(AFTER_FLIP)` | 560 ms |
-| a trigger's stand at the centre | `wait(TABLE_HOLD)` | 2600 ms — imported from `features/board-beats/toCentre.ts`, the same constant the AI recipe below holds its own pair on (there doubled, `HALLUCINATION_HOLD`, for `ai-hallucination`; this branch never sees that card, so it never doubles) |
+| an already-banked trigger's stand at the centre (no extra hold for a standing 503) | `wait(TABLE_HOLD)` | 2600 ms — imported from `features/board-beats/toCentre.ts`, the same constant the AI recipe below holds its own pair on (there doubled, `HALLUCINATION_HOLD`, for `ai-hallucination`; this branch never sees that card, so it never doubles) |
 | own card → hand | `useHandArrival` | `FLIGHT_MS = 480` |
 | trigger → discard | `useDiscardExit` | `FLIGHT_MS = 420`, on `scatterAt(discardId)` |
 | opponent's card → seat | `dealToSeat` | 460 ms, `to = cardBoxIn(seat, CARD_W * 0.7)` |
@@ -424,10 +426,9 @@ scene itself — this beat runs on the real board (`apps/frontend/src/features/b
   'partner'`, the arrow armed from the centre exactly as a plain aim's is (`aimFromCentre`), and
   every partner still in the fan lit in the support's own category colour (`accentAt` — ComboStory's
   "the TYPE is the message").
-- **Click a support at rest** also starts pairing when `state.comboOptions[uid]` is nonempty.
-  It shares `stageAtCentre` with the pull and measures its starting card box with `slotPlacement`.
-  Code Review need not be in `playable`: the partner offer authorizes the pair. Choose the support,
-  then the release, then pay the release cost if the mode requires it.
+- **An at-rest click never starts pairing.** Pull the support, click its offered partner,
+  then pay the release cost if the mode requires it. Code Review need not be in `playable`:
+  the nonempty `state.comboOptions[uid]` authorizes the pair.
 - **Pick a partner** (`onCardClick`, guard `phase === 'partner'`, refused while a cancel or a fold is
   already in flight): not in `state.comboOptions[support.uid]` → `cancel()`, the whole staging
   returns to the fan. A hit commits the fold (`merged: true`) and sets `foldingRef.current = true` —
@@ -1702,19 +1703,16 @@ each one read off what the plan already decided rather than re-derived from the 
 | `turnEnded` | the turn simply ends; the effect goes home. |
 | `alarm` | the effect mimics an Error 503 that resolved with nobody able to answer it (no pending raised); the effect goes home. |
 | `none` | nothing else followed in the batch; the effect goes home. |
-| `standing` | a prompt is now owed — `crush`, `neutralize503`'s mimic, `handLimit` (Bad Vibe) or `pickFromDiscard` (Inside) — and the effect card is dropped exactly where it stands rather than sent home. |
+| `standing` | a prompt is now owed — `crush`, `neutralize503`'s mimic, `handLimit` (Bad Vibe) or `pickFromDiscard` (Inside) — and both cause and effect remain standing until the answer resolves. |
 
 "Goes home" is one leg, `goHome`, shared by every ending but `zone` and `standing`: the card flips
 face down where it stands and shrinks back into the events deck (`returnToDeck`).
 
-> **The trigger never gets the `standing` treatment, and that is not a stylistic choice.** The
-> engine banks it — `discarded(trigger-ai)` in `fireTrigger` — in the very reduction that reveals
-> it, before `resolveAiEvent` ever runs; by the time this beat plans, the projection already has the
-> trigger in the discard heap. Holding it on screen would contradict a projection that has already
-> moved it. The effect card CAN stand, because `decks.events` is projected only as a count — one
-> fewer, and nothing on screen disagrees with the card still standing at `effect`. Do not "fix" this
-> into a matching pair: the asymmetry is downstream of an open backlog entry on the engine banking
-> the trigger before its own effect resolves, not a gap in this beat (`docs/animations/backlog.md`).
+**Standing cause.** The board retains `aiCause` beside the effect and hides that trigger's
+entry/count from the displayed discard. The standing render is published before the reveal flyers
+are released. The resolving batch sends the cause to the discard through `aiCauseExit` together
+with the effect's homeward flight. The engine still banks the trigger at reveal; that event-timing
+question remains open in the backlog. This is a presentation handoff, not an engine change.
 
 **Elements / refs** — all from `BoardAnchors`
 - `pileBox(index)` — the pile the trigger drew off.
@@ -1732,9 +1730,11 @@ face down where it stands and shrinks back into the events deck (`returnToDeck`)
 3. `wait(plan.eventCard === 'ai-hallucination' ? HALLUCINATION_HOLD : TABLE_HOLD)` — the one place
    this runner reads the card's own id, and only to size the READING; `plan.tail` alone still
    decides what the effect DOES.
-4. A `crush` raises the destroyed release as its own flyer, at its own slot, in the same commit the
+4. A `standing` ending publishes the pending and `aiCause`, waits a frame boundary and releases
+   both reveal flyers without an exit. Other endings continue below.
+5. A `crush` raises the destroyed release as its own flyer, at its own slot, in the same commit the
    zone lets go of it.
-5. Three legs run together (`Promise.all`): the trigger to the discard on
+6. Three legs run together (`Promise.all`): the trigger to the discard on
    `scatterAt(plan.triggerDiscardId)` (**I7**); the effect down its ending's road; a `crush`'s
    destroyed release down `plan.tail.destination`'s road.
 
@@ -1747,7 +1747,8 @@ face down where it stands and shrinks back into the events deck (`returnToDeck`)
 3. **Someone else's** — `dealToSeat` into their seat; their `handCount` is bumped in the same step
    the flight lands, so the hand-over to `live` does not pop their fan by one the instant the queue
    drains.
-4. If this batch also answers a standing prompt (`plan.homeward`), the AI card that has been
+4. If this batch also answers a standing prompt (`plan.homeward` / `plan.causeward`), the cause
+   exits through `aiCauseExit` alongside the effect, after clearing the standing render; the AI card that has been
    standing at `effect` since the batch that raised it goes home now: a no-travel raise at the place
    it already occupies, flip, `returnToDeck`. Written out here rather than shared with
    `handLimitBeat.tsx`'s or `defenseBeat.tsx`'s own `sendHomeward` — a carrier passed between hooks
@@ -2282,17 +2283,22 @@ holds, drops into the hand — and the rest go to the discard.
 
 ---
 
-## Git Cherry-pick (live board) — the grid over a heap that never emptied
+## Git Cherry-pick (live board) — one owner for the grid and accepted flight
 
 **When to call.** A `pickFromDiscard` pending whose `source` is `operation-git-cherry-pick` and whose `player` is
 us. Inside's row (`ai-inside`) is the OTHER surface over the same pending kind; the two are siblings, gated on
 `source`, because the offer is the whole discard here and only its Releases there.
 
 **What differs from the story, and why**
-- **The heap underneath is never emptied.** `openPickFromDiscard` leaves the candidates in `decks.discard` until
-  the pick resolves, and the heap renders that same array the whole time the grid is open. So **the unpicked never
-  fly back** — they never left. A return flight would draw each of them twice (once flying, once resting) and land
-  it on a pose the heap does not key by. The story needs that leg because its discard is local state it emptied.
+- **The grid owns the visible candidates.** The engine retains them in `decks.discard`, but the board
+  hides the heap and its count while the grid owns the cards. Unpicked cells return through
+  `useDiscardExit`; the heap resumes after all flights finish.
+- **Confirm submits the choice; acceptance starts the flight.** The local `takenFromDiscard` beat
+  awaits the grid handoff instead of raising a second card from the discard. The hand, optional deck
+  and unpicked return flights are awaited together. The handoff receives the accepted after-heap;
+  duplicate catalog cards consume separate destination poses one-to-one. `toDiscardHeap` consumes
+  `takenFromDiscard`, so selected cards no longer remain in the displayed heap. A rejected RESOLVE
+  unlocks the existing choice; rejection of a single-option automatic answer opens manual retry.
 - **The two sudo roles come from the engine**, not from click order: `openPickFromDiscard` withholds triggers from
   a base offer and `onPickFromDiscard` refuses one the hand slot, so a trigger in `options` can only be the deck
   card.
@@ -2308,7 +2314,7 @@ into the fan; a sudo deck card `flipCard` (`FLIP_DUR 420`) then `returnToDeck` (
 
 ## Git Rebase (live board) — a row only its owner can see
 
-**Choosing a pile.** With multiple draw piles, Branch and ordinary Rebase stage on click or pull
+**Choosing a pile.** With multiple draw piles, Branch and ordinary Rebase stage on pull
 and wait for a highlighted pile. The projection supplies those targets; the board sends the
 chosen index. Sudo Branch still chooses one pile; Sudo Rebase applies to all piles directly.
 The staged operation and its support leave from the centre through the discard beat's handoff.
@@ -2319,12 +2325,13 @@ The staged operation and its support leave from the centre through the discard b
 - **Privacy is the projection's, not the hook's.** `pendingView` hands every peer but the owner an empty `piles`,
   so there is nothing here to hide — and the empty case is what the `piles.length > 0` gate is for.
 - **Shared drag.** `useCardReorder` powers both the board and playground: drag left/right, preview the
-  insertion, release to commit within that pile. Arrow keys also reorder on the board. Rows with fewer
+  insertion, release to commit within that pile. Board keyboard reordering was removed after review. Rows with fewer
   than three cards clamp to their actual length. Projection refreshes preserve the chosen order.
 - **The RESOLVE waits for the last landing** — the opposite of Cherry-pick above, because a committed reorder is
   invisible in the projection, so there is no second renderer to race and the flight IS what the player is told.
   That disagreement is itself a recorded finding.
 - **Reduced motion answers at once**, with nothing left flying.
+- **Rejected RESOLVE** restores the face-up row, clears the flight lock and permits another confirmation.
 
 **Sequence.** Deal out of `pileBox(pile)` into the numbered row (`DEAL_DUR 520` / `DEAL_STEP 80`, settle
 `DEAL_HOLD 200`) → reorder → `faceDown` flips the row (`FLIP_DUR 420`), hold `FLIP_HOLD 260`, then `returnToDeck`
@@ -2348,17 +2355,35 @@ under a caption saying what the table is waiting for).
 **What differs from the story, and why**
 - **The centre is the projection's, not a beat's.** `pending.thrown` is public and survives every batch boundary,
   so the standing cards are rendered from it — exactly as `cardById(pending.requested)` persists for `requestCard`
-  — and `upgradeBeat` animates only ARRIVALS, letting its carrier go in the same commit the projection takes over
-  (I7).
+  — and `upgradeBeat` hands arrivals to that row in the same commit (I7). It also owns the final
+  base discard and sudo take/discard, so no generic beat repeats those legs.
 - **Answers may arrive together or apart.** `planBeats` folds consecutive `upgradeThrown` into one staggered beat;
   seats answering in separate batches become separate short beats over a centre that persists on its own. Both
   read the same on the table, which is the point of folding a run.
 - **An empty seat answers for itself.** `driveAbsent` drains the roster past a player who walked away, so one
   absence cannot hold the match.
 
-**Sequence.** Per throw: `seatBox(player)` → a card-sized box inside the seat (I6), `playToCenter` to the centre
-(`THROW_DUR 460`, growing from `THROW_SCALE 0.42`), staggered `THROW_STEP 260` inside one batch; `drop(key)` on
-landing.
+**Local contribution.** Pull a card from the real hand: its dropped rect is the source and its measured 150 px row slot the destination of
+`playToCenter` (460 ms); dispatch `upgradeDiscard` after landing. The accepted beat adopts that
+carrier. Rejection releases the carrier and restores the card to the fan. There is no second hand
+choice panel. Under reduced motion, accepting the pending clears the local contribution lock
+without waiting for a beat handoff (the queue skips motion); a subsequent Upgrade can accept a
+fresh pull. Normal motion retains the carrier until the accepted beat releases it.
+
+**Remote sequence.** Per throw: `seatBox(player)` → a card-sized box inside the seat (I6), `playToCenter` to the centre
+(`THROW_DUR 460`, growing from `THROW_SCALE 0.42`), staggered `THROW_STEP 260` inside one batch.
+Slots are reserved for the sorted roster before measuring, so arrival order does not shift targets.
+On landing, publish the row and release its carriers together. For the final base answer, the
+upgrade beat owns a `HOLD_MS 2500` read hold followed by shared `useDiscardExit` from those same
+measured row nodes (90 ms stagger), then clears the pending. The generic discard beat does not
+repeat these exits.
+
+**Sudo resolution.** `upgradeTaken` and its remaining discard tail form one upgrade beat. The
+chosen row card grows to the centre over 460 ms, holds for 560 ms, then uses `useHandArrival`
+for the local actor (with a real fan gap) or `dealToSeat` for a remote actor. Unchosen row nodes
+leave through `useDiscardExit` with a 90 ms stagger. The chosen slot stays reserved until all
+legs finish. The planner identifies the chosen physical card from public `pending.thrown` and
+the discarded tail's player/card pairs; duplicate faces do not select the wrong player's card.
 
 **Where.** `pages/board/[gameId]/_useUpgradeStaging.tsx`, `features/board-beats/upgradeBeat.tsx`,
 `features/board-beats/planBeats.ts`.
@@ -2816,3 +2841,15 @@ right rail. ConfirmAction must not be positioned inside a vertically centered ca
 that anchors the bar to the card rows and hides choices (including the final wrapped row).
 Selection only arms the requested card; confirmation sends `requestCard` with its catalogue ID.
 The existing `requested` / `handTransfer` beats handle the public reveal, transfer, and miss.
+
+
+## PR134 board interaction corrections — implementation status
+
+Targetless Monitoring and Git cards use the hand pull's `stagePlain` path and reach the centre
+before dispatch. A hand click does not initiate a standalone play. Targeted plays retain their
+target choice after staging.
+
+Local defense and neutralization beats await the staged carrier's `whenLanded` before `SHOW_HOLD`.
+Defense pair staging calls shared `usePairFold`; `_useBoardStaging` and `comboBeat` still have local
+fold implementations (see backlog). These notes describe code paths, not full browser parity
+between the board and playground.

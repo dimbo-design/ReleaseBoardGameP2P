@@ -1,5 +1,6 @@
 import { fireEvent, render } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
+import { mockReducedMotion } from '~/test/reducedMotion'
 import Board from '../_Board'
 import { makeBoardProps } from './fixture'
 
@@ -37,6 +38,7 @@ it('renders the projection’s own discard heap in the pile', () => {
 // (docs/animations/README.md — "Gating the hand", approach 3). Only the opening
 // is exclusive, so on a board with no intro every hand card stays clickable.
 it('leaves the hand live on a board with no opening', () => {
+  mockReducedMotion(true)
   const onPlay = vi.fn()
   const base = makeBoardProps()
   const uid = base.state.you.hand[0].uid
@@ -57,6 +59,7 @@ it('leaves the hand live on a board with no opening', () => {
   // refuses the pull and the press falls back to a plain click: down and up
   // with no movement between them, under Hand's own drag threshold.
   fireEvent.mouseDown(slot as HTMLElement)
-  fireEvent.mouseUp(slot as HTMLElement)
+  fireEvent.mouseMove(window, { clientX: 0, clientY: -200 })
+  fireEvent.mouseUp(window, { clientX: 0, clientY: -200 })
   expect(onPlay).toHaveBeenCalledWith(uid, undefined, undefined)
 })

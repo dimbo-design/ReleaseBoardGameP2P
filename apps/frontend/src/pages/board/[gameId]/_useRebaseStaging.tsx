@@ -19,7 +19,6 @@ import { useResolveFeedback } from './_useResolveFeedback'
 // same three positions.
 //
 // The board and playground share the same drag, insertion preview and drop.
-// Arrow keys provide the same reorder for keyboard users.
 //
 // THE FLIGHTS (Task D2): ported from the approved playground scene
 // (`apps/playground/stories/interactive/GitCards/Rebase.tsx`), values verbatim.
@@ -206,16 +205,6 @@ export function useRebaseStaging(args: {
 
   if ((!ours && !flying) || (confirmed && !flying)) return { row: null }
 
-  const move = (pile: number, uid: string, delta: number) =>
-    setOrder((o) => {
-      const cards = [...(o[pile] ?? [])]
-      const from = cards.indexOf(uid)
-      const to = from + delta
-      if (from < 0 || to < 0 || to >= cards.length) return o
-      cards.splice(to, 0, ...cards.splice(from, 1))
-      return { ...o, [pile]: cards }
-    })
-
   const confirm = () => {
     if (!ours || confirmed || !ready || reorder.drag) return
     // Committed against THIS render's offer: every offered pile, answered
@@ -321,11 +310,6 @@ export function useRebaseStaging(args: {
                         className={styles.move}
                         aria-label={`${copy.position} ${i + 1}`}
                         disabled={!ready}
-                        onKeyDown={(e) => {
-                          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
-                          e.preventDefault()
-                          move(entry.pile, uid, e.key === 'ArrowLeft' ? -1 : 1)
-                        }}
                       />
                     )}
                   </div>

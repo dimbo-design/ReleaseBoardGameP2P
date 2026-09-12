@@ -398,18 +398,21 @@ const opponentSudoAfter: BoardState = {
 // The mutation-check: drop the `plan.attacker === ctx.base.selfId` guard (or
 // the sudo aux) in `runAttack` and this fails two different ways — either the
 // opponent's own throw would go looking for a local handoff that was never
-// there (nothing folds, no pending renders), or only one half would fold and
+// there (nothing flies, no pending renders), or only one half would fly and
 // the CardPair assertion below would find a lone Card instead.
-it('an opponent’s sudo attack plans the full fold — no local staging involved at any point', async () => {
+it('an opponent’s sudo attack lands the pair in its pending pose without local staging', async () => {
   played.names = []
+  played.calls = []
   const { rerender } = render(<Harness live={opponentSudoBefore} events={[]} />)
   expect(api.staging?.staged).toBeNull()
   expect(api.handoffRef?.current).toBeNull()
 
   await drive(() => rerender(<Harness live={opponentSudoAfter} events={[opponentSudoAttacked]} />))
 
-  // both halves fold in from the attacker’s own seat
-  expect(played.names.filter((n) => n === 'foldIntoPair')).toHaveLength(2)
+  // The assembled pair flies as one card from the attacker's seat and lands
+  // in the same pose as the standing pending render (DefenseRelease).
+  expect(played.names).toEqual(['playToCenter'])
+  expect(played.calls[0]?.params).toMatchObject({ rotate: -4, dx: 0, dy: 0 })
   // the local player never staged anything — an opponent’s play never reads
   // or writes the handoff at all
   expect(api.handoffRef?.current).toBeNull()
@@ -912,9 +915,9 @@ it('plays the whole exchange for a watching peer that gets both events at once',
 
   await drive(() => rerender(<Harness live={watchingAfter} events={oneFlush} />), 120)
 
-  // the attack folded in, and the defence flew over it — two movements, not
+  // the attack landed in its table pose, and the defence flew over it — two movements, not
   // one, and the second is the one that used to be missing entirely
-  expect(played.names).toContain('foldIntoPair')
+  expect(played.names).toContain('landInPose')
   expect(played.names).toContain('playToCenter')
   // and the defence really TRAVELLED: out of the defender's own seat, which is
   // `cardBoxIn` of the stubbed rect above (centre 475/305, a CARD_W box), not a
@@ -922,8 +925,8 @@ it('plays the whole exchange for a watching peer that gets both events at once',
   const cover = played.calls.find((c) => c.name === 'playToCenter')
   expect(cover?.params.from).toMatchObject({ left: 475 - CARD_W / 2 })
   expect(cover?.params.from).not.toEqual(cover?.params.to)
-  // the fold happened first: the cover covers something that is already there
-  expect(played.names.indexOf('foldIntoPair')).toBeLessThan(played.names.indexOf('playToCenter'))
+  // the landing happened first: the cover covers something that is already there
+  expect(played.names.indexOf('landInPose')).toBeLessThan(played.names.indexOf('playToCenter'))
   // and the exchange reached the heap, in the order it lay on the table
   const heap = screen.getByTestId('discard-heap').querySelectorAll('[data-card]')
   expect(Array.from(heap).map((el) => el.getAttribute('data-card'))).toEqual([

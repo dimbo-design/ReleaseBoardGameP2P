@@ -295,3 +295,117 @@ describe('Git Rebase', () => {
     expect(events.map((e) => e.type)).toEqual(['rejected'])
   })
 })
+
+describe.each(['base', 'strategic'] as const)('Rebase draws in %s Branch mode', (gitBranch) => {
+  it.each([
+    { sudo: false, chosen: 0 },
+    { sudo: false, chosen: 1 },
+    { sudo: true, chosen: 0 },
+    { sudo: true, chosen: 1 },
+  ])('draws the committed top cards with sudo=$sudo from pile $chosen', ({ sudo, chosen }) => {
+    const main = [pile('a', 5), pile('b', 5), pile('c', 5)]
+    const base = table(sudo ? [REBASE, SUDO] : [REBASE], main)
+    const start: GameState = {
+      ...base,
+      setup: { ...base.setup, gitBranch },
+      turn: { ...base.turn, drawnFrom: [] },
+    }
+    const played = reduce(start, {
+      type: 'PLAY',
+      player: 'p1',
+      card: REBASE.uid,
+      ...(sudo ? { combo: SUDO.uid } : { target: { kind: 'pile' as const, pile: chosen } }),
+      at: 1,
+    }).state
+    const changedPiles = sudo ? [0, 1, 2] : [chosen]
+    expect(played.pending).toMatchObject({
+      kind: 'reorderTop',
+      piles: changedPiles.map((i) => ({ pile: i, cards: main[i].slice(0, 3) })),
+    })
+    const resolved = reduce(played, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: {
+        kind: 'reorderTop',
+        order: changedPiles.map((i) => ({
+          pile: i,
+          cards: [main[i][2].uid, main[i][0].uid, main[i][1].uid],
+        })),
+      },
+      at: 2,
+    })
+    expect(resolved.events).toEqual([])
+    expect(resolved.state.pending).toBeNull()
+    expect(resolved.state.rngCursor).toBe(start.rngCursor)
+    expect(resolved.state.players.p1.hand).toEqual([])
+    expect(resolved.state.turn.drawnFrom).toEqual([])
+
+    const drawn = reduce(resolved.state, { type: 'DRAW', player: 'p1', pile: chosen, at: 3 })
+    const drawnPiles = gitBranch === 'base' ? [0, 1, 2] : [chosen]
+    expect(drawn.state.players.p1.hand).toEqual(
+      drawnPiles.map((i) => main[i][changedPiles.includes(i) ? 2 : 0]),
+    )
+    expect(drawn.events.map((event) => event.type)).toEqual(drawnPiles.map(() => 'drawn'))
+    expect(drawn.state.turn.drawnFrom).toEqual(drawnPiles)
+    for (const i of [0, 1, 2]) {
+      const reordered = changedPiles.includes(i)
+        ? [main[i][2], main[i][0], main[i][1], ...main[i].slice(3)]
+        : main[i]
+      expect(drawn.state.decks.main[i]).toEqual(
+        drawnPiles.includes(i) ? reordered.slice(1) : reordered,
+      )
+    }
+  })
+
+  it.each([
+    false,
+    true,
+  ])('preserves the remaining order after an opponent draws before the next turn (sudo=%s)', (sudo) => {
+    const main = [pile('a', 5), pile('b', 5)]
+    const base = table(sudo ? [REBASE, SUDO] : [REBASE], main)
+    const start: GameState = {
+      ...base,
+      setup: { ...base.setup, gitBranch },
+      turn: { ...base.turn, drawnFrom: [0, 1] },
+      players: { ...base.players, p2: { ...base.players.p2, hand: [] } },
+    }
+    const played = reduce(start, {
+      type: 'PLAY',
+      player: 'p1',
+      card: REBASE.uid,
+      ...(sudo ? { combo: SUDO.uid } : { target: { kind: 'pile' as const, pile: 1 } }),
+      at: 1,
+    }).state
+    const changedPiles = sudo ? [0, 1] : [1]
+    const resolved = reduce(played, {
+      type: 'RESOLVE',
+      player: 'p1',
+      choice: {
+        kind: 'reorderTop',
+        order: changedPiles.map((i) => ({
+          pile: i,
+          cards: [main[i][2].uid, main[i][0].uid, main[i][1].uid],
+        })),
+      },
+      at: 2,
+    }).state
+    const opponentTurn = reduce(resolved, { type: 'PUSH', player: 'p1', at: 3 }).state
+    expect(opponentTurn.turn.player).toBe('p2')
+    const opponentDraw = reduce(opponentTurn, {
+      type: 'DRAW',
+      player: 'p2',
+      pile: 1,
+      at: 4,
+    }).state
+    expect(opponentDraw.players.p2.hand).toEqual(
+      gitBranch === 'base' ? [main[0][sudo ? 2 : 0], main[1][2]] : [main[1][2]],
+    )
+    const ownTurn = reduce(opponentDraw, { type: 'PUSH', player: 'p2', at: 5 }).state
+    expect(ownTurn.turn.player).toBe('p1')
+    const ownDraw = reduce(ownTurn, { type: 'DRAW', player: 'p1', pile: 1, at: 6 }).state
+    expect(ownDraw.players.p1.hand).toEqual(
+      gitBranch === 'base' ? [main[0][sudo ? 0 : 1], main[1][0]] : [main[1][0]],
+    )
+    expect(ownDraw.decks.main[1]).toEqual(main[1].slice(1).filter((card) => card !== main[1][2]))
+  })
+})

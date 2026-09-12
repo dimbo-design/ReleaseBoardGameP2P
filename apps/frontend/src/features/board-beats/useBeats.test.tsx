@@ -821,7 +821,7 @@ const autoAnswered503 = [
   { id: 10, type: 'discarded', player: 'p1', card: 'trigger-error-503', reason: 'trigger' },
 ] as Event[]
 
-it('lights the alarm while a self-answered 503 is on its way out', async () => {
+it('keeps the alarm dark when standing Monitoring answers automatically', async () => {
   motion.reduced = false
   sent.calls = []
   sent.hang = false
@@ -832,7 +832,7 @@ it('lights the alarm while a self-answered 503 is on its way out', async () => {
   rerender(<Probe live={afterSweep} events={autoAnswered503} anchors={stub} alarms={alarms} />)
   await flush()
   // it burned at some point during the beat…
-  expect(alarms).toContain(true)
+  expect(alarms).not.toContain(true)
   // …and the table is not left lit once the queue has drained
   expect(getByTestId('alarm').textContent).toBe('none')
 })

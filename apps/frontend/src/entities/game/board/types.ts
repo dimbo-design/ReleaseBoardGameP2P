@@ -59,6 +59,7 @@ export interface BoardOpponent {
 // Everything the engine's projection can answer. Assembled by the consumer's
 // adapter; nothing here is room- or session-shaped.
 export interface BoardState {
+  aiCause?: { card: string; eventId: number }
   you: {
     name: string
     hand: HandItem[]
@@ -264,6 +265,7 @@ export interface BoardCopyBundle {
  * sibling feature.
  */
 export interface BeatRun {
+  after?: BoardState
   base: BoardState
   publish: (state: BoardState) => void
 }
@@ -285,6 +287,7 @@ export interface BeatRun {
  * beat queue (`features/board-beats`) need this same shape.
  */
 export interface StagedHandoff {
+  whenLanded?: () => Promise<void>
   mainUid: string
   supportUid?: string
   el: HTMLElement | null // the staged node at the centre (pair flyer or single-card node)
@@ -396,5 +399,5 @@ export interface BoardProps {
 
 export interface DiscardPickHandoff {
   card: string
-  run: () => Promise<void>
+  run: (after: BoardState) => Promise<void>
 }

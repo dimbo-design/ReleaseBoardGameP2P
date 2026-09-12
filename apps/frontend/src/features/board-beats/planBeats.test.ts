@@ -1949,3 +1949,73 @@ describe('planBeats — System Upgrade (#108)', () => {
     expect(plans.map((p) => p.kind)).toEqual(['upgrade', 'upgrade'])
   })
 })
+
+it('plans Monitoring placement through the centre and release zone', () => {
+  expect(
+    planBeats(
+      [{ id: 20, type: 'placed', player: 'p1', card: 'protection-monitoring' }],
+      boardBefore(),
+    ),
+  ).toMatchObject([{ kind: 'releasePlaced', card: 'protection-monitoring', slot: 'monitoring' }])
+})
+
+it('keeps final base Upgrade row exits in the upgrade beat', () => {
+  const before = boardBefore({
+    pending: {
+      kind: 'systemUpgrade',
+      actor: 'p3',
+      owed: ['p1'],
+      thrown: [{ player: 'p2', card: { uid: 't1', id: 'defense-hotfix' } }],
+      sudo: false,
+      phase: 'discarding',
+      source: 'operation-system-upgrade',
+    },
+  })
+  const events: Event[] = [
+    { id: 1, type: 'upgradeThrown', player: 'p1', card: 'attack-bug' },
+    discarded(2, { player: 'p2', card: 'defense-hotfix' }),
+    discarded(3),
+  ]
+  const plans = planBeats(events, before)
+  expect(plans).toHaveLength(1)
+  expect(plans[0]).toMatchObject({
+    kind: 'upgrade',
+    clear: [
+      { eventId: 2, player: 'p2', card: 'defense-hotfix' },
+      { eventId: 3, player: 'p1', card: 'attack-bug' },
+    ],
+  })
+})
+
+it('identifies the sudo Upgrade choice by public UID even with matching card faces', () => {
+  const before = boardBefore({
+    pending: {
+      kind: 'systemUpgrade',
+      actor: 'p1',
+      owed: [],
+      thrown: [
+        { player: 'p2', card: { uid: 'first', id: 'attack-bug' } },
+        { player: 'p3', card: { uid: 'chosen', id: 'attack-bug' } },
+      ],
+      sudo: true,
+      phase: 'picking',
+      source: 'operation-system-upgrade',
+    },
+  })
+  const plans = planBeats(
+    [
+      { id: 1, type: 'upgradeTaken', player: 'p1', card: 'attack-bug' },
+      discarded(2, { player: 'p2' }),
+    ],
+    before,
+  )
+  expect(plans).toEqual([
+    {
+      kind: 'upgrade',
+      key: 'upgrade-take:1',
+      throws: [],
+      take: { player: 'p1', card: 'attack-bug', uid: 'chosen', fromPlayer: 'p3' },
+      clear: [{ eventId: 2, player: 'p2', card: 'attack-bug' }],
+    },
+  ])
+})

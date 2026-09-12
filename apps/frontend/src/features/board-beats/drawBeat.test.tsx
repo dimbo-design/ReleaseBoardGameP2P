@@ -5,8 +5,9 @@ import { expect, it, vi } from 'vitest'
 import type { BoardAnchors, BoardState } from '~/entities/game/board'
 import { useDrawBeat } from './drawBeat'
 import type { PlannedDraw } from './planBeats'
+import { TABLE_HOLD } from './toCentre'
 
-const played = vi.hoisted(() => ({ names: [] as string[] }))
+const played = vi.hoisted(() => ({ names: [] as string[], waits: [] as number[] }))
 // What each real `arrive()` call was aimed at — the `handLength` argument.
 // I8's whole claim is that the SECOND card of a batch aims at the fan the
 // FIRST card actually grew to, not the length the batch started with; the
@@ -28,6 +29,10 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
   const real = await importOriginal<typeof import('@release/ui/animations')>()
   return {
     ...real,
+    wait: (ms: number) => {
+      played.waits.push(ms)
+      return real.wait(ms)
+    },
     play: (name: string) => {
       played.names.push(name)
       return { finished: Promise.resolve() } as unknown as Animation
@@ -270,4 +275,12 @@ it('leaves a standing trigger at the centre and publishes the pending behind it'
   // the two with the flyer gone and the alarm not yet rendered — a blank
   // centre slot for a frame, the exact defect this beat exists to prevent.
   expect(order.log).toEqual(['publish:pending', 'drop:draw'])
+})
+
+it('raises the unanswered 503 alarm as soon as the flip settles', async () => {
+  played.waits = []
+  const { published, go } = run([draw({ card: undefined, reveal: { card: 'trigger-error-503' } })])
+  await go()
+  expect(published.at(-1)?.pending?.kind).toBe('neutralize503')
+  expect(played.waits).not.toContain(TABLE_HOLD)
 })

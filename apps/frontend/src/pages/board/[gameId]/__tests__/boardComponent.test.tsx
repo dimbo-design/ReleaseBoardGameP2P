@@ -12,6 +12,7 @@ import { restTransform } from '@release/ui/animations'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { vi } from 'vitest'
 import { ATTACK_POSE } from '~/entities/game/board'
+import { mockReducedMotion } from '~/test/reducedMotion'
 import Board from '../_Board'
 import { makeBoardProps } from './fixture'
 
@@ -129,7 +130,8 @@ it('marks an opponent listed in room.disconnected and leaves the others alone', 
   ).toBeNull()
 })
 
-it('plays a targetless card straight from the hand', () => {
+it('plays a targetless card by pulling from the hand', () => {
+  mockReducedMotion(true)
   const base = makeBoardProps()
   const onPlay = vi.fn()
   const uid = base.state.you.hand[0].uid
@@ -145,11 +147,13 @@ it('plays a targetless card straight from the hand', () => {
   // CLICK, not a drag: Hand's own threshold (Hand.tsx, DRAG_THRESHOLD) decides.
   const slot = container.querySelectorAll('[data-hand-slot]')[0]
   fireEvent.mouseDown(slot)
-  fireEvent.mouseUp(slot)
+  fireEvent.mouseMove(window, { clientX: 0, clientY: -200 })
+  fireEvent.mouseUp(window, { clientX: 0, clientY: -200 })
   expect(onPlay).toHaveBeenCalledWith(uid, undefined, undefined)
 })
 
-it('dispatches onAttack when a card open to a window attack is clicked', () => {
+it('dispatches onAttack when a card open to a window attack is pulled', () => {
+  mockReducedMotion(true)
   const base = makeBoardProps()
   const onAttack = vi.fn()
   const uid = base.state.you.hand[0].uid
@@ -176,7 +180,8 @@ it('dispatches onAttack when a card open to a window attack is clicked', () => {
   // from the hand" above (a short press, no movement between down and up).
   const slot = container.querySelectorAll('[data-hand-slot]')[0]
   fireEvent.mouseDown(slot)
-  fireEvent.mouseUp(slot)
+  fireEvent.mouseMove(window, { clientX: 0, clientY: -200 })
+  fireEvent.mouseUp(window, { clientX: 0, clientY: -200 })
   expect(onAttack).toHaveBeenCalledWith(uid, undefined)
 })
 

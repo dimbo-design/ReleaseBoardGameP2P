@@ -33,11 +33,7 @@
   cursor: default;
 }
 
-.hand {
-  position: absolute;
-  inset-block-end: 22%;
-  inset-inline: 0;
-  display: flex;
-  gap: 16px;
-  justify-content: center;
+.cell {
+  aspect-ratio: var(--card-aspect);
+  pointer-events: none;
 }
