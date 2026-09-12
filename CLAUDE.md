@@ -19,6 +19,11 @@ question in `docs/rules/backlog.md` **and** a marker in the spec at the exact pa
 came up (`> ❓ **Не из правил.**`). A guess written down as a rule stops being a guess: code gets
 written from it, a test pins it, and it becomes the source everyone checks against.
 
+**An AI card never leaves the game.** It is always in the events deck, in a release zone, or being
+played at the centre of the table. Do not describe it as burnt or discarded: an AI release given up to
+answer a 503 is *sacrificed*, and an AI card leaving the table goes *back to the events deck*. Wording
+like this steers every agent that reads it.
+
 **Design specs live in [`docs/specs/`](./docs/specs/)** (`YYYY-MM-DD-<topic>-design.md`).
 
 What exists today: the monorepo skeleton, the UI component library, the frontend shell, and the P2P networking layer (`apps/frontend/src/network/` plus the self-hosted signaling server). Game logic — the in-game board screens — is out of scope for this phase and lives in later specs.
