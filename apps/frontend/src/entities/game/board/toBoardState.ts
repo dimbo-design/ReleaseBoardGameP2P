@@ -363,22 +363,20 @@ function toDiscardHeap(log: Event[], top: CardData | undefined, count: number): 
  * engine's own field, and this function only assembles what it already
  * says — it does not infer a link the engine never emitted.
  *
- * `packages/engine/src/events.ts` claims more than the engine's emitters
- * deliver: "a defence names the attack it answered ... so the history tree
- * needs no inference" is an aspiration written on `EventBase.parent`, not a
- * description of current behaviour. What the fake engine actually parents a
- * `discarded` event to, today, is one of `eliminated`, `defended`, `revealed`,
- * `neutralized`, `aiRevealed`, `tookHit`, `monitoringDestroyed` or
- * `releaseReturned` (`packages/engine/src/fake/triggers.ts`, `attacks.ts`,
- * `handAttacks.ts`) — never an `attacked`. The one link this file's own
- * `attackerOf` reads for — a `defended` naming the `attacked` it answered — is
- * not among them: both `defended` emission sites
- * (`packages/engine/src/fake/attacks.ts:234`, `:352`) call `log.add` with no
- * parent at all. `attackerOf` therefore always takes its
- * `parent === undefined` branch in production, so `returnCard` and `redirect`
- * (Rollback's and Works on my Machine's tails) — and the attack/defence
- * nesting itself — are unreachable outside a test that hand-writes
- * `parent: 1`. Tracked in `docs/animations/backlog.md`.
+ * What the engine links, and therefore all this can assemble: an answer to an
+ * attack (`defended`, `tookHit`) names the `attacked` it answered, what a DDoS
+ * did (`monitoringDestroyed`, `releaseReturned`) names the `attacked` that did
+ * it, and a `discarded` names what spent the card — `eliminated`, `defended`,
+ * `revealed`, `neutralized`, `aiRevealed`, `tookHit`, `attacked` (a spent DDoS),
+ * `monitoringDestroyed` or `releaseReturned`. Nothing else carries a parent, so
+ * nothing else nests.
+ *
+ * The first of those links did not exist until #138: both `defended` emission
+ * sites called `log.add` with no parent, so `attackerOf` always took its
+ * `parent === undefined` branch in production and `returnCard`/`redirect`
+ * were unreachable on a live table while four tests hand-writing `parent: 1`
+ * reported them working. `attackDefenceHistory.test.ts` is the one that drives
+ * the engine's own output through here, and is what would catch it again.
  *
  * An entry whose parent is absent, or names an entry filtered out for this
  * viewer, stays at top level. `MoveHistory` walks only downward from the roots

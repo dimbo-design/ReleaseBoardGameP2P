@@ -396,3 +396,107 @@ it('thaws a frozen card when its owner’s next turn ends', () => {
   const r = reduce(frozen, { type: 'PUSH', player: 'p1', at: 1000 })
   expect(r.state.players.p1.frozen).toEqual([])
 })
+
+// The hand scope has its own attack emission (`openHandAttack`), so the link
+// the release scope makes is a separate one here — same field, other site (#138).
+it('parents a defence to the hand attack it answered', () => {
+  const attacked = reduce(table([BUG], [HOTFIX]), {
+    type: 'PLAY',
+    player: 'p1',
+    card: BUG.uid,
+    target: { kind: 'player', player: 'p2' },
+    at: 1000,
+  })
+  const attack = attacked.events.find((e) => e.type === 'attacked')
+  const r = reduce(attacked.state, {
+    type: 'RESOLVE',
+    player: 'p2',
+    choice: { kind: 'defend', card: HOTFIX.uid },
+    at: 1001,
+  })
+  const defended = r.events.find((e) => e.type === 'defended')
+  expect(attack?.id).toBeDefined()
+  expect(defended?.parent).toBe(attack?.id)
+})
+
+it('parents a taken hand hit to the attack that landed it', () => {
+  const attacked = reduce(table([BUG], [SPARE]), {
+    type: 'PLAY',
+    player: 'p1',
+    card: BUG.uid,
+    target: { kind: 'player', player: 'p2' },
+    at: 1000,
+  })
+  const attack = attacked.events.find((e) => e.type === 'attacked')
+  const r = reduce(attacked.state, {
+    type: 'RESOLVE',
+    player: 'p2',
+    choice: { kind: 'defend', card: null },
+    at: 1001,
+  })
+  const hit = r.events.find((e) => e.type === 'tookHit')
+  expect(attack?.id).toBeDefined()
+  expect(hit?.parent).toBe(attack?.id)
+})
+
+// A DDoS is the one attack whose target is the thrower's choice — any
+// opponent's Monitoring or release (cards.md, DDoS) — and it is never answered,
+// so nothing arrives later to carry that choice. It reaches the table only
+// through what the attack DID. Unless the consequence names its cause, the move
+// history shows a DDoS and what it hit as two unrelated rows.
+it('parents a Monitoring a DDoS destroyed to the attack', () => {
+  const s = table([DDOS], [])
+  const guarded: GameState = {
+    ...s,
+    players: { ...s.players, p2: { ...s.players.p2, release: { monitoring: MON } } },
+  }
+  const r = reduce(guarded, {
+    type: 'PLAY',
+    player: 'p1',
+    card: DDOS.uid,
+    target: { kind: 'monitoring', player: 'p2' },
+    at: 1000,
+  })
+  const attack = r.events.find((e) => e.type === 'attacked')
+  expect(attack?.id).toBeDefined()
+  expect(r.events.find((e) => e.type === 'monitoringDestroyed')?.parent).toBe(attack?.id)
+})
+
+it('parents a release a DDoS returned to the attack', () => {
+  const s = table([DDOS], [])
+  const guarded: GameState = {
+    ...s,
+    players: { ...s.players, p2: { ...s.players.p2, release: { frontend: { card: FE } } } },
+  }
+  const r = reduce(guarded, {
+    type: 'PLAY',
+    player: 'p1',
+    card: DDOS.uid,
+    target: { kind: 'release', player: 'p2', slot: 'frontend' },
+    at: 1000,
+  })
+  const attack = r.events.find((e) => e.type === 'attacked')
+  expect(attack?.id).toBeDefined()
+  expect(r.events.find((e) => e.type === 'releaseReturned')?.parent).toBe(attack?.id)
+})
+
+// Every other spent attack card hangs off its cause — the defence or the hit
+// that answered it. A DDoS has no answer, so its own card hangs off the throw.
+it('parents the spent DDoS card to the attack', () => {
+  const s = table([DDOS], [])
+  const guarded: GameState = {
+    ...s,
+    players: { ...s.players, p2: { ...s.players.p2, release: { monitoring: MON } } },
+  }
+  const r = reduce(guarded, {
+    type: 'PLAY',
+    player: 'p1',
+    card: DDOS.uid,
+    target: { kind: 'monitoring', player: 'p2' },
+    at: 1000,
+  })
+  const attack = r.events.find((e) => e.type === 'attacked')
+  const spent = r.events.find((e) => e.type === 'discarded' && e.reason === 'attackSpent')
+  expect(attack?.id).toBeDefined()
+  expect(spent?.parent).toBe(attack?.id)
+})
