@@ -1,0 +1,39 @@
+/* Everyone's answers, open at the centre (#108). The band the AI pair uses
+   (`centre.ts`'s CENTRE_TOP, 42%), because these cards ARE the centre of the
+   table for as long as the effect runs — not a question hovering over it. */
+.surface {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.centre {
+  position: absolute;
+  inset-block-start: 42%;
+  inset-inline: 0;
+  display: flex;
+  gap: 24px;
+  align-items: flex-end;
+  justify-content: center;
+  transform: translateY(-50%);
+}
+
+.thrown,
+.cell {
+  inline-size: 150px;
+  padding: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.thrown:disabled {
+  cursor: default;
+}
+
+.cell {
+  aspect-ratio: var(--card-aspect);
+  pointer-events: none;
+}

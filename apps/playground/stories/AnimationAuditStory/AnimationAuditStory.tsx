@@ -494,8 +494,8 @@ const SCENARIOS: Scenario[] = [
   {
     name: { ru: 'Розыгрыш карты', en: 'Playing a card' },
     from: {
-      ru: 'flyer (fixed) от rect карты → playToCenter (move 480, EASE) по центрам; wait — удержание; nextFrames перед стартом, чтобы новый узел успел отрисоваться; затем centerToDiscard (move 420) + jitter() на финальные rotate/dx/dy разброса.',
-      en: 'flyer (fixed) from the card rect → playToCenter (move 480, EASE) by centers; wait — hold; nextFrames before start so the new node can paint; then centerToDiscard (move 420) + jitter() for the final scatter rotate/dx/dy.',
+      ru: 'flyer (fixed) от rect карты → playToCenter (move 480, EASE) по центрам; wait — удержание; nextFrames перед стартом, чтобы новый узел успел отрисоваться; затем centerToDiscard (move 420) + jitter() на финальные rotate/dx/dy разброса. На борде розыгрыш начинается вытягиванием: Monitoring и Git без цели сначала достигают центра, затем отправляют действие. Клик по руке не начинает отдельный розыгрыш.',
+      en: 'flyer (fixed) from the card rect → playToCenter (move 480, EASE) by centers; wait — hold; nextFrames before start so the new node can paint; then centerToDiscard (move 420) + jitter() for the final scatter rotate/dx/dy. Board plays start with a hand pull: targetless Monitoring and Git cards reach the centre before dispatch. A hand click does not initiate a standalone play.',
     },
     where: 'CardPlay, DeckAnimations',
   },
@@ -581,8 +581,8 @@ const SCENARIOS: Scenario[] = [
   {
     name: { ru: 'Тревога Error 503 (краевое свечение)', en: 'Error 503 alarm (edge glow)' },
     from: {
-      ru: 'EdgeGlow внутри контейнера зоны стола (.glowBounds — inset:0 области демонстрации: край экрана ≠ край стола, и мерить нечего, потому что зона стола и есть сцена); своя вытяжка — strong ДО Hand в DOM (ПОД рукой); соперник — weak ПОСЛЕ Hand (НАД рукой) + pointer-events:none, чтобы не глушить ховер-реакцию руки; появление/затухание — CSS-transition opacity.',
-      en: 'EdgeGlow inside the table-zone container (.glowBounds — inset: 0 of the demo area: screen edge ≠ table edge, and there is nothing to measure because the table zone IS the stage); own layer — strong BEFORE Hand in the DOM (UNDER the hand); opponent — weak AFTER Hand (OVER the hand) + pointer-events:none so it does not smother the hand hover reaction; fade in/out — CSS-transition opacity.',
+      ru: 'EdgeGlow внутри контейнера зоны стола (.glowBounds — inset:0 области демонстрации: край экрана ≠ край стола, и мерить нечего, потому что зона стола и есть сцена); своя вытяжка — strong ДО Hand в DOM (ПОД рукой); соперник — weak ПОСЛЕ Hand (НАД рукой) + pointer-events:none, чтобы не глушить ховер-реакцию руки; появление/затухание — CSS-transition opacity. На борде стоящая 503 передаётся тревоге после вскрытия и AFTER_FLIP без дополнительного TABLE_HOLD (2600 мс).',
+      en: 'EdgeGlow inside the table-zone container (.glowBounds — inset: 0 of the demo area: screen edge ≠ table edge, and there is nothing to measure because the table zone IS the stage); own layer — strong BEFORE Hand in the DOM (UNDER the hand); opponent — weak AFTER Hand (OVER the hand) + pointer-events:none so it does not smother the hand hover reaction; fade in/out — CSS-transition opacity. On the board, a standing 503 hands over to the alarm after reveal and AFTER_FLIP, without an extra TABLE_HOLD (2600 ms).',
     },
     where: 'DrawCard',
   },
@@ -617,8 +617,8 @@ const SCENARIOS: Scenario[] = [
   {
     name: { ru: 'AI-эффекты — разрешение', en: 'AI effects — resolution' },
     from: {
-      ru: 'добор AI-триггера из базовой колоды → выбранная AI-карта из колоды событий в центр (drawToCenter, крупнее) → hold на столе → разрешение по эффекту. Карта события ВСЕГДА возвращается в AI-колоду (returnToDeck); в общий сброс идут только триггер (centerToDiscard) и уничтоженный ОБЫЧНЫЙ релиз. Release/Monitoring → в пустой слот (playToReleaseZone) и остаётся. Crush → уничтожает совпавший релиз (AI-релиз → AI-колода, обычный → сброс). На игровом столе защита от Crush использует жесты Error 503: перетянуть Debugger или релиз либо нажать стоящий Monitoring; панель выбора не перекрывает эффект. Inside → релиз из сброса через центр в руку (useHandArrival); при нескольких — открытый ряд-выбор с ConfirmAction, невыбранные летят обратно в сброс. Good Vibe → добор 2 карт; триггер в доборе отыгрывается полностью первым, Hallucination ставит флаг прерывания — 2-й добор пропускается. Bad Vibe → карта вытаскивается ИЗ ВЕЕРА и тем же движением встаёт справа от AI-карты, стоит открыто PICK_HOLD, и дальше всё уходит одновременно: триггер в сброс, AI-карта в колоду событий, отданная карта в сброс. Ховер руки заглушён во время анимаций (pointer-events).',
-      en: 'draw the AI trigger from the base deck → the chosen AI card from the events deck to the center (drawToCenter, larger) → hold → resolve by effect. An event card ALWAYS returns to the AI deck (returnToDeck); only the trigger (centerToDiscard) and a destroyed ORDINARY release reach the common discard. Release/Monitoring → into an empty slot (playToReleaseZone) and stays. Crush → destroys the matching release (AI release → AI deck, ordinary → discard). On the live board, an offered Crush defense uses the same card gestures as Error 503: drag Debugger or a release, or press standing Monitoring; no method panel covers the effect. Inside → a release from the discard through the center into the hand (useHandArrival); with several, an open row choice + ConfirmAction, the rest fly back to the discard. Good Vibe → draws 2 cards; a drawn trigger resolves fully first, Hallucination raises a turn-interrupt flag — the 2nd draw is skipped. Bad Vibe → the card is pulled OUT of the fan and, in the same movement, takes its place to the right of the AI card; it stands open for PICK_HOLD, and then everything leaves at once: the trigger to the discard, the AI card back to its deck, the given-up card to the discard. Hand hover is muted during animations (pointer-events).',
+      ru: 'AI Monitoring и AI Release передают карту слоту сразу по завершении полёта; слот отрисовывается до снятия носителя, не дожидаясь параллельного сброса триггера. Добор AI-триггера из базовой колоды → выбранная AI-карта из колоды событий в центр (drawToCenter, крупнее) → hold на столе → разрешение по эффекту. Карта события ВСЕГДА возвращается в AI-колоду (returnToDeck); в общий сброс идут только триггер (centerToDiscard) и уничтоженный ОБЫЧНЫЙ релиз. Release/Monitoring → в пустой слот (playToReleaseZone) и остаётся. Crush → уничтожает совпавший релиз (AI-релиз → AI-колода, обычный → сброс). На игровом столе защита от Crush использует жесты Error 503: перетянуть Debugger или релиз либо нажать стоящий Monitoring; панель выбора не перекрывает эффект. Inside → релиз из сброса через центр в руку (useHandArrival); при нескольких — открытый ряд-выбор с ConfirmAction, невыбранные летят обратно в сброс. Good Vibe → добор 2 карт; триггер в доборе отыгрывается полностью первым, Hallucination ставит флаг прерывания — 2-й добор пропускается. Bad Vibe → карта вытаскивается ИЗ ВЕЕРА и тем же движением встаёт справа от AI-карты, стоит открыто PICK_HOLD, и дальше всё уходит одновременно: триггер в сброс, AI-карта в колоду событий, отданная карта в сброс. Ховер руки заглушён во время анимаций (pointer-events).',
+      en: 'AI Monitoring and AI Release publish their slot at flight landing and paint it before dropping the carrier, without waiting for the concurrent trigger discard. Draw the AI trigger from the base deck → the chosen AI card from the events deck to the center (drawToCenter, larger) → hold → resolve by effect. An event card ALWAYS returns to the AI deck (returnToDeck); only the trigger (centerToDiscard) and a destroyed ORDINARY release reach the common discard. Release/Monitoring → into an empty slot (playToReleaseZone) and stays. Crush → destroys the matching release (AI release → AI deck, ordinary → discard). On the live board, an offered Crush defense uses the same card gestures as Error 503: drag Debugger or a release, or press standing Monitoring; no method panel covers the effect. Inside → a release from the discard through the center into the hand (useHandArrival); with several, an open row choice + ConfirmAction, the rest fly back to the discard. Good Vibe → draws 2 cards; a drawn trigger resolves fully first, Hallucination raises a turn-interrupt flag — the 2nd draw is skipped. Bad Vibe → the card is pulled OUT of the fan and, in the same movement, takes its place to the right of the AI card; it stands open for PICK_HOLD, and then everything leaves at once: the trigger to the discard, the AI card back to its deck, the given-up card to the discard. Hand hover is muted during animations (pointer-events).',
     },
     where: 'AiCardsStory',
     board:
@@ -645,28 +645,32 @@ const SCENARIOS: Scenario[] = [
       'features/board-beats/transferBeat.tsx, features/board-beats/planBeats.ts, pages/board/[gameId]/_useRequestStaging.tsx, pages/board/[gameId]/_Board.tsx',
   },
   {
-    name: { ru: 'Git Cherry-pick (прототип)', en: 'Git Cherry-pick (prototype)' },
+    name: { ru: 'Git Cherry-pick', en: 'Git Cherry-pick' },
     from: {
-      ru: 'сброс раздаётся в грид выбора (стаггер DEAL_STEP, cap STAGGER_CAP); выбранная — к центру, useHandArrival в руку; sudo-вторая — flipCard рубашкой + returnToDeck на колоду; невыбранные возвращаются в стопку по scatterAt (порядок сохраняется, без перетасовки). Rules-complete отложен (#61).',
-      en: 'the discard deals into a selection grid (stagger DEAL_STEP, cap STAGGER_CAP); the pick → centre, useHandArrival into the hand; a sudo second card → flipCard back-up + returnToDeck onto the deck; the unpicked return to the pile by scatterAt (order kept, no reshuffle). Rules-complete deferred (#61).',
+      ru: 'При приземлении выбранный uid одновременно добавляется в руку и сохраняется в личном порядке: следующая проекция не сдвигает карту в конец. Вертикальные отступы скролл-контейнера сохраняют рамку и подписи. Сброс раздаётся в грид; выбор — через центр и useHandArrival в руку; sudo-вторая — flipCard и returnToDeck. Борд скрывает кучу и счётчик, пока грид владеет картами. Подтверждение отправляет RESOLVE, принятое событие запускает единственный полёт; невыбранные возвращаются через useDiscardExit. Отказ разблокирует выбор. Полный браузерный паритет ещё не подтверждён. takenFromDiscard убирает выбранные карты из кучи; after-heap задаёт позы возврата один к одному даже для дублей. Отказ автоответа с одной картой открывает ручной повтор.',
+      en: 'Landing publishes the chosen UID and commits the private hand order in the same step, so the next projection cannot move it to the end. Scroll-box block padding preserves the outline and role labels. Discard deals into a grid; the pick travels through the centre and useHandArrival; the sudo second card uses flipCard and returnToDeck. The board hides the heap/count while the grid owns the cards. Confirm submits RESOLVE; acceptance starts the sole flight, including unpicked returns through useDiscardExit. Rejection unlocks the choice. Full browser parity is not yet verified. takenFromDiscard removes selected cards from the heap; the after-heap assigns return poses one-to-one, including duplicates. A rejected single-card auto-answer opens manual retry.',
     },
     where: 'GitCards/CherryPick',
+    board: 'pages/board/[gameId]/_useCherryPickStaging.tsx, pages/board/[gameId]/_Board.tsx',
   },
   {
-    name: { ru: 'Git Rebase (прототип)', en: 'Git Rebase (prototype)' },
+    name: { ru: 'Git Rebase', en: 'Git Rebase' },
     from: {
-      ru: 'верхние 3 карты колоды вылетают в нумерованный ряд (DEAL_DUR/STEP), игрок меняет порядок, затем flipCard рубашкой + returnToDeck обратно на колоду в выбранном порядке (BACK_DUR/STEP). Знание о колоде не моделируется (#61 q9). Rules-complete отложен.',
-      en: 'the top 3 cards fly out into a numbered row (DEAL_DUR/STEP), the player reorders, then flipCard back-up + returnToDeck onto the deck in the chosen order (BACK_DUR/STEP). Deck knowledge is not modelled (#61 q9). Rules-complete deferred.',
+      ru: 'верхние 3 карты колоды вылетают в нумерованный ряд (DEAL_DUR/STEP), игрок меняет порядок, затем flipCard рубашкой + returnToDeck обратно на колоду в выбранном порядке (BACK_DUR/STEP). Знание о колоде не моделируется (#61 q9). На живом борде (#108) приватность обеспечивает проекция: `pendingView` отдаёт всем, кроме владельца, пустой `piles`, так что скрывать в хуке нечего. Борд и сцена используют useCardReorder. Отказ RESOLVE снимает блокировку и восстанавливает открытый ряд для повторного ответа.',
+      en: 'the top 3 cards fly out into a numbered row (DEAL_DUR/STEP), the player reorders, then flipCard back-up + returnToDeck onto the deck in the chosen order (BACK_DUR/STEP). Deck knowledge is not modelled (#61 q9). On the live board (#108) the projection is what makes it private: `pendingView` hands every peer but the owner an empty `piles`, so there is nothing for the hook to hide. Board and story use useCardReorder. Rejected RESOLVE unlocks and restores the face-up row for another answer.',
     },
     where: 'GitCards/Rebase',
+    board: 'pages/board/[gameId]/_useRebaseStaging.tsx, pages/board/[gameId]/_Board.tsx',
   },
   {
-    name: { ru: 'System Upgrade (прототип)', en: 'System Upgrade (prototype)' },
+    name: { ru: 'System Upgrade', en: 'System Upgrade' },
     from: {
-      ru: 'каждый соперник бросает карту с места в центр (THROW_DUR/STEP, рост THROW_SCALE→1); base — после HOLD_MS всё в сброс (centerToDiscard, стаггер CLEAR_STEP); sudo — игрок берёт одну (reveal + useHandArrival), остальные в сброс. Rules-complete отложен.',
-      en: 'each opponent throws a card from its seat to the centre (THROW_DUR/STEP, growing THROW_SCALE→1); base — after HOLD_MS all to the discard (centerToDiscard, stagger CLEAR_STEP); sudo — the player takes one (reveal + useHandArrival), the rest to the discard. Rules-complete deferred.',
+      ru: 'На борде свой взнос вытягивается из настоящей руки и летит в центр до RESOLVE; принятый такт подхватывает этот носитель. Отказ возвращает карту в веер. Без анимации принятый ответ снимает блокировку без ожидания такта: следующий Upgrade снова принимает вытягивание. Чужие взносы летят от места игрока. pending.thrown сохраняет стоящие карты между батчами; sudo позволяет выбрать одну в руку. Все полёты используют измеренные слоты ряда шириной 150 px. Финальный base-такт держит ряд 2500 мс и сам отправляет его в сброс через useDiscardExit со стаггером 90 мс. Sudo-такт ведёт выбранную карту через центр в руку (useHandArrival) или к месту актёра; остальные узлы ряда уходят в сброс, без повторного общего такта.',
+      en: 'On the board, pull your contribution from the real hand; it reaches the centre before RESOLVE and the accepted beat adopts that carrier. Rejection restores the card to the fan. Reduced motion clears the accepted contribution lock without waiting for a beat, so the next Upgrade accepts another pull. Remote contributions fly from their seat. pending.thrown retains standing cards across batches; sudo offers one to take into the hand. All flights use measured 150 px row slots. The final base beat holds the row for 2500 ms and owns its useDiscardExit to the heap with a 90 ms stagger. The sudo beat carries the chosen card through the centre into the hand (useHandArrival) or to the actor’s seat; the remaining row nodes exit to discard without a repeated generic beat.',
     },
     where: 'GitCards/SystemUpgrade',
+    board:
+      'pages/board/[gameId]/_useUpgradeStaging.tsx, features/board-beats/upgradeBeat.tsx, features/board-beats/planBeats.ts, pages/board/[gameId]/_Board.tsx',
   },
   {
     name: { ru: 'Лимит карт в руке', en: 'Hand limit' },
@@ -702,8 +706,8 @@ const SCENARIOS: Scenario[] = [
   {
     name: { ru: 'Конец партии', en: 'The end of a match' },
     from: {
-      ru: "последний релиз вытягивается из веера и садится в свой слот (playToReleaseZone, SNAP) — зона закрыта. Дальше хлопушки: ТРИ независимых залпа (0 / 620 / 1450ms), у каждого своя сила — она задаёт число частиц, дальность и время в воздухе, поэтому это три события, а не один повтор. Залп — отдельный компонент: частицы создаются один раз и стартуют один раз в эффекте на монтирование (запуск из ref-колбэка убивал уже летящие: колбэк переприсваивается на каждом рендере, а play вешает вторую анимацию на летящий узел). Частица — свой символ кода, цвет-токен и ступень моно-шкалы; дуга — play('confettiFly'). Окно GameOver встаёт на 2.4s, ПОКА конфетти ещё летит, и конфетти идёт поверх окна. В плейграунде оба слоя начинаются под технической линией — она часть плейграунда, а не экрана.",
-      en: "the last release is pulled out of the fan and settles into its slot (playToReleaseZone, SNAP) — the zone is closed. Then the poppers: THREE independent bangs (0 / 620 / 1450ms), each with its own power — it drives the piece count, the reach and the time in the air, so they are three events and not one repeat. A volley is its own component: the pieces are made once and started once in a mount effect (starting from a render-time ref callback killed the pieces already in the air: the callback re-fires on every render and play stacks a second animation on a node mid-flight). Every piece its own code symbol, colour token and step of the mono scale; the arc is play('confettiFly'). The GameOver window comes up at 2.4s WHILE the confetti is still flying, and the confetti flies over it. In the playground both layers start below the technical line — it belongs to the playground, not the screen.",
+      ru: "На живом борде хлопушки видит только победитель, при любом условии победы. Остальные игроки и зрители переходят к результатам после предыдущих тактов без задержки на конфетти. Последний релиз вытягивается из веера и садится в свой слот (playToReleaseZone, SNAP) — зона закрыта. Дальше хлопушки: ТРИ независимых залпа (0 / 620 / 1450ms), у каждого своя сила — она задаёт число частиц, дальность и время в воздухе, поэтому это три события, а не один повтор. Залп — отдельный компонент: частицы создаются один раз и стартуют один раз в эффекте на монтирование (запуск из ref-колбэка убивал уже летящие: колбэк переприсваивается на каждом рендере, а play вешает вторую анимацию на летящий узел). Частица — свой символ кода, цвет-токен и ступень моно-шкалы; дуга — play('confettiFly'). Окно GameOver встаёт на 2.4s, ПОКА конфетти ещё летит, и конфетти идёт поверх окна. В плейграунде оба слоя начинаются под технической линией — она часть плейграунда, а не экрана.",
+      en: "On the live board only the winner sees poppers, for either victory condition. Other players and spectators see results after preceding beats without a confetti delay. The last release is pulled out of the fan and settles into its slot (playToReleaseZone, SNAP) — the zone is closed. Then the poppers: THREE independent bangs (0 / 620 / 1450ms), each with its own power — it drives the piece count, the reach and the time in the air, so they are three events and not one repeat. A volley is its own component: the pieces are made once and started once in a mount effect (starting from a render-time ref callback killed the pieces already in the air: the callback re-fires on every render and play stacks a second animation on a node mid-flight). Every piece its own code symbol, colour token and step of the mono scale; the arc is play('confettiFly'). The GameOver window comes up at 2.4s WHILE the confetti is still flying, and the confetti flies over it. In the playground both layers start below the technical line — it belongs to the playground, not the screen.",
     },
     where: 'GameEnd',
     board: 'features/board-beats/gameEndBeat.tsx',
@@ -754,6 +758,96 @@ const ISSUES: Issue[] = [
     where: {
       ru: 'engine gameOver(lastStanding) + playground GameEnd (только release) + features/board-beats/gameEndBeat.tsx',
       en: 'engine gameOver(lastStanding) + playground GameEnd (release only) + features/board-beats/gameEndBeat.tsx',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'Git не давал выбрать колоду, подтверждение Rebase перекрывало карты',
+      en: 'Git omitted pile selection and Rebase confirmation covered the cards',
+    },
+    problem: {
+      ru: 'Исправлено: Branch и обычный Rebase предлагают основные колоды через targets движка. Sudo Branch сохраняет выбор, Sudo Rebase использует все колоды. Подтверждение вынесено из прокручиваемых рядов к нижнему краю доски; проверено в браузере.',
+      en: 'Fixed: Branch and ordinary Rebase offer draw piles through engine targets. Sudo Branch keeps the choice; Sudo Rebase uses every pile. Confirmation sits outside the scrolling rows at the board bottom, verified in the browser.',
+    },
+    where: {
+      ru: 'fake/project.ts + pages/board/[gameId]/_Board.tsx + _useBoardStaging.ts + _useRebaseStaging.tsx',
+      en: 'fake/project.ts + pages/board/[gameId]/_Board.tsx + _useBoardStaging.ts + _useRebaseStaging.tsx',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'Сыгранная защита возвращалась в веер во время сброса',
+      en: 'Played defenses reappeared in the fan during discard',
+    },
+    problem: {
+      ru: 'Исправлено: веер остаётся у защитного жеста до завершения передачи. Очередь сохраняет прежнюю проекцию уже на первом кадре новой анимации. Проверены обычная защита, Sudo, быстрый и поздний ответ, reduced motion.',
+      en: 'Fixed: the defense gesture keeps ownership of the fan until handoff finishes. The queue preserves the previous projection on the first render of an animated batch. Covered plain/Sudo defenses, early/late responses and reduced motion.',
+    },
+    where: {
+      ru: 'pages/board/[gameId]/_Board.tsx + features/board-beats/useBeats.ts',
+      en: 'pages/board/[gameId]/_Board.tsx + features/board-beats/useBeats.ts',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'DDoS исчезала без полёта в сброс',
+      en: 'DDoS disappeared without a discard flight',
+    },
+    problem: {
+      ru: 'Исправлено: мгновенно разрешённая атака сама удерживает карту в центре и отправляет её вместе с Sudo в сброс через useDiscardExit. Отдельный такт больше не ищет несуществующий запрос защиты.',
+      en: 'Fixed: an instantly resolved attack owns its centre hold and sends itself and its Sudo through useDiscardExit. A separate beat no longer searches for a defense prompt that never existed.',
+    },
+    where: {
+      ru: 'features/board-beats/planBeats.ts + comboBeat.tsx',
+      en: 'features/board-beats/planBeats.ts + comboBeat.tsx',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'Возвращающаяся AI-карта увеличивалась после разделения колод',
+      en: 'Returning AI cards grew after draw piles were split',
+    },
+    problem: {
+      ru: 'Исправлено: eventsBox привязан к Pile.boxRef, а не к растянутой обёртке. Все обратные полёты используют реальный размер и положение AI-колоды; проверены один, два и три основных стека.',
+      en: 'Fixed: eventsBox uses Pile.boxRef instead of the stretched wrapper. Every return uses the actual AI pile card geometry; verified with one, two and three draw piles.',
+    },
+    where: {
+      ru: 'pages/board/[gameId]/_Board.tsx (eventsBox)',
+      en: 'pages/board/[gameId]/_Board.tsx (eventsBox)',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'Клик по Code Review не начинал комбо',
+      en: 'Clicking Code Review did not start pairing',
+    },
+    problem: {
+      ru: 'Исправлено: клик и вытягивание используют stageAtCentre. Партнёров разрешает comboOptions движка; после Code Review выбирается релиз и оплачивается его стоимость.',
+      en: 'Fixed: clicking and pulling share stageAtCentre. The engine comboOptions authorize partners; choose Code Review, then the release and its cost.',
+    },
+    where: {
+      ru: 'pages/board/[gameId]/_useBoardStaging.ts',
+      en: 'pages/board/[gameId]/_useBoardStaging.ts',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'AI-релиз менял лицо после посадки в зону',
+      en: 'AI releases changed face after landing in the zone',
+    },
+    problem: {
+      ru: 'Исправлено: toBoardState показывает лицо event и сохраняет id правил в releaseId. Своя и чужая зоны сохраняют AI-карту; поиск источника анимации использует id правил.',
+      en: 'Fixed: toBoardState displays the event face and retains the rules identity in releaseId. Both zones keep the AI card; animation source lookup uses the rules identity.',
+    },
+    where: {
+      ru: 'entities/game/board/toBoardState.ts, features/board-beats/planBeats.ts',
+      en: 'entities/game/board/toBoardState.ts, features/board-beats/planBeats.ts',
     },
     status: 'ok',
   },
@@ -1135,8 +1229,8 @@ const ISSUES: Issue[] = [
       en: 'On the board an attack lands untilted — the rest pose supplies the tilt',
     },
     problem: {
-      ru: 'В сцене атака летит `playToCenter` с `rotate: ATTACK_POSE.rot` (480ms) и приземляется уже наклонённой. На борде тот же прилёт делает `comboBeat.foldIn` — `foldIntoPair`, 620ms, только translate+scale: пресет знает позу половины ВНУТРИ пары, но не поворот карты на столе, а один рантаймер обслуживает и одиночную атаку, и пару с судо. Поэтому наклон даёт поза покоя: pending-атака рисуется во внутреннем `.pose` при `restTransform(ATTACK_POSE)` (#101, Fix A) — она же то, ОТ чего стартует выход (`useDiscardExit.pose`), без неё карта дёргалась с 0° на −4° на первом кадре ухода. Покой совпал, движение — нет: в сцене доворот едет по дуге полёта, на борде появляется мгновенно. Закроет `rotate`/`pose` у `foldIntoPair` для карты (не для половины) или отдельный шаг «прилёт на стол в позе» со своей строкой в reference.md. — ОТВЕТ ВЛАДЕЛЬЦА: на нашей стороне уже решено, надо адаптировать. В словаре есть шаг landInPose (наклон едет вместе с картой и в неё же приземляется), инвариант I11 записан. Осталось: comboBeat.foldIn зовёт landInPose для ОДИНОЧНОЙ атаки, парный путь остаётся на foldIntoPair, и ATTACK_POSE сводится к одному объявлению вместо двух.',
-      en: 'In the scene an attack flies `playToCenter` with `rotate: ATTACK_POSE.rot` (480ms) and lands already tilted. On the board the same arrival is `comboBeat.foldIn` — `foldIntoPair`, 620ms, translate+scale only: the preset knows a half’s pose INSIDE a pair, not a card’s rotation on the table, and one runner serves a lone attack and a sudo pair alike. So the tilt comes from the rest pose instead: the pending attack renders in an inner `.pose` at `restTransform(ATTACK_POSE)` (#101, Fix A) — which is also what the exit starts from (`useDiscardExit.pose`), and without it the card popped from 0° to −4° on the exit’s first frame. The rest matches now, the movement does not: in the scene the turn rides the flight arc, on the board it appears instantly. Closed by a `rotate`/`pose` param on `foldIntoPair` for the CARD (not the half), or a step of its own for "landing on the table in a pose", with its row in reference.md. — OWNER: decided on our side already, the board needs adapting. The vocabulary has the landInPose step (the tilt travels with the card and lands with it) and invariant I11 is written down. What is left: comboBeat.foldIn calls landInPose for the SINGLE attack, the pair path stays on foldIntoPair, and ATTACK_POSE collapses to one declaration instead of two.',
+      ru: 'Исправлено для одиночной атаки: comboBeat.foldIn вызывает landInPose (480ms) с restTransform(ATTACK_POSE). Наклон едет вместе с картой; выходы runPairOut и немедленно разрешённой атаки передают тот же ATTACK_POSE и scatterAt события сброса. Проверены источник, поза прибытия и цель сброса. Sudo-атака летит целой CardPair через playToCenter (480ms) с ATTACK_POSE, как в Defense Release. Миграция двух локальных копий образования пары и единое объявление ATTACK_POSE для сцены и борда остаются открытыми.',
+      en: 'Fixed for single attacks: comboBeat.foldIn calls landInPose (480ms) with restTransform(ATTACK_POSE). The tilt travels with the card; runPairOut and immediate attack exits pass the same ATTACK_POSE and the discard event scatterAt. Tests cover the source, arrival pose and discard destination. Sudo attacks travel as a whole CardPair through playToCenter (480ms) at ATTACK_POSE, matching Defense Release. Migrating the two local pair-formation copies and sharing ATTACK_POSE between the story and board remain open.',
     },
     where: {
       ru: 'frontend: features/board-beats/comboBeat.tsx (foldIn), pages/board/[gameId]/_Board.tsx + playground: interactive/DefenseReleaseStory.tsx',
@@ -1150,8 +1244,8 @@ const ISSUES: Issue[] = [
       en: 'The card-and-sudo fold into a pair is written four times, not as a module',
     },
     problem: {
-      ru: 'Один и тот же ход — измерить обе половины, покрасить входные позы enterPose, nextFrames, затем параллельный foldIntoPair на каждую половину — существует отдельным кодом в DefenseReleaseStory.tsx (mergeIntoPair), comboBeat.tsx (foldIn) и _useDefenseStaging.tsx (onCardClick), все три на флаере с CardPair как content, и ещё раз в _useBoardStaging.ts — тем же ходом, но на персистентном узле вместо флаера (оттого и без вспышки в позе покоя, которую флаерная форма даёт на первый кадр-другой, пока raise дожидается nextFrames). Правка тайминга или порядка кадров в одной копии не долетит до трёх остальных сама. — СДЕЛАНО НА НАШЕЙ СТОРОНЕ: жест собран шагом usePairFold() и обе плейграундные копии переведены на него — DefenseRelease (защита и своё судо) и Combo (опора и партнёр, вместе с её персистентным узлом). Шаг закрыл и слепое пятно флаерной формы: пара монтируется невидимой и открывается в тот же тик, когда половинам проставлены входные позы, поэтому кадра «уже сложена» больше нет. Осталось три копии на борде — они заменяются вызовом.',
-      en: 'The same move — measure both halves, paint their entry poses with enterPose, nextFrames, then a parallel foldIntoPair per half — exists as separate code in DefenseReleaseStory.tsx (mergeIntoPair), comboBeat.tsx (foldIn) and _useDefenseStaging.tsx (onCardClick), all three on a flyer carrying a CardPair as content, and once more in _useBoardStaging.ts — the same move, but on a persistent node instead of a flyer (which is also why it skips the flash of the rest pose the flyer form shows for a frame or two while raise awaits nextFrames). A timing or frame-order fix in one copy will not reach the other three on its own. — DONE ON OUR SIDE: the gesture is packed into the usePairFold() step and both playground copies now call it — DefenseRelease (a defence and your own sudo) and Combo (the source and its partner, together with its persistent node). The step also closed the flyer form blind spot: the pair mounts invisible and is revealed in the same tick its halves get their entry poses, so the frame showing it already folded is gone. Three copies remain on the board, each replaceable by the call.',
+      ru: 'Общий шаг usePairFold уже используется сценами DefenseRelease/Combo и защитой борда в _useDefenseStaging. Локальные реализации остаются в _useBoardStaging и comboBeat; их миграция остаётся открытой. Такт локальной защиты ждёт whenLanded перед SHOW_HOLD.',
+      en: 'Shared usePairFold is used by the DefenseRelease/Combo stories and board defense staging. Local implementations remain in _useBoardStaging and comboBeat; their migration stays open. The local defense beat waits for whenLanded before SHOW_HOLD.',
     },
     where: {
       ru: 'frontend: pages/board/[gameId]/_useBoardStaging.ts, _useDefenseStaging.tsx, features/board-beats/comboBeat.tsx + playground: interactive/DefenseReleaseStory.tsx',
@@ -1210,8 +1304,8 @@ const ISSUES: Issue[] = [
       en: 'An AI trigger is banked before its own effect resolves',
     },
     problem: {
-      ru: 'Правила отпускают триггер и эффект одним движением — оба стоят и уходят вместе (сценарный `resolveGeneric` у `AiCardsStory`, и собственный текст Bad Vibe в #106: «всё уходит разом: триггер в сброс, AI-карта в свою колоду»). Движок этого не делает: `fireTrigger` (`packages/engine/src/fake/triggers.ts`, ветка `trigger-ai`) заносит `discarded(trigger-ai)` сразу следом за `aiRevealed`, ДО того как `resolveAiEvent` вообще запускается, — а именно он решает, стоит ли AI-карта дальше и не открыт ли ею пендинг. К моменту, когда прогон доходит до вопроса «выдан ли прогноз», триггер уже в куче сброса, и когда прогноз остаётся висеть (`crush`, `neutralize503`-мимик, `handLimit`, `pickFromDiscard`), такт (`aiBeat.tsx`) вынужден оставить эффект стоять, а триггер отправить домой сразу — асимметрия, записанная в новом рецепте борда как чужая, движковая, а не решение такта. Та же форма, что у соседней находки про Security Bug — движок банкует карту в той же редукции, что поднимает пендинг, до того как стол успевает её показать.',
-      en: 'The rules let go of the trigger and the effect in one movement — both stand and leave together (`AiCardsStory`’s own `resolveGeneric`, and #106’s own Bad Vibe text: “everything leaves at once: trigger to the discard, AI card back to its deck”). The engine does not: `fireTrigger` (`packages/engine/src/fake/triggers.ts`, the `trigger-ai` branch) files `discarded(trigger-ai)` immediately after `aiRevealed`, BEFORE `resolveAiEvent` ever runs — and it is `resolveAiEvent` that decides whether the AI card stands on and whether it opens a pending. By the time the walk reaches the question of whether a prompt is owed, the trigger is already in the discard heap, and on the four endings that leave a prompt standing (`crush`, `neutralize503`’s mimic, `handLimit`, `pickFromDiscard`) the beat (`aiBeat.tsx`) is forced to leave the effect standing while sending the trigger home at once — an asymmetry the new board recipe records as the engine’s own, not a choice this beat made. Same shape as the neighbouring Security Bug finding — the engine banks a card in the same reduction that raises the pending, before the table gets a chance to show it.',
+      ru: 'Движок по-прежнему банкует trigger-ai при вскрытии, до завершения эффекта. Борд теперь удерживает aiCause рядом с эффектом, скрывает его запись и счётчик из видимой кучи и передаёт рендер до снятия флаеров. При ответе причина уходит в сброс вместе с возвратом эффекта. Вопрос порядка событий движка остаётся открытым; прежний ранний визуальный уход исправлен в коде. Полный браузерный паритет не подтверждён.',
+      en: 'The engine still banks trigger-ai at reveal before the effect resolves. The board now retains aiCause beside the effect, hides its heap entry/count and publishes the standing render before releasing flyers. Answering sends the cause to discard alongside the effect return. Engine event timing remains open; the early visual departure is corrected in code. Full browser parity is not verified.',
     },
     where: {
       ru: 'packages/engine/src/fake/triggers.ts (fireTrigger, trigger-ai) + frontend: features/board-beats/aiBeat.tsx',
@@ -1266,6 +1360,21 @@ const ISSUES: Issue[] = [
   },
   {
     what: {
+      ru: 'Rebase переставляет карты кнопками на борде и перетаскиванием в сцене',
+      en: 'Rebase reorders by buttons on the board and by dragging in the story',
+    },
+    problem: {
+      ru: 'Исправлено: борд и сцена используют useCardReorder — захват, превью позиции и отпускание. Работают ряды из одной, двух и трёх карт. Борд сохраняет выбранный порядок при обновлении проекции. Клавиатурная перестановка удалена после ревью PR134.',
+      en: 'Fixed: board and story share useCardReorder for grab, insertion preview and drop, including rows of one or two cards. The board preserves the chosen order across projection refreshes. Keyboard reordering was removed after PR134 review.',
+    },
+    where: {
+      ru: 'apps/playground/stories/interactive/GitCards/Rebase.tsx + pages/board/[gameId]/_useRebaseStaging.tsx',
+      en: 'apps/playground/stories/interactive/GitCards/Rebase.tsx + pages/board/[gameId]/_useRebaseStaging.tsx',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
       ru: 'Движок не называет атаку, которую отвечает защита — хвосты Rollback/Works on my Machine недостижимы',
       en: 'The engine never names the attack a defence answered — the Rollback/Works on my Machine tails are unreachable',
     },
@@ -1276,6 +1385,36 @@ const ISSUES: Issue[] = [
     where: {
       ru: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
       en: 'packages/engine/src/fake/attacks.ts:234,352 + frontend: entities/game/board/toBoardState.ts (attackerOf, buildHistoryTree)',
+    },
+    status: 'open',
+  },
+  {
+    what: {
+      ru: 'Грид Cherry-pick на борде стоит над ЖИВОЙ кучей, в сцене — над опустошённой',
+      en: 'The board’s Cherry-pick grid stands over a LIVE heap; the story’s over an emptied one',
+    },
+    problem: {
+      ru: 'Исправлено в реализации: видимая куча и счётчик скрыты, пока грид владеет кандидатами. Принятое событие запускает handoff грида, такт ждёт его вместо второго полёта из сброса. Выбранная идёт в руку, sudo-вторая на колоду, невыбранные возвращаются в кучу; отказ RESOLVE разблокирует выбор. Полный браузерный паритет не подтверждён.',
+      en: 'Corrected in implementation: the visible heap/count are hidden while the grid owns candidates. The accepted event starts the grid handoff, which the beat awaits instead of a second discard flight. The pick enters the hand, the sudo second card goes to deck, and unpicked cards return to the heap; rejected RESOLVE unlocks the choice. Full browser parity is not verified.',
+    },
+    where: {
+      ru: 'apps/playground/stories/interactive/GitCards/CherryPick.tsx + pages/board/[gameId]/_useCherryPickStaging.tsx',
+      en: 'apps/playground/stories/interactive/GitCards/CherryPick.tsx + pages/board/[gameId]/_useCherryPickStaging.tsx',
+    },
+    status: 'ok',
+  },
+  {
+    what: {
+      ru: 'Две соседние сцены расходятся в том, ждёт ли RESOLVE своего полёта',
+      en: 'Two neighbouring surfaces disagree about whether a RESOLVE waits for its flight',
+    },
+    problem: {
+      ru: 'Cherry-pick отправляет RESOLVE сразу, но полёт запускает только принятое событие: у выбранной карты есть куда приехать, и полёт — это то, что происходит с ЛОКАЛЬНЫМ выбором, пока сеть догоняет. Rebase (план #108, задача D2) требует обратного — ответ уходит, когда села последняя карта, — потому что в проекции о зафиксированном порядке не видно ничего (содержимое колоды не проецируется никому), второго рисующего нет, и полёт и есть всё, что игроку сообщают. Оба решения защищены в своих файлах, но правило теперь одно на двоих отсутствует: третий такой экран не сможет выбрать, не перечитав оба. Приведённое движение не спасёт — расходятся не значения, а момент отправки. Закроет запись этого выбора в `docs/animations/` как правила с двумя ветками и признаком, по которому ветка выбирается (есть ли у карты видимое место назначения в проекции), — либо решение, что борд всегда отвечает сразу, и тогда правку в Rebase.',
+      en: 'Cherry-pick dispatches RESOLVE at once, but only the accepted event starts its flight: the picked card has somewhere visible to land, and the flight is what happens with the LOCAL choice while the network catches up. Rebase (plan #108, task D2) asks for the opposite — the answer goes when the last card lands — because nothing about a committed reorder is visible in the projection (a deck’s contents are projected to nobody), there is no second renderer to race, and the flight IS the whole of what the player is told. Both choices are defended in their own files, but there is now no single rule across them: a third such surface cannot choose without reading both. Aligning the movement would not help — what differs is not a value but the moment of dispatch. What closes it: writing the choice into `docs/animations/` as a rule with two branches and the test that picks one (does the card have a visible destination in the projection?), or a decision that the board always answers at once, and then an edit to Rebase.',
+    },
+    where: {
+      ru: 'pages/board/[gameId]/_useRebaseStaging.tsx + pages/board/[gameId]/_useCherryPickStaging.tsx',
+      en: 'pages/board/[gameId]/_useRebaseStaging.tsx + pages/board/[gameId]/_useCherryPickStaging.tsx',
     },
     status: 'open',
   },

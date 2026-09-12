@@ -32,6 +32,7 @@ import {
   PauseGame,
   PendingPrompt,
   Pile,
+  pendingOwesSelf,
   pileWidthFor,
   Reconnect,
   type ReleaseSlots,
@@ -68,6 +69,7 @@ import kit from '@/table/Table/Table.module.css'
 import { ATTACK_POSE, COVER_POSE, SUDO_POSE, useBoardAnchors } from '~/entities/game/board'
 import type {
   BoardProps,
+  DiscardPickHandoff,
   HandLimitHandoff,
   Panel,
   StagedHandoff,
@@ -76,13 +78,15 @@ import { useBeats, useEliminationPreload } from '~/features/board-beats'
 import { useDealIntro } from '~/features/game-intro/useDealIntro'
 import { useHandOrder } from '~/features/hand-order/useHandOrder'
 import opening from './_Board.module.css'
-import { useBoardInteractions } from './_useBoardInteractions'
 import { useBoardStaging } from './_useBoardStaging'
+import { useCherryPickStaging } from './_useCherryPickStaging'
 import { useDefenseStaging } from './_useDefenseStaging'
 import { useHandLimit } from './_useHandLimit'
 import { useInsideStaging } from './_useInsideStaging'
 import { useNeutralizeStaging } from './_useNeutralizeStaging'
+import { useRebaseStaging } from './_useRebaseStaging'
 import { useRequestStaging } from './_useRequestStaging'
+import { useUpgradeStaging } from './_useUpgradeStaging'
 
 // светофор для лимита зрителей (зеркало палитры из экрана Lobby):
 // 0–8 зелёный, 9–18 жёлтый, 19–28 красный
@@ -219,6 +223,7 @@ export default function Board({
   // declared here, ahead of `useBeats`, because the ref's IDENTITY is all the
   // queue needs at this point; the layout effect that keeps `.current` current
   // runs after every hook regardless of where it sits in the function.
+  const discardPickRef = useRef<DiscardPickHandoff | null>(null)
   const handoffRef = useRef<StagedHandoff | null>(null)
   // The hand limit's own handoff (#104), a ref for the same reason `handoffRef`
   // is one: the beat reads it once at run start (I8), not a render's worth of
@@ -249,6 +254,7 @@ export default function Board({
   // on screen.
   const beats = useBeats({
     live,
+    discardPick: discardPickRef,
     events: intro?.events ?? [],
     anchors,
     enabled: introOver || intro == null,
@@ -312,11 +318,6 @@ export default function Board({
   const controlled = panelProp !== undefined
   const panel = controlled ? panelProp : ownPanel
 
-  // gesture machine: turns clicks into completed intents. Legality is always
-  // the engine's answer (state.playable / state.targets) — Table only renders
-  // what the hook decided, never re-derives it.
-  const gestures = useBoardInteractions({ state, actions })
-
   // the staging gesture: pulling a card that needs a target out of the fan —
   // stands it at the centre, aims the arrow, dispatches on a lit target. Inert
   // under the same gate the click actions already have: the deal or an
@@ -363,6 +364,10 @@ export default function Board({
     enabled: !(deal.active || beats.exclusive),
     matchKey: intro?.gameId ?? null,
   })
+  // The defense still owns its hand exclusions after the beat closes the
+  // prompt: its exit is flying the spent cards while the shadow holds the
+  // old hand. Release that ownership only when staging catches up to live.
+  const defenseOwnsHand = answering || defenseStaging.staged?.phase === 'dispatched'
   // the hand limit owed to US means this hook owns the fan (#104) — a third
   // owner beside `answering` and the turn hook, and the three can never
   // overlap: `state.pending` is one slot.
@@ -411,6 +416,7 @@ export default function Board({
   // no dedicated slot of its own on this branch).
   const pendingSource = state.pending && 'source' in state.pending ? state.pending.source : null
   const pendingSourceCard = pendingSource ? (cardById(pendingSource) ?? null) : null
+  const aiCauseCard = state.aiCause ? cardById(state.aiCause.card) : null
   const aiStanding = pendingSourceCard?.deck === 'ai' ? pendingSourceCard : null
   // …or a sweep is running, which is the defenceless path's own alarm: it
   // raises no `pending` at all (the engine eliminates in the same batch as
@@ -461,6 +467,59 @@ export default function Board({
     copy: { prompt: copy.table.insidePrompt, confirm: copy.pending.confirm },
     enabled: !(deal.active || beats.exclusive),
   })
+  // Git Cherry-pick's own grid (#108) — the OTHER `pickFromDiscard`. Gated on
+  // `source` for the same reason Inside is: the two effects share a pending
+  // kind and nothing else.
+  const cherry = useCherryPickStaging({
+    handoff: discardPickRef,
+    state,
+    events: intro?.events ?? [],
+    anchors,
+    actions,
+    onHandArrival: (hand, uid, at) => handOrder.commit(hand, hand, uid, at),
+    copy: {
+      prompt: copy.table.cherryPickPrompt,
+      sudoPrompt: copy.table.cherryPickSudoPrompt,
+      toHand: copy.table.cherryPickToHand,
+      toDeck: copy.table.cherryPickToDeck,
+      noHand: copy.table.cherryPickNoHand,
+      confirm: copy.pending.confirm,
+    },
+    enabled: !(deal.active || beats.exclusive),
+  })
+  // Git Rebase's private row (#108) — the same band and the same gate as the
+  // grid above, because both are the same kind of question asked over the same
+  // table. Its content is private by projection, not by anything done here.
+  const rebase = useRebaseStaging({
+    state,
+    events: intro?.events ?? [],
+    anchors,
+    actions,
+    copy: {
+      prompt: copy.table.rebasePrompt,
+      position: copy.table.rebasePosition,
+      confirm: copy.pending.confirm,
+    },
+    enabled: !(deal.active || beats.exclusive),
+  })
+  // System Upgrade's centre (#108) — the one pending owed to several seats at
+  // once. Its standing cards are read off the projection rather than held by a
+  // beat: `thrown` is public and survives every batch boundary, exactly as
+  // `cardById(pending.requested)` persists for `requestCard`.
+  const upgrade = useUpgradeStaging({
+    anchors,
+    state,
+    events: intro?.events ?? [],
+    actions,
+    copy: {
+      prompt: copy.table.upgradePrompt,
+      waiting: copy.table.upgradeWaiting,
+      takePrompt: copy.table.upgradeTakePrompt,
+      confirm: copy.pending.confirm,
+    },
+    enabled: !(deal.active || beats.exclusive),
+  })
+  const neutralizeOwnsHand = alarmMineOpen || neutralizing.staged != null
   // the answer once its own flight has landed (or at once under reduced
   // motion) — the same gate, and the same reason, as `stagedCover` above.
   const stagedNeutralize =
@@ -517,16 +576,16 @@ export default function Board({
   // deal's and the beat queue's own (unrelated) gaps.
   const liveGapAt = discarding
     ? handLimit.gapAt
-    : answering
+    : defenseOwnsHand
       ? defenseStaging.gapAt
-      : alarmMineOpen
+      : neutralizeOwnsHand
         ? neutralizing.gapAt
         : staging.gapAt
   const liveGapSize = discarding
     ? handLimit.gapSize
-    : answering
+    : defenseOwnsHand
       ? defenseStaging.gapSize
-      : alarmMineOpen
+      : neutralizeOwnsHand
         ? neutralizing.gapSize
         : staging.gapSize
 
@@ -655,6 +714,14 @@ export default function Board({
     // catch-up waits for its carrier). The two hooks are never both staged —
     // the engine suspends normal play while a pending is open — so this cannot
     // steal the turn side's handoff either.
+    if (upgrade.stagedUid) {
+      handoffRef.current = {
+        mainUid: upgrade.stagedUid,
+        el: upgrade.el(),
+        release: upgrade.release,
+      }
+      return
+    }
     const answeringStaged = defenseStaging.staged
     if (answeringStaged?.phase === 'dispatched' && answeringStaged.main) {
       handoffRef.current = {
@@ -662,6 +729,7 @@ export default function Board({
         supportUid: answeringStaged.support?.uid,
         el: coverStagedRef.current,
         release: defenseStaging.release,
+        whenLanded: defenseStaging.whenLanded,
       }
       return
     }
@@ -672,13 +740,14 @@ export default function Board({
     // Monitoring stages nothing — it answers from where it stands — so there
     // is nothing to hand over and this stays null for it, which is exactly
     // what the beat's own `!(mine && handoff)` check wants.
-    if (alarmMineOpen) {
+    if (neutralizeOwnsHand) {
       const nz = neutralizing.staged
       handoffRef.current = nz
         ? {
             mainUid: nz.home.kind === 'hand' ? nz.home.uid : (you.releaseUid?.[nz.home.slot] ?? ''),
             el: coverStagedRef.current,
             release: neutralizing.release,
+            whenLanded: neutralizing.whenLanded,
           }
         : null
       return
@@ -692,6 +761,7 @@ export default function Board({
               supportUid: ds.support?.uid,
               el: coverStagedRef.current,
               release: defenseStaging.release,
+              whenLanded: defenseStaging.whenLanded,
             }
           : null
       return
@@ -707,12 +777,15 @@ export default function Board({
           }
         : null
   }, [
+    upgrade.stagedUid,
+    upgrade.overlay,
     answering,
     defenseStaging.staged,
     defenseStaging.landed,
     defenseStaging.overlay,
     defenseStaging.release,
     alarmMineOpen,
+    neutralizeOwnsHand,
     neutralizing.staged,
     neutralizing.landed,
     neutralizing.overlay,
@@ -1088,30 +1161,44 @@ export default function Board({
         <div className={cls(opening.deckStack, enter)} ref={anchors.decks}>
           <div className={opening.pileRow}>
             {decks.main.map((count, i) => (
-              <Pile
+              <div
                 // biome-ignore lint/suspicious/noArrayIndexKey: a pile IS its index — the engine names it that way in `drawn.pile`, and a split leaves the halves where the pile was
                 key={i}
-                label={copy.table.deck}
-                deck="base"
-                count={count}
-                width={pileWidthFor(decks.main.length)}
-                countPos="tl"
-                boxRef={(el) => anchors.bindPile(i, el)}
-              />
+                className={opening.pileTarget}
+              >
+                <Pile
+                  label={copy.table.deck}
+                  deck="base"
+                  count={count}
+                  width={pileWidthFor(decks.main.length)}
+                  countPos="tl"
+                  boxRef={(el) => anchors.bindPile(i, el)}
+                  pickable={staging.targets.some((t) => t.kind === 'pile' && t.pile === i)}
+                />
+                {staging.targets.some((t) => t.kind === 'pile' && t.pile === i) && (
+                  <button
+                    type="button"
+                    className={opening.pilePick}
+                    aria-label={`${copy.table.deck} ${i + 1}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      staging.onTargetPick({ kind: 'pile', pile: i })
+                    }}
+                  />
+                )}
+              </div>
             ))}
           </div>
-          {/* Pile has a closed prop list — no arbitrary attribute passes
-              through it — so the events pile's card box is a wrapping node
-              instead of `boxRef` on the pile itself (matching the discard
-              pile's own `boxRef` would leave nothing here for a test, or a
-              future flight, to find by attribute). */}
-          <div ref={anchors.eventsBox} data-events-box>
+          {/* The wrapper stretches with the draw-pile row; flights must use
+              the pile's actual card box, especially after a Git split. */}
+          <div data-events-box>
             <Pile
               label={copy.table.events}
               deck="ai"
               count={decks.events}
               width={150}
               countPos="tl"
+              boxRef={anchors.eventsBox}
             />
           </div>
         </div>
@@ -1123,10 +1210,14 @@ export default function Board({
         <div className={enter} ref={anchors.discard}>
           <Pile
             label={copy.table.discard}
-            heap={decks.discardHeap}
+            heap={
+              cherry.grid
+                ? []
+                : decks.discardHeap?.filter((c) => c.uid !== `d${state.aiCause?.eventId}`)
+            }
             heapShow={HEAP_SHOW}
-            topCard={decks.discard}
-            count={decks.discardCount}
+            topCard={cherry.grid || state.aiCause ? null : decks.discard}
+            count={cherry.grid ? 0 : Math.max(0, decks.discardCount - (state.aiCause ? 1 : 0))}
             width={116}
             boxRef={anchors.discardBox}
           />
@@ -1169,7 +1260,9 @@ export default function Board({
         data-centre-slot="cause"
         style={centrePlaceStyle('ai', 'cause')}
         ref={anchors.cause}
-      />
+      >
+        {aiCauseCard && <Card card={aiCauseCard} interactive={false} width="100%" />}
+      </div>
       <div
         className={opening.aiSlot}
         data-centre-slot="effect"
@@ -1320,9 +1413,8 @@ export default function Board({
                     `comboBeat.runPairOut` measures — a rotated node's bounding
                     rect is the box AROUND the tilted card (I6). Same shape as
                     the cover and sudo slots.
-                    The ARRIVAL still does not carry the tilt: `foldIn` is
-                    translate+scale only, so the rest pose is what supplies it
-                    — recorded in docs/animations/backlog.md. */}
+                    Single attacks arrive at this tilt through `landInPose`;
+                    Sudo attacks use `playToCenter` on the whole CardPair. */}
                 <div className={opening.pose} style={{ transform: restTransform(ATTACK_POSE) }}>
                   {aux ? (
                     <CardPair main={data} aux={aux} width="100%" />
@@ -1426,7 +1518,11 @@ export default function Board({
           `.glowBounds` and its hardcoded tech-bar offsets stay in the
           playground — that story is explicitly not the reference here (Page
           Shell Rule, apps/playground/CLAUDE.md). */}
-      {glowStrong && <EdgeGlow visible intensity="strong" data-testid="board-glow-strong" />}
+      <EdgeGlow
+        visible={glowStrong}
+        intensity="strong"
+        data-testid={glowStrong ? 'board-glow-strong' : undefined}
+      />
 
       <div className={kit.you} data-testid="board-you">
         {youEliminated ? (
@@ -1499,18 +1595,18 @@ export default function Board({
               onMouseDown={handInert ? (e) => e.stopPropagation() : undefined}
             >
               <Hand
-                // a `defend` pending owed to us means the defence hook owns
-                // the fan (#101, Task 16) — `answering` picks the source at
-                // every call site below, rather than merging the two hooks'
-                // outputs.
+                // Keep the same owner for items and index-based handlers,
+                // including the exit after the defense prompt closes.
                 items={
-                  discarding
-                    ? handLimit.handItems
-                    : answering
-                      ? defenseStaging.handItems
-                      : alarmMineOpen
-                        ? neutralizing.handItems
-                        : staging.handItems
+                  upgrade.asked || upgrade.stagedUid
+                    ? upgrade.handItems
+                    : discarding
+                      ? handLimit.handItems
+                      : defenseOwnsHand
+                        ? defenseStaging.handItems
+                        : neutralizeOwnsHand
+                          ? neutralizing.handItems
+                          : staging.handItems
                 }
                 // the fan opens room for the arriving heap while it travels —
                 // the deal wins the tie against every other beat the same way
@@ -1518,14 +1614,20 @@ export default function Board({
                 // return-flight gap is last: it opens only once nothing else
                 // owns the fan.
                 gapAt={
-                  deal.gapAt ?? (discarding ? handLimit.gapAt : null) ?? beats.gapAt ?? liveGapAt
+                  deal.gapAt ??
+                  (discarding ? handLimit.gapAt : null) ??
+                  beats.gapAt ??
+                  cherry.gapAt ??
+                  liveGapAt
                 }
                 gapSize={
                   deal.gapAt == null
                     ? discarding && handLimit.gapAt != null
                       ? handLimit.gapSize
                       : beats.gapAt == null
-                        ? liveGapSize
+                        ? cherry.gapAt == null
+                          ? liveGapSize
+                          : cherry.gapSize
                         : beats.gapSize
                     : deal.gapSize
                 }
@@ -1541,9 +1643,9 @@ export default function Board({
                 stateAt={
                   discarding
                     ? handLimit.stateAt
-                    : answering
+                    : defenseOwnsHand
                       ? defenseStaging.stateAt
-                      : alarmMineOpen
+                      : neutralizeOwnsHand
                         ? neutralizing.stateAt
                         : staging.stateAt
                 }
@@ -1553,9 +1655,9 @@ export default function Board({
                 accentAt={
                   discarding
                     ? handLimit.accentAt
-                    : answering
+                    : defenseOwnsHand
                       ? defenseStaging.accentAt
-                      : alarmMineOpen
+                      : neutralizeOwnsHand
                         ? undefined
                         : staging.accentAt
                 }
@@ -1575,26 +1677,16 @@ export default function Board({
                 // dispatches the play and never tells the stage machine, so the
                 // card stood nowhere for the whole step that followed.
                 onCardClick={
-                  deal.active || discarding
+                  deal.active || discarding || upgrade.asked
                     ? undefined
-                    : answering
+                    : defenseOwnsHand
                       ? (i) => defenseStaging.onCardClick(i)
-                      : alarmMineOpen
+                      : neutralizeOwnsHand
                         ? // a 503 is answered by a PULL, never by a click —
                           // one gesture per step, the same discipline the
                           // defence's own `askPartner` line records
                           undefined
-                        : (i) => {
-                            if (staging.onCardClick(i)) return
-                            // resolved against the array the fan actually
-                            // RENDERED, and handed on as a uid: `handItems` is
-                            // `you.hand` minus whatever is staged, so an index
-                            // that crossed this seam pointed at a different card
-                            // the whole time anything stood on the table (#101,
-                            // Fix D round 2).
-                            const item = staging.handItems[i]
-                            if (item) gestures.onCardClick(item.uid)
-                          }
+                        : staging.onCardClick
                 }
                 // drag-mode: a card that needs a target — or a legal defence
                 // answering an open `defend` pending — is pulled out of the
@@ -1603,13 +1695,15 @@ export default function Board({
                 onPlay={
                   deal.active || (discarding && handLimit.carrying)
                     ? undefined
-                    : discarding
-                      ? handLimit.onHandPlay
-                      : answering
-                        ? defenseStaging.onHandPlay
-                        : alarmMineOpen
-                          ? neutralizing.onHandPlay
-                          : staging.onHandPlay
+                    : upgrade.asked
+                      ? upgrade.onHandPlay
+                      : discarding
+                        ? handLimit.onHandPlay
+                        : defenseOwnsHand
+                          ? defenseStaging.onHandPlay
+                          : neutralizeOwnsHand
+                            ? neutralizing.onHandPlay
+                            : staging.onHandPlay
                 }
                 // the reorder gesture's commit — without it the kit settles the
                 // card into its new slot and the next projection render snaps
@@ -1623,9 +1717,9 @@ export default function Board({
                           you.hand,
                           discarding
                             ? handLimit.handItems
-                            : answering
+                            : defenseOwnsHand
                               ? defenseStaging.handItems
-                              : alarmMineOpen
+                              : neutralizeOwnsHand
                                 ? neutralizing.handItems
                                 : staging.handItems,
                           uid,
@@ -1701,7 +1795,13 @@ export default function Board({
           flying to or from the cover slot (a carrier at `--z-flight`, 250)
           vanished the instant it landed. What only the panel could do —
           decline — is the board's own affordance now, in the ask below. */}
-      {state.pending?.player === state.selfId &&
+      {state.pending &&
+        // "owed to you" is a predicate now, not a comparison: a `systemUpgrade`
+        // is owed to every seat on its roster at once while it is discarding,
+        // and to the actor alone once it is picking — `pendingOwesSelf` is the
+        // kit's one answer to that question, shared with the dock and Table so
+        // the panel and the ring cannot disagree about whose move it is.
+        pendingOwesSelf(state.pending, state.selfId) &&
         state.pending.kind !== 'discardForRelease' &&
         state.pending.kind !== 'handLimit' &&
         state.pending.kind !== 'defend' &&
@@ -1715,14 +1815,23 @@ export default function Board({
         // …and this one is not a question: the copies differ only by uid, so
         // `_useRequestStaging` answers it and the victim watches the scene
         state.pending.kind !== 'giveCard' &&
-        // the row on the table asks Inside's own pick, for the same reason
-        // the others above are asked by the cards themselves (#106) — but
-        // only Inside's: Git Cherry-pick raises the same pending kind over
-        // the whole discard (and a sudo second pick to the draw deck), a
-        // shape the row was never built for, so it falls through to this
-        // panel, which already has a complete case for it
-        // (`PendingPrompt.tsx`'s own `pickFromDiscard`, `toDeck` included)
-        !(state.pending.kind === 'pickFromDiscard' && state.pending.source === 'ai-inside') && (
+        // Both `pickFromDiscard` surfaces replace the generic panel: Inside's
+        // row (#106) and Cherry-pick's grid (#108). A panel that unmounts when
+        // the pending clears cannot hold a flight, which is what the grid is
+        // about to do.
+        !(
+          state.pending.kind === 'pickFromDiscard' &&
+          (state.pending.source === 'ai-inside' ||
+            state.pending.source === 'operation-git-cherry-pick')
+        ) &&
+        // Rebase's row asks the same way (#108): the panel has no control for
+        // an ORDER, and two confirm bars over one question is the occlusion
+        // every suppression above exists to avoid.
+        state.pending.kind !== 'reorderTop' &&
+        // …and this one is owed to a ROSTER, not to one seat: the panel asks
+        // whoever it is rendered for, which is the wrong question for every
+        // seat but the one currently owed (#108).
+        state.pending.kind !== 'systemUpgrade' && (
           <PendingPrompt
             pending={state.pending}
             hand={you.hand}
@@ -1915,8 +2024,13 @@ export default function Board({
       {defenseStaging.overlay}
       {handLimit.overlay}
       {neutralizing.overlay}
+      {cherry.overlay}
       {requesting.band}
       {inside.row}
+      {cherry.grid}
+      {rebase.row}
+      {upgrade.surface}
+      {upgrade.overlay}
       {previewOverlay}
 
       {/* the pair flyer — a persistent node (I10: position: fixed against the

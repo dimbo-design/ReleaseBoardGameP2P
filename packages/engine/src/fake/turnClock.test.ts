@@ -33,7 +33,17 @@ const SUDO: CardInstance = { uid: 'support-sudo#0', id: 'support-sudo' }
 const NOTABUG: CardInstance = { uid: 'defense-not-a-bug#0', id: 'defense-not-a-bug' }
 const HOTFIX: CardInstance = { uid: 'defense-hotfix#0', id: 'defense-hotfix' }
 
-// p1 on turn holding a release; p2 holds a Bug so a window has a live responder.
+// An inert card, pinned to the top of the draw pile below: drawing it is only
+// a draw — no trigger to pause the sequence, no AI event to reveal. Named
+// rather than left to the shuffle, because these are clock tests and what the
+// draw happens to turn up is not what any of them is about. Left to the seed,
+// the top card moves every time FAKE_DECK gains an entry (`operation-system-
+// upgrade`, #108, turned it into a `trigger-ai` that opened a window and so
+// legitimately cleared the very clock the test was reading).
+const INERT: CardInstance = { uid: 'protection-debugger#t', id: 'protection-debugger' }
+
+// p1 on turn holding a release; p2 holds a Bug so a window has a live responder;
+// an inert card on top of pile 0 so a DRAW is only a DRAW.
 const primed = (hands?: Partial<Record<'p1' | 'p2' | 'p3', CardInstance[]>>): GameState => {
   const s = engine.createGame(config())
   return {
@@ -44,6 +54,7 @@ const primed = (hands?: Partial<Record<'p1' | 'p2' | 'p3', CardInstance[]>>): Ga
       p2: { ...s.players.p2, hand: hands?.p2 ?? [BUG] },
       p3: { ...s.players.p3, hand: hands?.p3 ?? [] },
     },
+    decks: { ...s.decks, main: [[INERT, ...s.decks.main[0]], ...s.decks.main.slice(1)] },
   }
 }
 

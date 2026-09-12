@@ -112,6 +112,30 @@ export type PendingView =
       picks: 1 | 2
       source: CardId
     }
+  // Full card identity, gated behind `mine` in pendingView (attacks.ts) — the
+  // whole of what "не показывая другим" needs, since a deck's contents are
+  // never projected to anyone.
+  | {
+      kind: 'reorderTop'
+      player: PlayerId
+      piles: { pile: number; cards: CardInstance[] }[]
+      source: CardId
+    }
+  // The one pending with nothing private in it, so it mirrors state.ts's
+  // variant field for field with no `mine` gate anywhere: the rules put the
+  // thrown cards face up at the centre, and who has yet to answer is plain to
+  // everyone watching. Carries no `player` for the same reason the state
+  // variant does not — see state.ts, and `pendingOwes` for the question every
+  // reader of this union actually wants answered.
+  | {
+      kind: 'systemUpgrade'
+      actor: PlayerId
+      owed: PlayerId[]
+      thrown: { player: PlayerId; card: CardInstance }[]
+      sudo: boolean
+      phase: 'discarding' | 'picking'
+      source: CardId
+    }
 
 export interface OpponentView {
   id: PlayerId

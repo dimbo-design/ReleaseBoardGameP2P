@@ -57,7 +57,12 @@ describe('an event card that stays on the table (#93)', () => {
     // its full size throughout.
     const mon = c('ai-monitoring', 'e')
     const spare = c('ai-hallucination', 'e')
-    const r = fireEvent({}, [mon, spare])
+    // `spare` first: the pick is `events[floor(randomAt(seed, rngCursor) *
+    // events.length)]`, and rngCursor is where createGame's shuffle of the
+    // (now Rebase-sized, #108) main deck left off — this order is what lands
+    // on `mon` under that cursor. The test only cares that ONE of the two
+    // stands and the other doesn't, not which index the RNG landed on.
+    const r = fireEvent({}, [spare, mon])
 
     expect(r.state.players.p1.release.monitoring).toBeTruthy()
     expect(eventUids(r.state)).not.toContain(mon.uid)

@@ -19,6 +19,7 @@ import handArrivalStyles from '@/animations/useHandArrival.module.css'
 // Arrow's CSS Module classnames are not part of `@release/ui`'s public barrel
 // — reached into the same way `boardComponent.test.tsx` does.
 import arrowStyles from '@/primitives/Arrow/Arrow.module.css'
+import { mockReducedMotion } from '~/test/reducedMotion'
 import Board from '../_Board'
 import { makeBoardProps } from './fixture'
 
@@ -451,6 +452,42 @@ it('a release partner dispatches without a target', async () => {
   await pullFromComboFan('support-code-review#0')
   await clickComboFanCard('release-frontend#0')
   expect(onPlay).toHaveBeenCalledWith('release-frontend#0', undefined, 'support-code-review#0')
+})
+
+it.each([
+  false,
+  true,
+])('pulling Code Review starts a legal pair (reduced motion: %s)', async (reduced) => {
+  const motion = mockReducedMotion(reduced)
+  const onPlay = vi.fn()
+  comboOut = []
+  const base = makeBoardProps()
+  render(
+    <Board
+      {...makeBoardProps({
+        state: {
+          ...base.state,
+          you: { ...base.state.you, hand: COMBO_HAND },
+          playable: ['release-frontend#0'],
+          comboOptions: { 'support-code-review#0': ['release-frontend#0'] },
+        },
+        actions: { onPlay },
+      })}
+    />,
+  )
+  try {
+    await pullFromComboFan('support-code-review#0')
+    expect(onPlay).not.toHaveBeenCalled()
+    expect(comboAccentOf('release-frontend#0')).toBe('var(--cat-support)')
+    await clickComboFanCard('release-frontend#0')
+    expect(onPlay).toHaveBeenCalledExactlyOnceWith(
+      'release-frontend#0',
+      undefined,
+      'support-code-review#0',
+    )
+  } finally {
+    motion.mockRestore()
+  }
 })
 
 it('a window pair dispatches onAttack straight from the fold', async () => {

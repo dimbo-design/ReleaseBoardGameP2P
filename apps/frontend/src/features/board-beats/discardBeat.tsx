@@ -1,4 +1,4 @@
-import { cardById } from '@release/ui'
+import { cardBoxIn, cardById, PAIR_AUX } from '@release/ui'
 import type { Leaving, Rect } from '@release/ui/animations'
 import {
   nextFrames,
@@ -8,8 +8,8 @@ import {
   useFlyer,
   wait,
 } from '@release/ui/animations'
-import { useCallback, useRef } from 'react'
-import type { BeatRun, BoardAnchors } from '~/entities/game/board'
+import { type RefObject, useCallback, useRef } from 'react'
+import type { BeatRun, BoardAnchors, StagedHandoff } from '~/entities/game/board'
 import { GATHER_HOLD } from '~/entities/game/board'
 import type { BeatPlan, DiscardCard } from './planBeats'
 import { withoutFlown } from './withoutFlown'
@@ -28,15 +28,15 @@ const rectOf = (el: Element | null): Rect | null => {
   return { left: r.left, top: r.top, width: r.width, height: r.height }
 }
 
-export function useDiscardBeat(anchors: BoardAnchors) {
+export function useDiscardBeat(anchors: BoardAnchors, staging?: RefObject<StagedHandoff | null>) {
   const { overlay: exitOverlay, send, reset: resetExit } = useDiscardExit(anchors.discardBox)
   // The sweep's own carrier (#102): the cards a defenceless player owned are
   // drawn together at the centre before they scatter, and that draw-together
   // leg needs a flyer of its own — the exit step only ever flies FROM where a
   // card stands TO the discard, it has no notion of a stop in between.
   const flyer = useFlyer()
-  const latest = useRef({ anchors, send })
-  latest.current = { anchors, send }
+  const latest = useRef({ anchors, send, staging })
+  latest.current = { anchors, send, staging }
 
   const whereFrom = useCallback((c: DiscardCard): Rect | null => {
     const a = latest.current.anchors
@@ -46,9 +46,9 @@ export function useDiscardBeat(anchors: BoardAnchors) {
   }, [])
 
   const toLeaving = useCallback(
-    (c: DiscardCard): Leaving | null => {
+    (c: DiscardCard, stagedFrom?: Rect): Leaving | null => {
       const card = cardById(c.card)
-      const from = whereFrom(c)
+      const from = stagedFrom ?? whereFrom(c)
       if (!card || !from) return null
       // The SAME Scatter the adapter rests this card on (I7): the flight ends on
       // the pose the heap already holds for it, so nothing moves on handover.
@@ -59,6 +59,7 @@ export function useDiscardBeat(anchors: BoardAnchors) {
 
   const run = useCallback(
     async (plan: Extract<BeatPlan, { kind: 'discard' }>, ctx: BeatRun) => {
+      const handoff = latest.current.staging?.current
       // WAIT FOR THE SHADOW, THEN MEASURE — in that order, and the order is the
       // whole point. The queue starts this from inside a layout effect, so at
       // entry React has committed the projection that ARRIVED: the card is
@@ -73,11 +74,22 @@ export function useDiscardBeat(anchors: BoardAnchors) {
       await nextFrames()
       const items: Leaving[] = []
       const flown: DiscardCard[] = []
+      let adopted = false
       for (const c of plan.cards) {
-        const leaving = toLeaving(c)
+        const uid = c.source.kind === 'hand' ? ctx.base.you.hand[c.source.index]?.uid : undefined
+        const staged = uid != null && (uid === handoff?.mainUid || uid === handoff?.supportUid)
+        const centre = staged ? rectOf(latest.current.anchors.centre.current) : null
+        const aux = staged && uid === handoff?.supportUid
+        const auxEl = aux ? handoff?.el?.querySelector<HTMLElement>('[data-aux]') : null
+        const from =
+          centre && auxEl ? cardBoxIn(auxEl.getBoundingClientRect(), centre.width) : centre
+        const leaving = toLeaving(c, from ?? undefined)
         if (leaving) {
+          if (aux && centre) leaving.pose = { rot: PAIR_AUX.rot, dx: 0, dy: 0 }
+          if (staged && handoff?.supportUid) leaving.layer = aux ? 0 : 1
           items.push(leaving)
           flown.push(c)
+          adopted ||= staged
         }
       }
       if (items.length === 0) return
@@ -87,6 +99,10 @@ export function useDiscardBeat(anchors: BoardAnchors) {
       // discard end is deliberately left at `ctx.base`'s own — see
       // `withoutFlown`'s comment for why.
       ctx.publish(withoutFlown(ctx.base, flown))
+      // Pile selection stages Git cards at the centre. Hand that render to
+      // the exit together with the shadow update, rather than flying a copy
+      // from the old fan slot (which may already hold a different card).
+      if (adopted) handoff?.release()
       // THE SWEEP (#102): a defenceless player's whole table does not leave
       // card by card — it is gathered at the centre first, held open long
       // enough for the table to read what happened, and only then scattered.

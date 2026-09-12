@@ -19,6 +19,61 @@ so that is where a finding has to show up, in one line with a status. This file 
 in full: what it costs and what would close it. Enter it in both — the page so it is seen, here so
 it can be acted on.
 
+## Resolved board regressions (2026-09-07)
+
+### Clicking Code Review did not start pairing — closed 2026-09-07
+
+The September 7 patch allowed a click to begin pairing. PR #134 review rejected that change
+in gesture: pulling starts a play, then clicking chooses a partner. The board now follows that
+sequence and uses the engine's `comboOptions`; an at-rest click never begins a play.
+Regression tests cover the pull/partner path in normal and reduced motion.
+
+### AI releases changed face on landing — closed 2026-09-07
+
+The engine keeps a rules identity (`release-*`) and an events-deck identity (`event`) for the
+same instance. The flight showed the AI face, but `toBoardState` resolved only the rules ID
+for the resting zone. It now displays the event face and preserves `releaseId` for animation
+source lookup. Adapter tests cover all three AI release slots on both sides of the table;
+planner tests verify that rules-ID events still locate the displayed AI card.
+
+### Spent defenses reappeared in the hand — closed 2026-09-08
+
+The board switched back to the turn hand when the defense prompt closed, even though
+the defense staging still excluded its spent cards from the pre-batch shadow. It now keeps
+the defense hand owner until staging catches up. The queue also holds the pre-batch state
+on the render that starts an animated batch, so a late response cannot clear landed staging
+before its beat starts. Batches with no animation continue to show live immediately.
+Full-board regressions cover plain and Sudo defenses, early/late responses and reduced motion.
+
+### DDoS disappeared instead of leaving the table — closed 2026-09-08
+
+An immediate resolution deliberately creates no defense prompt. Its separate `pairToDiscard`
+beat nevertheless looked for a pending card at the centre and found nothing. `attackPlaced`
+now owns the immediate attack's spent cards: hold the staged card or remote fold, then send
+the attack and optional Sudo through `useDiscardExit` on their own event scatters. Remove
+the spent local instances from the shadow at takeoff, preserving other copies in the hand.
+
+### AI returns grew toward the deck row — closed 2026-09-08
+
+The events-deck wrapper stretches to the width of the split main-deck row. Measuring that
+wrapper made `returnToDeck` enlarge the AI card and aim away from its pile. `eventsBox`
+now binds to `Pile.boxRef`, the actual card box (I6). Anchor regressions cover one, two and
+three main piles; all AI return paths share the corrected anchor.
+
+### Git pile choice and confirmation placement — closed 2026-09-08
+
+Branch and ordinary Rebase now receive pile targets from the engine projection when multiple
+main piles exist. Click or pull stages the card, then clicking a highlighted pile dispatches
+that pile index. Sudo Branch retains the choice; Sudo Rebase continues to use all piles.
+Projection and board tests cover selecting the second pile and both Sudo paths.
+The discard beat adopts the staged operation from the centre, releasing its staging in the
+same commit as the spent hand instances leave the shadow; it no longer measures an empty fan slot.
+
+Rebase's confirmation was nested inside its positioned, translated card row, so its bottom
+was the row's bottom rather than the board's. It is now a sibling of the scrollable rows,
+anchored at the board bottom. Removing the row transform also keeps fixed return flights in
+viewport coordinates. Visually verified one row and multiple scrolling rows on the real Board.
+
 ## How to write an entry
 
 ```
@@ -633,7 +688,7 @@ biome-ignore в `Hand.tsx` говорит прямо: «pointer-only … no keyb
 
 ### Атака на борде прилетает без наклона — наклон даёт поза покоя, а не посадка
 
-**Что не хватает.** В одобренной сцене (`DefenseReleaseStory`) атака летит с места соперника
+**Исходное расхождение.** В одобренной сцене (`DefenseReleaseStory`) атака летит с места соперника
 `play('playToCenter', …, { rotate: ATTACK_POSE.rot })` — 480ms, наклон едет вместе с картой, и она
 ПРИЗЕМЛЯЕТСЯ уже наклонённой. На борде тот же прилёт делает `comboBeat.foldIn` — `foldIntoPair`,
 620ms, только translate+scale: `foldIntoPair` по своей подписи умеет позу покоя половины ВНУТРИ
@@ -663,22 +718,21 @@ biome-ignore в `Hand.tsx` говорит прямо: «pointer-only … no keyb
 приземляется. `foldIntoPair` растягивать не стали: пара и посадка на стол — разные ходы, и одно имя
 на оба смысла заставляло бы читателя каждый раз выяснять, что складывается.
 
-Осталось: `comboBeat.foldIn` вызывает `landInPose` для ОДИНОЧНОЙ атаки вместо `foldIntoPair`, и
-поза покоя перестаёт быть компенсацией. Правка во фронте, не в ките.
+**Исправлено на борде.** Одиночная атака в `comboBeat.foldIn` вызывает `landInPose`
+с `pose: restTransform(ATTACK_POSE)` и длительностью 480ms. Sudo-атака летит одной уже
+собранной `CardPair` через `playToCenter` (480ms), с тем же `ATTACK_POSE`, как `throwAttack`
+в сцене Defense Release. Оба варианта прилетают под углом статичного рендера, без смены
+позы на последнем кадре. `runPairOut` и выход немедленно разрешённой атаки передают
+тот же `ATTACK_POSE` в `useDiscardExit`, вместе со `scatterAt` события сброса.
+`comboBeat.test.tsx` проверяет источник, целую пару, позу прибытия и следующий выход;
+`comboHandoff.test.tsx` проверяет прилёт перед защитой и общий сброс.
 
-**Ответ владельца.** На нашей стороне уже решено — надо адаптировать.
+**Остаётся открытым.** Две локальные реализации образования пары
+(`_useBoardStaging` и путь релиза в `comboBeat`) ещё не переведены на `usePairFold`;
+их отдельная запись остаётся открытой. `ATTACK_POSE` пока объявлен отдельно в сцене и на борде.
 
-**Техническая рекомендация.** В `comboBeat.foldIn` одиночная атака (без судо) едет через
-`landInPose` с `pose: ATTACK_POSE`, парный путь остаётся на `foldIntoPair` — переписывать пару ради
-одиночной нельзя, это разные ходы. После этого поза покоя в `_Board.tsx` перестаёт быть
-компенсацией: карта приземляется уже наклонённой, а покой просто совпадает с последним кадром.
-Заодно `ATTACK_POSE` стоит свести к одному объявлению — сегодня значение живёт и в
-`entities/game/board/poses.ts`, и константой сцены, и одинаковыми их держит только внимание.
-
-**Статус.** `времянка` — модуль есть, борд на него ещё не переведён; поза покоя проставлена и
-совпадает с тем, от чего уходит выход (`boardComponent.test.tsx` пинит и то, и что наклон живёт на
-внутреннем узле, а не на измеряемом — **I6**). Строка в реестре находок на странице аудита
-(`apps/playground/stories/AnimationAuditStory`) заведена, статус `rework`.
+**Статус.** Прилёт одиночной и sudo-атаки исправлен. Запись аудита сохраняет `rework`
+для общего объявления позы и локальных реализаций образования пары.
 
 ### Один sync-флаш: тень публикуется всем, кроме того, кто сам отвечает
 
@@ -789,8 +843,9 @@ rect назначения → `nextFrames` → `foldIntoPair` на каждую 
 **Ответ владельца.** Похоже, что сделанный под это модуль не раскатили полноценно как пример — надо
 исправить.
 
-**Статус.** `открыто` — все четыре копии на месте, работают и покрыты своими тестами; шаг собрать и
-раскатить, чтобы копии стали вызовами. Кит, наша сторона.
+**Текущее состояние.** `rework`: `usePairFold` существует; сцены DefenseRelease/Combo и
+`_useDefenseStaging` используют общий шаг. Остались две локальные реализации на борде:
+`_useBoardStaging` и `comboBeat`. Их миграция остаётся открытой.
 
 ### Строка-подсказка под центром стола написана дважды
 
@@ -1297,34 +1352,17 @@ card» описывал центрированный грид из `gridPosition
 
 ---
 
-### Триггер AI сбанчен раньше, чем разрешится его собственный эффект
+### AI trigger banking — engine timing remains open
 
-**Что не хватает.** Правила отпускают триггер и эффект одним движением — оба стоят и уходят вместе
-(сценарный `resolveGeneric` у `AiCardsStory`, и собственный текст Bad Vibe в #106 говорит буквально
-«всё уходит разом: триггер в сброс, AI-карта в свою колоду»). Движок этого не делает: `fireTrigger`
-(`packages/engine/src/fake/triggers.ts`, ветка `trigger-ai`) заносит `discarded(trigger-ai)` сразу
-следом за `aiRevealed`, ДО того, как `resolveAiEvent` вообще запускается, — а именно
-`resolveAiEvent` решает, стоит ли AI-карта дальше и не открыт ли ею пендинг. К моменту, когда прогон
-дошёл до вопроса «выдан ли прогноз», проекция уже держит триггер в куче сброса.
+The engine still emits `discarded(trigger-ai)` at reveal before resolving a standing effect.
+The board now retains `aiCause` beside that effect, filters its entry/count from the visible heap,
+and publishes the standing render before releasing reveal flyers. The answering batch sends the
+cause to discard alongside the effect's homeward leg. This removes the visual early departure
+without changing engine event order.
 
-**Чем грозит.** Пока эффект уходит домой в том же батче, разница не видна — обе карты давно в своих
-кучах к тому времени, как рисуется такт. Но стоит батчу оставить прогноз висящим — а именно так
-устроены четыре из шести исходов (`crush`, `neutralize503`-мимик, `handLimit`, `pickFromDiscard`) —
-и такт (`aiBeat.tsx`'s `run`) вынужден вести себя нечестно с одной из двух карт: эффект может стоять
-и объяснять прогноз (`docs/animations/recipes.md`'s `standing`-ветка), а триггер — уже в куче, и
-доске нечем удержать его рядом, не соврав проекции. Ровно этот компромисс сейчас и записан в новом
-рецепте борда как «не баг, а асимметрия» — но асимметрия эта чужая, движковая, а не решение такта.
-
-**Что закроет.** Перенос банковки триггера в движке — из `fireTrigger`'s ветки `trigger-ai` в конец
-`resolveAiEvent`, после того как эффект уже решил, остаётся ли он висящим прогнозом или уходит
-следом. Тогда обе карты банкуются в один момент, и рецепту не придётся объяснять, почему триггер и
-эффект ведут себя по-разному. Форма ровно та же, что у уже записанной находки «Правила ставят
-Security Bug в центр на время выбора — движок к этому моменту уже сбанчил её» (выше, «Правила
-ставят Security Bug…») — движок банкует карту в той же редукции, которая поднимает пендинг, до того
-как стол успевает её показать, — и стоит читаться рядом с ней, а не отдельным случаем.
-
-**Статус.** `открыто`. Строка в реестре находок на странице аудита
-(`apps/playground/stories/AnimationAuditStory`) заведена, статус `open`.
+**Open question.** Whether the engine should defer banking until the effect resolves. Keep the
+finding open for that event contract; the old claim that the board cannot retain the cause is
+obsolete. Full browser parity is not asserted here.
 
 ---
 
@@ -1452,3 +1490,95 @@ the attack it answered … so the history tree needs no inference». Это не
 
 **Статус.** `открыто`. Строка в реестре находок на странице аудита
 (`apps/playground/stories/AnimationAuditStory`) заведена, статус `open`.
+
+---
+
+### Rebase reorder interaction — closed 2026-09-08
+
+The board's empty move-up buttons had no usable visible hit area, and did not implement the
+playground's drag gesture. Both now use `useCardReorder` from `apps/ui/src/animations`.
+Cards preview their insertion and can move in both directions; short rows use their actual length.
+The board seeds order by offer identity rather than projection-object identity, so an unrelated
+refresh does not undo the player's work. Its unplanned arrow-key reorder path was removed after
+PR134 review; drag remains the primary interaction.
+
+### Cherry-pick grid and heap ownership — implementation corrected
+
+The board now hides its discard heap/count while the grid owns the candidates. On accepted
+`takenFromDiscard`, the event beat awaits the grid handoff: the selected card travels through the
+centre into the hand, the sudo deck card returns to the deck, and unpicked cells return through
+`useDiscardExit`. All three legs finish before the grid releases ownership. Rejected RESOLVE
+unlocks the choice, including manual retry after a rejected single-option automatic answer.
+`toDiscardHeap` consumes `takenFromDiscard`, and return flights use the accepted after-heap with
+one destination pose per physical candidate, including duplicate catalog cards.
+The engine discard remains unchanged until resolution; presentation ownership
+prevents duplicate rendering. Full browser parity is not claimed by this implementation update.
+
+---
+
+### Две соседние сцены расходятся в том, ждёт ли RESOLVE своего полёта
+
+**Что не хватает.** Правила, одного на обе. Cherry-pick отправляет RESOLVE сразу и запускает полёт только по принятому событию; Rebase (план #108, задача D2) отвечает, когда села последняя карта. Оба решения защищены в
+своих файлах, и каждое по-своему право: у выбранной карты Cherry-pick есть видимое место назначения в
+проекции, а у зафиксированного порядка Rebase — нет, содержимое колоды не проецируется никому, и
+полёт и есть всё, что игроку сообщают.
+
+**Чем грозит.** Третий такой экран не сможет выбрать ветку, не перечитав оба хука и не восстановив
+рассуждение заново; а выбранная наугад ветка либо задержит ход на длину анимации, либо покажет ответ
+раньше, чем стол успел его прочитать. Приведение движений не спасёт: расходятся не значения, а момент
+отправки.
+
+**Что закроет.** Строка в `docs/animations/` — правило с двумя ветками и признаком, по которому ветка
+выбирается: есть ли у карты видимое место назначения в проекции. Либо решение владельца, что борд
+всегда отвечает сразу, и тогда правка в `_useRebaseStaging.tsx`.
+
+**Статус.** `открыто`. Строка в реестре находок на странице аудита заведена, статус `open`.
+
+---
+
+### Выбор в Cherry-pick нельзя было передумать — клик по другой карте не делал ничего
+
+**Закрыто в [#141](https://github.com/MythHand/ReleaseBoardGameP2P/pull/141).**
+
+**Что было.** `canSelect` возвращал `false` для любой невыбранной карты, как только `picks`
+заполнялся (`picks.length >= max`), а обработчик клика в этом случае возвращал массив без
+изменений. В базовом режиме `max` равен единице — то есть после ПЕРВОГО же выбора остальные карты
+переставали отвечать. Единственный выход был неочевидным: клик по УЖЕ выбранной карте её отпускает.
+Ничто на это не указывало, поэтому сетка читалась как сломанная — так её и отрепортили с
+задеплоенного плейграунда.
+
+**Где.** Дважды: сцена `apps/playground/stories/interactive/GitCards/CherryPick.tsx` и — что важнее
+— живой борд, `apps/frontend/src/pages/board/[gameId]/_useCherryPickStaging.tsx`. Одна и та же
+логика, написанная в двух местах: в этом и была цена, баг доехал до реальной игры, а не остался
+витриной.
+
+**Как закрыто.** Клик описан одной функцией `nextPicks(p, uid)`: выбранная карта снимается,
+невыбранная встаёт, пока есть место, а когда места нет — занимает место САМОЙ СТАРОЙ, вместо того
+чтобы быть проигнорированной. Легальность проверяется по РЕЗУЛЬТИРУЮЩЕМУ набору (`legal`), а не по
+карте-кандидату: триггер может занимать только слот колоды, которого в базовом режиме нет, поэтому
+подменить им единственный слот руки по-прежнему нельзя. `canSelect` теперь выражен через
+`nextPicks(...) !== p` — «изменит ли этот клик хоть что-нибудь», — так что подсветка `blocked` не
+может разойтись с тем, что клик реально делает.
+
+**Что осталось.** Две копии логики (сцена и борд) держатся синхронными вручную. Машинной сверки
+между ними нет — если понадобится третья точка, логику стоит вынести, а не копировать в третий раз.
+
+
+### Исправления передачи карт и аудитории конфетти — 2026-09-13
+
+**Закрыто в рабочей ветке.**
+
+- AI Monitoring / AI Release: слот не обновлялся при завершении полёта, и карта
+  исчезала до окончания сброса триггера. `aiBeat` публикует только изменённый слот
+  и даёт ему отрисоваться перед снятием носителя. Сброс остаётся параллельным.
+- Cherry-pick: `onLanded` был пустым, а проекция добавляла карту в конец руки.
+  Принятый handoff теперь публикует физический uid в месте приземления и сохраняет
+  личный порядок руки. Возврат оставшихся карт может закончиться позже.
+- Cherry-pick: скролл-контейнер обрезал внешнюю рамку и подписи ролей. Вертикальные
+  отступы оставляют для них место без удаления прокрутки.
+- Конфетти: очередь запускала финальный такт на каждом клиенте. `useBeats` проверяет
+  победителя терминального события; проигравшие и зрители видят результаты без хлопушек.
+
+Регрессии покрывают своё и чужое размещение AI, обычный и sudo Cherry-pick с
+задержанным возвратом в сброс, а также победителя, проигравшего и зрителя при обоих
+условиях победы. Правила движка и события не менялись.

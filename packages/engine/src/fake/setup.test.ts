@@ -104,15 +104,19 @@ it('is deterministic for a given seed and divergent across seeds', () => {
 })
 
 it('excludes deck entries the engine does not implement', () => {
+  // An id off the catalogue entirely, because the engine now implements every
+  // card on it — System Upgrade, which used to stand in here, was the last one
+  // deferred (#108). The filter is about a caller handing over ids this build
+  // has no rules for, and that is what this id is.
   const s = createGame(
     config({
-      deck: [...DECK, { id: 'operation-system-upgrade', qty: 3 }],
+      deck: [...DECK, { id: 'not-a-card', qty: 3 }],
     }),
   )
   const ids = [...s.seating.flatMap((id) => s.players[id].hand), ...s.decks.main.flat()].map(
     (c) => c.id,
   )
-  expect(ids).not.toContain('operation-system-upgrade')
+  expect(ids).not.toContain('not-a-card')
 })
 
 it('opens on the first seat with nothing drawn or released', () => {

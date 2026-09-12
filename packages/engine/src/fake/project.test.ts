@@ -477,6 +477,22 @@ const primed = (hands: Record<string, CardInstance[]>): GameState => {
 }
 
 describe('self.targets', () => {
+  it.each([
+    'operation-git-branch',
+    'operation-git-rebase',
+  ])('offers every draw pile for %s when the player has a choice', (id) => {
+    const s = primed({ p1: [inst(id, 0)] })
+    const multi = {
+      ...s,
+      decks: { ...s.decks, main: [[inst('attack-bug', 8)], [inst('attack-bug', 9)]] },
+    }
+    expect(project(multi, 'p1').self.targets[`${id}#0`]).toEqual([
+      { kind: 'pile', pile: 0 },
+      { kind: 'pile', pile: 1 },
+    ])
+    expect(project(s, 'p1').self.targets[`${id}#0`]).toBeUndefined()
+  })
+
   it('projects legal targets for playable attacks and nothing else', () => {
     // prime: it is p1's turn (default), p1 holds an attack, a release, and a defence
     const s = primed({

@@ -46,6 +46,8 @@ export interface BoardOpponent {
   name: string
   handCount: number
   release: ReleaseSlots
+  // Rules identities remain available when a slot displays an AI card face.
+  releaseId?: Partial<Record<keyof ReleaseSlots, string>>
   // A played Code Review lying under the release it protects.
   support?: ReleaseSupport
   eliminated?: boolean
@@ -57,10 +59,12 @@ export interface BoardOpponent {
 // Everything the engine's projection can answer. Assembled by the consumer's
 // adapter; nothing here is room- or session-shaped.
 export interface BoardState {
+  aiCause?: { card: string; eventId: number }
   you: {
     name: string
     hand: HandItem[]
     release: ReleaseSlots
+    releaseId?: Partial<Record<keyof ReleaseSlots, string>>
     // A played Code Review lying under the release it protects.
     support?: ReleaseSupport
     eliminated?: boolean
@@ -195,6 +199,29 @@ export interface BoardChromeCopy {
   // above it. Shared with Git Cherry-pick once #61 lands: the two effects
   // resolve through the same pending, so they read the same line.
   insidePrompt: string
+  // Git Cherry-pick's own grid (#108, `pickFromDiscard`, `operation-git-
+  // cherry-pick`) — its own captions, not Inside's `insidePrompt`: a base
+  // pick asks for one card, a sudo pick asks for two with different
+  // destinations, and a trigger card sitting in the offer needs a reason it
+  // cannot take the hand slot.
+  cherryPickPrompt: string
+  cherryPickSudoPrompt: string
+  cherryPickToHand: string
+  cherryPickToDeck: string
+  cherryPickNoHand: string
+  // Git Rebase's private row (#108, `reorderTop`) — the prompt above the row
+  // and the label each position's move button carries. Its own captions for
+  // the same reason Cherry-pick has its own: this question is about ORDER, and
+  // no other pending asks it.
+  rebasePrompt: string
+  rebasePosition: string
+  // System Upgrade's centre (#108, `systemUpgrade`) — the one pending owed to
+  // several seats at once, so it needs three captions rather than one: the ask
+  // while this seat is owed, what the table is waiting for once it has
+  // answered, and the sudo actor's pick from what everyone threw.
+  upgradePrompt: string
+  upgradeWaiting: string
+  upgradeTakePrompt: string
   // поле паузы (опционально — рендерится только вместе с обработчиком паузы):
   // подпись поля, состояние тумблера (вкл / выкл) и строка-пояснение
   pauseGame?: string
@@ -238,6 +265,7 @@ export interface BoardCopyBundle {
  * sibling feature.
  */
 export interface BeatRun {
+  after?: BoardState
   base: BoardState
   publish: (state: BoardState) => void
 }
@@ -259,6 +287,7 @@ export interface BeatRun {
  * beat queue (`features/board-beats`) need this same shape.
  */
 export interface StagedHandoff {
+  whenLanded?: () => Promise<void>
   mainUid: string
   supportUid?: string
   el: HTMLElement | null // the staged node at the centre (pair flyer or single-card node)
@@ -366,4 +395,9 @@ export interface BoardProps {
     restoredThrough?: number
     onDone: () => void
   }
+}
+
+export interface DiscardPickHandoff {
+  card: string
+  run: (ctx: BeatRun) => Promise<void>
 }

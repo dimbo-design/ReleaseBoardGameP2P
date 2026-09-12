@@ -28,6 +28,13 @@ export type TableChoice =
   | { kind: 'giveCard'; card: string }
   | { kind: 'handLimit'; cards: string[] }
   | { kind: 'pickFromDiscard'; card: string; toDeck?: string }
+  // The order committed per pile, index 0 becoming the new top — mirrors the
+  // engine's own Choice.
+  | { kind: 'reorderTop'; order: { pile: number; cards: string[] }[] }
+  // System Upgrade: `upgradeDiscard` from a seat on the roster, `upgradeTake`
+  // from the actor once every seat has answered — mirrors the engine's Choice.
+  | { kind: 'upgradeDiscard'; card: string }
+  | { kind: 'upgradeTake'; card: string }
   // Taking a staged release back before its cost is paid — see the engine's
   // own Choice for why it carries nothing.
   | { kind: 'cancelRelease' }
@@ -82,6 +89,47 @@ export type TablePending =
       picks: 1 | 2
       source: string
     }
+  | {
+      kind: 'reorderTop'
+      player: string
+      piles: { pile: number; cards: { uid: string; id: string }[] }[]
+      source: string
+    }
+  // System Upgrade — the one pending owed to SEVERAL seats at once, and so the
+  // one with no `player`. Mirrors the engine's PendingView field for field
+  // (Decision 7), including the omission: every other member has a `player`,
+  // which is exactly what let a union-wide `pending.player` read compile, and
+  // dropping it here makes the kit's own readers say what they meant instead.
+  // Nothing is gated — the rules put the thrown cards face up at the centre.
+  | {
+      kind: 'systemUpgrade'
+      actor: string
+      owed: string[]
+      thrown: { player: string; card: { uid: string; id: string } }[]
+      sudo: boolean
+      phase: 'discarding' | 'picking'
+      source: string
+    }
+
+// The kit's own `pendingOwes` (the engine exports one under that name from
+// state.ts). Declared rather than imported for the same reason TablePending is
+// — the kit carries no domain dependency (Decision 7) — and kept to one
+// expression so the two cannot drift into different answers about whose move
+// it is. `systemUpgrade` owes its roster while it is discarding and the actor
+// once it is picking; every other kind owes the single seat it names.
+export function pendingOwesSelf(pending: TablePending | null | undefined, selfId: string): boolean {
+  if (!pending) return false
+  if (pending.kind !== 'systemUpgrade') return pending.player === selfId
+  return pending.phase === 'picking' ? pending.actor === selfId : pending.owed.includes(selfId)
+}
+
+// The seat the table is waiting on, for a dock that has to name somebody. The
+// mirror of `pendingOwesSelf` from the other side: the first seat still owing
+// while a `systemUpgrade` is discarding, the actor once it is picking.
+export function pendingOwedBy(pending: TablePending): string | undefined {
+  if (pending.kind !== 'systemUpgrade') return pending.player
+  return pending.phase === 'picking' ? pending.actor : pending.owed[0]
+}
 
 export interface TableWindow {
   player: string

@@ -1,6 +1,14 @@
 import type { Action, Choice } from '../actions'
+import { rulesFor } from '../cards'
 import type { Engine } from '../engine'
-import type { CardUid, GameState, PlayerId, ReleaseSlot } from '../state'
+import {
+  type CardUid,
+  type GameState,
+  type PlayerId,
+  pendingOwes,
+  type ReleaseSlot,
+  seatOwing,
+} from '../state'
 import type { ReleaseView } from '../view'
 
 // The order the rules give (see release.ts's `neutralizeOptions`): the
@@ -35,7 +43,11 @@ export function botAction(
   if (view.over) return null
 
   const pending = view.pending
-  if (pending && pending.player === me) {
+  // "Is this decision mine?" — asked of the projection, through the engine's
+  // own predicate, because a `systemUpgrade` is owed to a roster rather than to
+  // one seat and `me` may be anywhere on it. Every kind below still answers for
+  // a single seat; the predicate is what decides whether `me` is that seat.
+  if (pending && pendingOwes(pending, me)) {
     switch (pending.kind) {
       case 'defend': {
         const card = pending.options[0] ?? null
@@ -74,14 +86,39 @@ export function botAction(
         }
       }
       case 'pickFromDiscard': {
-        const card = pending.options[0]?.uid ?? ''
-        const toDeck = pending.picks === 2 ? pending.options[1]?.uid : undefined
+        // options[0] may be a trigger a sudo offer carries for the DECK slot;
+        // naming it for the hand is rejected, and a pending nothing can resolve
+        // stalls everything behind it.
+        const hand = pending.options.find((c) => rulesFor(c.id)?.kind !== 'trigger')
+        if (!hand) return null
+        const toDeck =
+          pending.picks === 2 ? pending.options.find((c) => c.uid !== hand.uid)?.uid : undefined
         return {
           type: 'RESOLVE',
           player: me,
-          choice: { kind: 'pickFromDiscard', card, ...(toDeck ? { toDeck } : {}) },
+          choice: { kind: 'pickFromDiscard', card: hand.uid, ...(toDeck ? { toDeck } : {}) },
           at,
         }
+      }
+      case 'reorderTop': {
+        // A bot has no opinion about deck order; leaving it alone is a legal
+        // answer and keeps the seat from stalling the table.
+        const order = pending.piles.map((e) => ({
+          pile: e.pile,
+          cards: e.cards.map((c) => c.uid),
+        }))
+        return { type: 'RESOLVE', player: me, choice: { kind: 'reorderTop', order }, at }
+      }
+      case 'systemUpgrade': {
+        // `pendingOwes` already decided this is our move: the picking phase
+        // belongs to the actor, the discarding one to a seat on the roster.
+        if (pending.phase === 'picking') {
+          const card = pending.thrown[0]?.card.uid ?? ''
+          return { type: 'RESOLVE', player: me, choice: { kind: 'upgradeTake', card }, at }
+        }
+        // The roster never carries an empty-handed seat, so this holds a card.
+        const card = view.self.hand[0]?.uid ?? ''
+        return { type: 'RESOLVE', player: me, choice: { kind: 'upgradeDiscard', card }, at }
       }
       default:
         return null
@@ -159,7 +196,12 @@ export function runUntilIdle(
     // doc comment above: this is the headless-driver behaviour, not safe to
     // reuse verbatim for a UI driver.
     if (current.turn.player === human && !current.pending && !current.window) return current
-    const seat = current.pending?.player ?? current.turn.player
+    // The seat the pending is waiting on, which is no longer always a single
+    // named one: a `systemUpgrade` owes its whole roster, and the driver has to
+    // pick somebody to be. `seatOwing` gives the first seat still owing (the
+    // actor once it is picking), so repeated passes here drain the roster one
+    // answer at a time instead of asking a seat that has already answered.
+    const seat = seatOwing(current.pending) ?? current.turn.player
     const action = botAction(engine, current, seat, at)
     if (!action) return current
     current = engine.reduce(current, action).state

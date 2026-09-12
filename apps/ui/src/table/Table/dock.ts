@@ -1,4 +1,5 @@
 import type { TurnDockState } from '@/table/TurnDock/TurnDock'
+import { pendingOwedBy, pendingOwesSelf } from './intents'
 import type { TableState } from './types'
 
 export interface DockView {
@@ -54,7 +55,13 @@ export function isCounting(state: TableState, selfId: string, timers = true): bo
     // Only your OWN decision counts down here — waiting on somebody else's is a
     // flat ring, so there is nothing for a consumer to tick. Mirrors the two
     // pending branches in `deriveDock` below.
-    return state.pending.player === selfId && 'deadline' in state.pending
+    //
+    // Both halves are load-bearing, and a `systemUpgrade` fails the second: it
+    // carries no deadline, so even the seats it owes get a flat ring — which is
+    // exactly what `deriveDock`'s `timed` already produces for it below. Owed
+    // to several seats at once, it is the first pending where "is it mine" is
+    // not a single comparison, so it goes through the one predicate.
+    return pendingOwesSelf(state.pending, selfId) && 'deadline' in state.pending
   }
   // Mirrors the window branch below exactly: the window's OWNER gets the hold
   // ring with a live clock whoever they are — elimination only silences a
@@ -122,7 +129,11 @@ export function deriveDock(
   // A pending owed by you outranks everything — the engine is waiting on your
   // decision. The choice itself lives on the table or in the PendingPrompt;
   // the dock narrates the phase and counts its clock down.
-  if (pending && pending.kind !== 'discardForRelease' && pending.player === selfId) {
+  // "Owed by you" is `pendingOwesSelf`, not a comparison: a `systemUpgrade`
+  // owes every seat on its roster at once while it is discarding, and the
+  // actor alone once it is picking — so the actor sits in the `hold` branch
+  // below for the first half of their own card and lands here for the second.
+  if (pending && pending.kind !== 'discardForRelease' && pendingOwesSelf(pending, selfId)) {
     const timed = 'deadline' in pending ? pending : undefined
     return {
       state: 'reaction',
@@ -152,7 +163,12 @@ export function deriveDock(
       state: 'hold',
       danger: false,
       progress: 0,
-      activePlayer: state.opponents.find((o) => o.id === pending.player)?.name,
+      // Whose decision the table is waiting on — for a `systemUpgrade`, the
+      // first seat still owing (the actor once it is picking), which is what
+      // `pendingOwedBy` answers. One name, because the dock has one slot for
+      // one: a roster of three would need a row this component does not have,
+      // and naming the next seat to answer is the honest reduction of it.
+      activePlayer: state.opponents.find((o) => o.id === pendingOwedBy(pending))?.name,
     }
   }
 

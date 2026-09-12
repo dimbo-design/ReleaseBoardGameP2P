@@ -191,6 +191,7 @@ function Probe({
         <div key={c.uid} data-hand-slot />
       ))}
       <div data-testid="hand">{shown.you.hand.length}</div>
+      <div data-testid="turn">{shown.turn}</div>
       {/* The deck tells the three states apart where the hand cannot: preDeal
           and afterDiscard both have an empty fan, and only the deck count says
           whether the board is showing the opening's shadow or the projection. */}
@@ -233,6 +234,27 @@ const mount = (intro?: IntroBeat | null) => {
 // batch left behind — and jsdom drives requestAnimationFrame on a real timer, so
 // flushing microtasks alone no longer reaches the other side of it.
 const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 80))))
+
+it('shows live immediately for a batch with no animation plans', async () => {
+  motion.reduced = false
+  try {
+    const { getByTestId, rerender } = render(
+      <Probe live={{ ...preDiscard, turn: 'p1' }} events={[]} anchors={stub} />,
+    )
+    rerender(
+      <Probe
+        live={{ ...preDiscard, turn: 'p2' }}
+        events={[{ id: 1, type: 'turnStarted', player: 'p2', index: 1 }]}
+        anchors={stub}
+      />,
+    )
+    await flush()
+    expect(getByTestId('turn').textContent).toBe('p2')
+    expect(getByTestId('running').textContent).toBe('idle')
+  } finally {
+    motion.reduced = true
+  }
+})
 
 // An opening that reports when it is told to, so a test can watch the order.
 const introBeat = (log: string[], run?: () => Promise<void>): IntroBeat => ({
@@ -765,14 +787,17 @@ it('is never working under prefers-reduced-motion', async () => {
   expect(getByTestId('running').textContent).toBe('idle')
 })
 
-it('starts a release victory celebration as an exclusive board beat', async () => {
+it.each([
+  'release',
+  'lastStanding',
+] as const)('starts a %s victory celebration as an exclusive board beat for the winner', async (condition) => {
   vi.useFakeTimers()
   motion.reduced = false
   const event = {
     id: 99,
     type: 'gameOver',
     winner: 'p1',
-    condition: 'release',
+    condition,
   } as Event
   const { container, getByTestId, rerender } = render(
     <Probe live={preDiscard} events={[]} anchors={stub} />,
@@ -788,6 +813,38 @@ it('starts a release victory celebration as an exclusive board beat', async () =
   expect(getByTestId('exclusive').textContent).toBe('exclusive')
 })
 
+it.each([
+  { condition: 'release', selfId: 'p2', role: 'losing player' },
+  { condition: 'lastStanding', selfId: 'p2', role: 'losing player' },
+  { condition: 'release', selfId: 'observer', role: 'observer' },
+  { condition: 'lastStanding', selfId: 'observer', role: 'observer' },
+] as const)('does not celebrate a $condition win on the $role board', async ({
+  condition,
+  selfId,
+}) => {
+  vi.useFakeTimers()
+  motion.reduced = false
+  const live = { ...preDiscard, selfId }
+  const event = { id: 99, type: 'gameOver', winner: 'p1', condition } as Event
+  const { container, getByTestId, rerender } = render(
+    <Probe live={live} events={[]} anchors={stub} />,
+  )
+
+  rerender(<Probe live={live} events={[event]} anchors={stub} />)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+
+  expect(container.querySelector('[data-testid="game-end-confetti"]')).toBeNull()
+  expect(getByTestId('running').textContent).toBe('idle')
+  expect(getByTestId('exclusive').textContent).toBe('open')
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(8500)
+  })
+  expect(container.querySelector('[data-testid="game-end-confetti"]')).toBeNull()
+})
+
 // ===== a 503 a standing Monitoring answers by itself (#103 testing, problem 2)
 // No pending is ever raised, so nothing lights the alarm off the projection —
 // the plan carries the fact and the queue turns it into the beat's own `alarm`,
@@ -799,7 +856,7 @@ const autoAnswered503 = [
   { id: 10, type: 'discarded', player: 'p1', card: 'trigger-error-503', reason: 'trigger' },
 ] as Event[]
 
-it('lights the alarm while a self-answered 503 is on its way out', async () => {
+it('keeps the alarm dark when standing Monitoring answers automatically', async () => {
   motion.reduced = false
   sent.calls = []
   sent.hang = false
@@ -810,7 +867,7 @@ it('lights the alarm while a self-answered 503 is on its way out', async () => {
   rerender(<Probe live={afterSweep} events={autoAnswered503} anchors={stub} alarms={alarms} />)
   await flush()
   // it burned at some point during the beat…
-  expect(alarms).toContain(true)
+  expect(alarms).not.toContain(true)
   // …and the table is not left lit once the queue has drained
   expect(getByTestId('alarm').textContent).toBe('none')
 })

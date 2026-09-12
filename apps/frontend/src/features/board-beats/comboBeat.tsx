@@ -4,6 +4,7 @@ import {
   enterPose,
   nextFrames,
   play,
+  restTransform,
   scatterAt,
   useDiscardExit,
   useFlyer,
@@ -12,6 +13,7 @@ import {
 import type { RefObject } from 'react'
 import { useCallback, useRef } from 'react'
 import {
+  ATTACK_POSE,
   type BeatRun,
   type BoardAnchors,
   MERGE_MS,
@@ -62,12 +64,10 @@ export function useComboBeat(
   const latest = useRef({ anchors, staging, send, clearPaidCost, takeStagedRelease })
   latest.current = { anchors, staging, send, clearPaidCost, takeStagedRelease }
 
-  // The full fold: raise a carrier at the centre, paint both halves standing
-  // at the source, fold them into the pair's pose. The aux is the same
-  // movement with PAIR_AUX_POSE as its rest — no branch, the degenerate case
-  // (a lone card, no aux) is built in. Returns the carrier element still HELD
-  // — the caller decides whether the pair stays (attack → drop, the pending
-  // render is underneath) or flies on (release → playToReleaseZone first).
+  // Attacks arrive in ATTACK_POSE, including the whole composed Sudo pair,
+  // matching DefenseRelease's throwAttack and the pending render underneath.
+  // Release pairs form from their two halves. Returns the carrier still held;
+  // the caller hands it to pending or flies it on to the release zone.
   const foldIn = useCallback(
     async (
       actor: string,
@@ -88,6 +88,21 @@ export function useComboBeat(
       const fromRect =
         (mine && handIndex >= 0 ? rectOf(a.handSlotAt(handIndex)) : null) ?? a.seatBox(actor)
       if (!fromRect) return null
+      if (aux && main.category === 'attack') {
+        const [el] = await flyer.raise([
+          { key: 'fold', at: fromRect, content: <CardPair main={main} aux={aux} width="100%" /> },
+        ])
+        if (el) {
+          await play('playToCenter', el, {
+            from: fromRect,
+            to: cRect,
+            rotate: ATTACK_POSE.rot,
+            dx: ATTACK_POSE.dx,
+            dy: ATTACK_POSE.dy,
+          })?.finished
+        }
+        return el ?? null
+      }
       const [el] = await flyer.raise([
         aux
           ? { key: 'fold', at: cRect, content: <CardPair main={main} aux={aux} width="100%" /> }
@@ -100,8 +115,15 @@ export function useComboBeat(
       if (mainEl) mainEl.style.transform = enterPose(fromRect, cRect)
       if (auxEl) auxEl.style.transform = enterPose(fromRect, cRect)
       await nextFrames() // the painted frame at the source (I2)
+      const plainAttack = main.category === 'attack' && !aux
       const flights = [
-        mainEl ? play('foldIntoPair', mainEl, { from: fromRect, box: cRect, dur: MERGE_MS }) : null,
+        mainEl
+          ? play(plainAttack ? 'landInPose' : 'foldIntoPair', mainEl, {
+              from: fromRect,
+              box: cRect,
+              ...(plainAttack ? { pose: restTransform(ATTACK_POSE) } : { dur: MERGE_MS }),
+            })
+          : null,
         auxEl
           ? play('foldIntoPair', auxEl, {
               from: fromRect,
@@ -143,6 +165,53 @@ export function useComboBeat(
     async (plan: Extract<BeatPlan, { kind: 'attackPlaced' }>, ctx: BeatRun) => {
       const { staging: s } = latest.current
       const handoff = s?.current
+
+      // DDoS resolves without a defense prompt. Keep its staged card (or the
+      // remote fold) visible until this beat sends it to discard itself; a
+      // later pairToDiscard cannot find a pending render for this attack.
+      if (plan.resolved && plan.spent && plan.spent.length > 0) {
+        const mine = plan.attacker === ctx.base.selfId
+        await nextFrames()
+        const el =
+          mine && handoff
+            ? handoff.el
+            : await foldIn(plan.attacker, plan.card, plan.sudo ? 'support-sudo' : undefined, ctx)
+        const from = rectOf(latest.current.anchors.centre.current)
+        const main = cardById(plan.card)
+        const mainSpent = plan.spent.find((item) => item.card === plan.card)
+        const auxSpent = plan.spent.find((item) => item.card === 'support-sudo')
+        await wait(SHOW_HOLD)
+        // Hand back the staged node and remove the spent instances from the
+        // shadow in the same commit as the discard carrier takes over.
+        if (mine) {
+          const hand = [...ctx.base.you.hand]
+          for (const spent of plan.spent) {
+            const uid = spent.card === plan.card ? handoff?.mainUid : handoff?.supportUid
+            const at = hand.findIndex((item) =>
+              uid ? item.uid === uid : item.card.id === spent.card,
+            )
+            if (at >= 0) hand.splice(at, 1)
+          }
+          ctx.publish({ ...ctx.base, you: { ...ctx.base.you, hand } })
+          handoff?.release()
+        }
+        flyer.drop('fold')
+        if (from && main && mainSpent) {
+          await latest.current.send([
+            {
+              key: `instant:${mainSpent.eventId}`,
+              card: main,
+              aux: auxSpent ? cardById(auxSpent.card) : null,
+              el,
+              from,
+              pose: ATTACK_POSE,
+              scatter: scatterAt(mainSpent.eventId),
+              auxScatter: auxSpent ? scatterAt(auxSpent.eventId) : undefined,
+            },
+          ])
+        }
+        return
+      }
 
       // WHAT THE CARRIER HANDS OVER TO — the same question for every seat, so
       // one answer for all of them (#101, Fix D, finding 7). Letting go of
@@ -283,7 +352,7 @@ export function useComboBeat(
   const runRelease = useCallback(
     async (plan: Extract<BeatPlan, { kind: 'releasePlaced' }>, ctx: BeatRun) => {
       const { staging: s } = latest.current
-      const handoff = s?.current
+      let handoff = s?.current
 
       // THE COST — by the rules a release costs one card, and the cost is
       // shown to the table in the open before it goes. The actor's own is
@@ -332,6 +401,10 @@ export function useComboBeat(
       }
 
       await nextFrames()
+      // A plain play can be accepted in the same commit that dispatches it.
+      // Board publishes that handoff in its later layout effect; preserve an
+      // early capture, but let this freshly dispatched staging catch up too.
+      handoff ??= latest.current.staging?.current
       const { anchors: a } = latest.current
       const cRect = rectOf(a.centre.current)
       const toRect = rectOf(a.releaseSlot(plan.player, plan.slot))
@@ -372,7 +445,9 @@ export function useComboBeat(
       // a hand-index lookup aims at another card's slot — or, when the release
       // was last in hand, at no slot at all, and `seatBox` is null for us.
       const stageRect =
-        plan.player === ctx.base.selfId && !plan.codeReview ? rectOf(a.stage.current) : null
+        plan.player === ctx.base.selfId && !plan.codeReview && plan.slot !== 'monitoring'
+          ? rectOf(a.stage.current)
+          : null
       const standing = cardById(plan.card)
       if (stageRect && standing) {
         // The static render is let go in the SAME commit the carrier goes up:
@@ -405,6 +480,7 @@ export function useComboBeat(
         return
       }
       const el = await foldIn(plan.player, plan.card, plan.codeReview, ctx)
+      if (plan.slot === 'monitoring') await wait(SHOW_HOLD)
       if (el) await play('playToReleaseZone', el, { from: cRect, to: toRect })?.finished
       flyer.drop('fold')
     },
@@ -440,6 +516,7 @@ export function useComboBeat(
                 el,
                 from,
                 layer: 0,
+                pose: main.category === 'attack' ? ATTACK_POSE : undefined,
                 scatter: scatterAt(mainRef.eventId),
                 auxScatter: auxRef ? scatterAt(auxRef.eventId) : undefined,
               },

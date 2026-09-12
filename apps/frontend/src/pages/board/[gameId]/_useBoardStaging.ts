@@ -37,6 +37,7 @@ import {
   type Rect,
   useFlyer,
   useHandArrival,
+  wait,
 } from '@release/ui/animations'
 import {
   type ReactNode,
@@ -48,7 +49,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { type BoardAnchors, type BoardState, MERGE_MS } from '~/entities/game/board'
+import { type BoardAnchors, type BoardState, MERGE_MS, SHOW_HOLD } from '~/entities/game/board'
 import { useReducedMotion } from '~/shared/lib/useReducedMotion'
 
 // Moved verbatim from the pre-#99 `_useBoardInteractions.ts` — the comparison a
@@ -70,6 +71,11 @@ const sameTarget = (a: TableTarget, b: TableTarget): boolean => {
       return b.kind === 'pile' && a.pile === b.pile
   }
 }
+
+// The projection's target offer describes a solo play. Sudo Rebase applies
+// to every draw pile, while Sudo Branch still splits the chosen one.
+const rebaseAllPiles = (main: CardData, support: CardData | null) =>
+  main.id === 'operation-git-rebase' && support?.id === 'support-sudo'
 
 export interface StagedCard {
   uid: string
@@ -238,6 +244,7 @@ export function useBoardStaging({
   // regardless of what `cancel()` does), and a second click on another
   // candidate could start an overlapping second fold on top of the first.
   const foldingRef = useRef(false)
+  const plainAttempt = useRef(0)
 
   const commitStaged = (next: StagedPlay | null) => {
     stagedRef.current = next
@@ -264,7 +271,10 @@ export function useBoardStaging({
 
   const targets = useMemo(
     () =>
-      staged?.main && staged.phase !== 'dispatched' && !cancelling
+      staged?.main &&
+      staged.phase !== 'dispatched' &&
+      !cancelling &&
+      !rebaseAllPiles(staged.main.card, staged.support?.card ?? null)
         ? (state.targets?.[staged.main.uid] ?? [])
         : [],
     [staged, cancelling, state.targets],
@@ -481,6 +491,8 @@ export function useBoardStaging({
     }
     const s = stagedRef.current
     if (!s || s.phase === 'dispatched' || cancellingRef.current || foldingRef.current) return
+    plainAttempt.current += 1
+    flyer.drop('stage')
     arrowCtl.stop()
     const cRect = anchors.centre.current?.getBoundingClientRect()
     if (reduced || !cRect) {
@@ -523,6 +535,7 @@ export function useBoardStaging({
     cost,
     state.you.hand,
     actions,
+    flyer.drop,
   ])
 
   // While a support waits for a partner, the cards it can fold with keep
@@ -628,6 +641,69 @@ export function useBoardStaging({
     [reduced, anchors.stage, flyer.raise, flyer.drop, actions],
   )
 
+  // Clicks and pulls share the same centre staging; only their starting rect differs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commitStaged only writes refs/state
+  const stageAtCentre = useCallback(
+    (card: StagedCard, hasTarget: boolean, from?: Rect) => {
+      commitStaged(
+        hasTarget
+          ? { support: null, main: card, phase: 'aim', merged: false }
+          : { support: card, main: null, phase: 'partner', merged: false },
+      )
+      setStage('none')
+      void (async () => {
+        const to = anchors.centre.current?.getBoundingClientRect()
+        if (!reduced && from && to) {
+          const [el] = await flyer.raise([{ key: 'stage', card: card.card, at: from }])
+          if (el) await play('playToCenter', el, { from, to })?.finished
+          flyer.drop('stage')
+        }
+        aimFromCentre()
+      })()
+    },
+    [anchors.centre, reduced, flyer.raise, flyer.drop, aimFromCentre],
+  )
+
+  // A standalone play is read at the centre before its effect is sent.
+  // Targeted cards and combo partners keep their existing decision step.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commitStaged only updates refs and state
+  const stagePlain = useCallback(
+    (card: StagedCard, from: Rect | undefined, attack: boolean) => {
+      const attempt = ++plainAttempt.current
+      commitStaged({ support: null, main: card, phase: 'aim', merged: false })
+      setStage('none')
+      const current = () =>
+        attempt === plainAttempt.current &&
+        !cancellingRef.current &&
+        stagedRef.current?.main?.uid === card.uid &&
+        stagedRef.current.phase === 'aim'
+      const dispatch = () => {
+        if (!current()) return
+        commitStaged({ support: null, main: card, phase: 'dispatched', merged: false })
+        dispatchWatermarkRef.current = eventsRef.current.length
+        if (attack) actions?.onAttack?.(card.uid, undefined)
+        else actions?.onPlay?.(card.uid, undefined, undefined)
+      }
+      if (reduced) {
+        dispatch()
+        return
+      }
+      void (async () => {
+        const to = anchors.centre.current?.getBoundingClientRect()
+        if (to && from) {
+          const [el] = await flyer.raise([{ key: 'stage', card: card.card, at: from }])
+          if (!current()) return
+          if (el) await play('playToCenter', el, { from, to })?.finished
+          if (!current()) return
+          flyer.drop('stage')
+        }
+        await wait(SHOW_HOLD)
+        dispatch()
+      })()
+    },
+    [actions, anchors.centre, reduced, flyer.raise, flyer.drop],
+  )
+
   // GESTURE — pulling a card out of the fan puts it on the table. A card with
   // its own targets stages a plain aim (Task 3's path: `main` set, `phase:
   // 'aim'`); a support with no targets of its own but a combo partner stages
@@ -650,7 +726,6 @@ export function useBoardStaging({
   // `discardForRelease.release`, never from `staged` — see the clearing
   // effect further down for why `staged` does not linger once that pending
   // lands.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: commitStaged closes only over refs/setStaged and is stable in effect
   const onHandPlay = useCallback(
     (uid: string, drop: HandPlayDrop): boolean => {
       if (!enabled || stagedRef.current) return false
@@ -672,33 +747,28 @@ export function useBoardStaging({
         partners.length === 0 &&
         item.card.category === 'release' &&
         state.playable.includes(uid)
-      if (!hasTarget && partners.length === 0 && !soloRelease) return false // pull only what plays alone, with a partner, or a release
+      const attack = Boolean(state.window?.canAttackWith?.includes(uid))
+      const plain =
+        !hasTarget &&
+        partners.length === 0 &&
+        !soloRelease &&
+        ((state.playable.includes(uid) &&
+          (item.card.category === 'operation' || item.card.category === 'protection')) ||
+          attack)
+      if (!hasTarget && partners.length === 0 && !soloRelease && !plain) return false
       const card: StagedCard = { uid, card: item.card, index }
       // A release goes through the shared road above — the same one the click
       // takes — so the two can never again disagree about where the card is.
       // Placed after the guards on purpose: a refused pull touches no state.
+      if (plain) {
+        stagePlain(card, drop.rect, attack)
+        return true
+      }
       if (soloRelease) {
         stageSoloRelease(card, drop.rect)
         return true
       }
-      commitStaged(
-        hasTarget
-          ? { support: null, main: card, phase: 'aim', merged: false }
-          : { support: card, main: null, phase: 'partner', merged: false },
-      )
-      // EVERY pull sets the stage machine, not only a release's — that is what
-      // stops one play inheriting the last one's whereabouts (#101, Fix C,
-      // finding 5). This pull leaves the stage slot empty, and says so.
-      setStage('none')
-      void (async () => {
-        const to = anchors.centre.current?.getBoundingClientRect()
-        if (!reduced && drop.rect && to) {
-          const [el] = await flyer.raise([{ key: 'stage', card: item.card, at: drop.rect }])
-          if (el) await play('playToCenter', el, { from: drop.rect, to })?.finished
-          flyer.drop('stage')
-        }
-        aimFromCentre()
-      })()
+      stageAtCentre(card, hasTarget, drop.rect)
       return true
     },
     [
@@ -707,12 +777,10 @@ export function useBoardStaging({
       state.targets,
       state.comboOptions,
       state.playable,
-      reduced,
-      aimFromCentre,
       stageSoloRelease,
-      flyer.raise,
-      flyer.drop,
-      anchors.centre,
+      stageAtCentre,
+      stagePlain,
+      state.window,
     ],
   )
 
@@ -787,35 +855,8 @@ export function useBoardStaging({
         return true
       }
       const s = stagedRef.current
-      // A RELEASE CLICKED AT REST (#101, Fix D, finding 1) — the other road to
-      // the stage slot, and until now the one that led nowhere. It takes the
-      // same `stageSoloRelease` a pull takes; the only difference is that a
-      // click has no drop rect, so the flight starts from the card's own fan
-      // slot, measured off the fan's geometry exactly as `onCostPick` measures
-      // one (I6).
-      //
-      // `state.playable` is the whole legality check, the same one `onHandPlay`
-      // leans on for its own release branch: it is empty while a window or a
-      // pending is open (`playableFor`'s own first checks), so a window's attack
-      // affordance — a click too, and the plain gesture's to own — can never be
-      // taken by this branch. The target check mirrors `onHandPlay`'s: a release
-      // with something to aim at would belong at the centre, not here.
-      if (!s) {
-        const item = handItems[index]
-        const releaseAtRest =
-          item != null &&
-          item.card.category === 'release' &&
-          state.playable.includes(item.uid) &&
-          (state.targets?.[item.uid] ?? []).length === 0
-        if (!item || !releaseAtRest) return false
-        const handIndex = state.you.hand.findIndex((c) => c.uid === item.uid)
-        if (handIndex < 0) return false
-        stageSoloRelease(
-          { uid: item.uid, card: item.card, index: handIndex },
-          reduced ? undefined : slotBox(index, handItems.length),
-        )
-        return true
-      }
+      // A click chooses a cost or a combo partner; it never starts a play.
+      if (!s) return false
       if (s.phase !== 'partner' || !s.support) return false
       const item = handItems[index]
       if (!item) return true
@@ -863,7 +904,10 @@ export function useBoardStaging({
           commitStaged({ support, main, phase: 'dispatched', merged: true })
           dispatchWatermarkRef.current = eventsRef.current.length
           actions?.onAttack?.(main.uid, support.uid)
-        } else if ((state.targets?.[main.uid] ?? []).length > 0) {
+        } else if (
+          (state.targets?.[main.uid] ?? []).length > 0 &&
+          !rebaseAllPiles(main.card, support.card)
+        ) {
           commitStaged({ support, main, phase: 'target', merged: true })
           aimFromCentre()
         } else {
@@ -954,6 +998,7 @@ export function useBoardStaging({
       arrowCtl.stop,
       aimFromCentre,
       stageSoloRelease,
+      stageAtCentre,
       actions,
       cancel,
       costOptions,
@@ -1084,6 +1129,7 @@ export function useBoardStaging({
   // `Options.matchKey` above, and `docs/animations/backlog.md`.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `matchKey` is the boundary and the only dependency this may have. `arrowCtl.stop` and `flyer.drop` happen to be memoized, but `arrival.reset` is a plain function `useHandArrival` recreates on every render — so listing what the body touches would wipe the gesture on every render instead of once per match. The closure is this render's, which is exactly what a wipe wants.
   useLayoutEffect(() => {
+    plainAttempt.current += 1
     commitStaged(null)
     cancellingRef.current = false
     foldingRef.current = false
@@ -1095,6 +1141,9 @@ export function useBoardStaging({
     arrowCtl.stop()
     flyer.drop()
     arrival.reset()
+    return () => {
+      plainAttempt.current += 1
+    }
   }, [matchKey])
 
   // the combo beat's own clear (#100) — no flight, just done. Unguarded, unlike

@@ -1,7 +1,10 @@
+import { createFakeEngine, FAKE_DECK, FAKE_EVENTS } from '@release/engine/fake'
+import { cardById } from '@release/ui'
 import { scatterAt } from '@release/ui/animations'
 import { describe, expect, it, vi } from 'vitest'
-import type { BoardState } from '~/entities/game/board'
+import { type BoardState, type HistoryLabels, toBoardState } from '~/entities/game/board'
 import { SHOW_HOLD, useAiBeat } from './aiBeat'
+import { planBeats } from './planBeats'
 import {
   anchorsFixture,
   animationsTrace,
@@ -30,6 +33,7 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
     ...real,
     play: (name: string, el: Element | null, params?: Record<string, unknown>) => {
       animationsTrace.played.push(name)
+      animationsTrace.order.push(`play:${name}`)
       // index-aligned with `played` — `playedWith(name)` is what reads it, and
       // it is what tells "a flight happened" from "a flight aimed HERE"
       animationsTrace.params.push(params)
@@ -39,11 +43,8 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
       animationsTrace.waited.push(ms)
       return real.wait(ms)
     },
-    // `aiBeat.tsx` has exactly one call site for `nextFrames` (the `standing`
-    // branch) — `useFlyer.tsx`'s own internal `raise()` imports `nextFrames`
-    // straight from `./timing`, not through this barrel, so it never touches
-    // this trace. That makes a plain call-order log here unambiguous: any
-    // `'nextFrames'` entry IS the standing branch's own await.
+    // Internal flyer raises import timing directly, so this trace records
+    // only the runner's handoffs from a carrier to the standing board.
     nextFrames: () => {
       animationsTrace.order.push('nextFrames')
       return real.nextFrames()
@@ -103,6 +104,76 @@ describe('aiBeat', () => {
     // the AI card went to the slot and NOT to the events deck
     expect(playedNames()).toContain('playToReleaseZone')
     expect(playedNames()).not.toContain('returnToDeck')
+  })
+
+  it.each([
+    ['p1', 'ai-monitoring', 'monitoring', 'protection-monitoring'],
+    ['p2', 'ai-monitoring', 'monitoring', 'protection-monitoring'],
+    ['p1', 'ai-release-frontend', 'frontend', 'release-frontend'],
+    ['p2', 'ai-release-frontend', 'frontend', 'release-frontend'],
+  ] as const)('keeps %s’s landed %s in the zone while the trigger is still leaving', async (player, eventCard, slot, rulesCard) => {
+    const engine = createFakeEngine()
+    const initial = engine.createGame({
+      gameId: 'ai-landing',
+      seed: 4242,
+      players: [
+        { id: 'p1', name: 'One' },
+        { id: 'p2', name: 'Two' },
+      ],
+      setup: {},
+      deck: FAKE_DECK,
+      events: FAKE_EVENTS,
+    })
+    const staged = {
+      ...initial,
+      turn: { ...initial.turn, player, drawnFrom: [] },
+      decks: {
+        ...initial.decks,
+        main: [[{ uid: 'trigger', id: 'trigger-ai' }, ...initial.decks.main[0]]],
+        events: [{ uid: 'event', id: eventCard }],
+      },
+    }
+    const reduction = engine.reduce(staged, { type: 'DRAW', player, at: 1000 })
+    const before = toBoardState(engine.project(staged, 'p1'), [], {} as HistoryLabels)
+    const after = toBoardState(engine.project(reduction.state, 'p1'), [], {} as HistoryLabels)
+    const plans = planBeats(reduction.events, before, after.pending)
+    expect(plans.map((entry) => entry.kind)).toEqual(['aiEvent'])
+    const plan = plans[0]
+    if (plan.kind !== 'aiEvent') throw new Error('Expected AI scene')
+    expect(plan.tail).toEqual({ kind: 'zone', slot, card: rulesCard })
+    const anchors = anchorsFixture({ releaseSlot: () => nodeAt(ZONE_SLOT) })
+    anchors.exitSpy.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5000))
+      animationsTrace.order.push('trigger-landed')
+    })
+    const { result } = renderBeat(() => useAiBeat(anchors))
+    const { published } = await runBeat(
+      (p, beat) =>
+        result.current.run(p, {
+          ...beat,
+          after,
+          publish: (state) => {
+            animationsTrace.order.push('publish-zone')
+            beat.publish(state)
+          },
+        }),
+      plan,
+      anchors,
+      { base: before },
+    )
+    const landed = published.at(-1)
+    const owner = player === 'p1' ? landed?.you : landed?.opponents.find((o) => o.id === player)
+    expect(owner?.release[slot]?.id).toBe(eventCard)
+    expect(owner?.releaseId?.[slot]).toBe(rulesCard)
+    expect(owner?.releaseEvent?.[slot]).toBe(eventCard)
+    if (player === 'p1') expect(landed?.you.releaseUid?.[slot]).toBe('event')
+    expect(landed?.you.hand).toEqual(before.you.hand)
+    expect(landed?.decks).toEqual(before.decks)
+    const order = callOrder()
+    expect(order.indexOf('publish-zone')).toBeGreaterThan(order.indexOf('play:playToReleaseZone'))
+    expect(order.indexOf('nextFrames')).toBeGreaterThan(order.indexOf('publish-zone'))
+    expect(order.indexOf('drop:eff')).toBeGreaterThan(order.indexOf('nextFrames'))
+    expect(order.indexOf('trigger-landed')).toBeGreaterThan(order.indexOf('drop:eff'))
   })
 
   const crushPlan = (destination: 'events' | 'discard') => ({
@@ -259,16 +330,14 @@ describe('aiBeat', () => {
     tail: { kind: 'standing' as const },
   }
 
-  it('lets the trigger go and leaves the AI card standing when a prompt is owed', async () => {
+  it('keeps the trigger beside the AI card until the prompt is answered', async () => {
     const anchors = anchorsFixture()
     const { result } = renderBeat(() => useAiBeat(anchors))
     // NOT wrapped in an outer `act(...)` — see `runBeat`'s own header in
     // `./testing`.
     await runBeat(result.current.run, standingPlan, anchors)
-    // the trigger was filed…
     const keys = (anchors.exitSpy.mock.calls.flat(2) as { key: string }[]).map((c) => c.key)
-    expect(keys).toEqual(['d3'])
-    // …and the AI card neither followed it nor went home
+    expect(keys).toEqual([])
     expect(playedNames()).not.toContain('returnToDeck')
   })
 
@@ -287,22 +356,40 @@ describe('aiBeat', () => {
     expect(playedNames()).toContain('returnToDeck')
   })
 
-  // Pins I2 (`aiBeat.tsx:173-175`'s own comment): the projection's render
-  // must be up before the carrier lets go, not after. `nextFrames()` is
-  // called exactly once in this scenario (see the mock's own comment), and
-  // `order`'s indices only agree with "before" if the call actually precedes
-  // the drop — a version that dropped the carrier FIRST and awaited
-  // `nextFrames()` after would still make the call, but out of order, and
-  // this assertion catches that the same way it catches deleting the line.
-  it('paints the projection before letting the AI carrier go', async () => {
+  it('publishes the standing pair before either carrier lets go', async () => {
     const anchors = anchorsFixture()
     const { result } = renderBeat(() => useAiBeat(anchors))
-    await runBeat(result.current.run, standingPlan, anchors)
+    const pending = {
+      kind: 'handLimit' as const,
+      player: 'p1',
+      excess: 1,
+      options: [],
+      source: 'ai-bad-vibe-coding',
+    }
+    const { published } = await runBeat(
+      (plan, beat) =>
+        result.current.run(plan, {
+          ...beat,
+          after: { ...beat.base, pending },
+          publish: (state) => {
+            animationsTrace.order.push('publish')
+            beat.publish(state)
+          },
+        }),
+      standingPlan,
+      anchors,
+    )
+    expect(published.at(-1)).toMatchObject({
+      pending,
+      aiCause: { card: 'trigger-ai', eventId: 3 },
+    })
     const order = callOrder()
+    const publishIndex = order.indexOf('publish')
     const nextFramesIndex = order.indexOf('nextFrames')
-    const dropIndex = order.indexOf('drop:eff')
-    expect(nextFramesIndex).toBeGreaterThanOrEqual(0)
-    expect(dropIndex).toBeGreaterThan(nextFramesIndex)
+    expect(publishIndex).toBeGreaterThanOrEqual(0)
+    expect(nextFramesIndex).toBeGreaterThan(publishIndex)
+    expect(order.indexOf('drop:eff')).toBeGreaterThan(nextFramesIndex)
+    expect(order.indexOf('drop:trig')).toBeGreaterThan(nextFramesIndex)
   })
 
   // `runBeat`'s own opts carry no `onWait` hook (the brief's snippet assumed
@@ -389,6 +476,68 @@ describe('runTaken — a Release comes back out of the discard (#106, Task 11)',
     const { result } = renderBeat(() => useAiBeat(anchors))
     await runBeat(result.current.runTaken, takenPlan, anchors)
     expect(playedNames()).not.toContain('returnToDeck')
+  })
+
+  it('releases the standing cause with Inside after the selected card reaches its owner', async () => {
+    const anchors = anchorsFixture()
+    const trigger = cardById('trigger-ai')
+    if (!trigger) throw new Error('missing AI trigger')
+    anchors.exitSpy.mockImplementation(async () => {
+      animationsTrace.order.push('causeExit')
+      await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      animationsTrace.order.push('causeLanded')
+    })
+    const { result } = renderBeat(() => useAiBeat(anchors))
+    const { published } = await runBeat(
+      (plan, beat) =>
+        result.current.runTaken(plan, {
+          ...beat,
+          base: {
+            ...beat.base,
+            decks: {
+              ...beat.base.decks,
+              discard: trigger,
+              discardCount: 1,
+              discardHeap: [{ uid: 'd3', card: trigger, ...scatterAt(3) }],
+            },
+            aiCause: { card: 'trigger-ai', eventId: 3 },
+            pending: {
+              kind: 'pickFromDiscard',
+              picks: 1,
+              player: 'p1',
+              options: [],
+              source: 'ai-inside',
+            },
+          },
+          publish: (state) => {
+            if (state.you.hand.length === 1) animationsTrace.order.push('received')
+            if (!state.aiCause && state.decks.discardHeap?.some((card) => card.uid === 'd3')) {
+              animationsTrace.order.push('causeBanked')
+            }
+            beat.publish(state)
+          },
+        }),
+      { ...takenPlan, homeward: 'ai-inside', causeward: { card: 'trigger-ai', eventId: 3 } },
+      anchors,
+    )
+    const items = anchors.exitSpy.mock.calls.flat(2) as {
+      key: string
+      from: unknown
+      scatter: unknown
+    }[]
+    expect(items).toMatchObject([{ key: 'd3', from: boxed(250, 300), scatter: scatterAt(3) }])
+    const order = callOrder()
+    expect(order.indexOf('causeExit')).toBeGreaterThan(order.indexOf('received'))
+    expect(order.indexOf('play:returnToDeck')).toBeGreaterThan(order.indexOf('causeExit'))
+    expect(order.indexOf('play:returnToDeck')).toBeLessThan(order.indexOf('causeLanded'))
+    expect(order.indexOf('causeBanked')).toBeGreaterThan(order.indexOf('causeLanded'))
+    const departing = published.find((state) => state.pending === null)
+    expect(departing?.decks.discardCount).toBe(0)
+    expect(departing?.decks.discard).toBeUndefined()
+    expect(departing?.decks.discardHeap).toEqual([])
+    expect(published.at(-1)?.decks.discardCount).toBe(1)
+    expect(published.at(-1)?.pending).toBeNull()
+    expect(published.at(-1)?.aiCause).toBeUndefined()
   })
 
   // THE SLOT IS OCCUPIED. `pickFromDiscard` is still open while this flies, so

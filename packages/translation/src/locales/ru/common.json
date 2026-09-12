@@ -262,6 +262,14 @@
     "pickFromDiscard": {
       "prompt": "возьмите карту из сброса",
       "action": "взять"
+    },
+    "reorderTop": {
+      "prompt": "посмотрите три верхние карты и расположите их по своему усмотрению",
+      "action": "изменить порядок"
+    },
+    "systemUpgrade": {
+      "prompt": "system upgrade — скиньте одну карту из руки",
+      "action": "сбросить"
     }
   },
   "window": {
@@ -323,6 +331,16 @@
     "askNeutralize": "нейтрализуйте тревогу — ответьте подсвеченной картой",
     "askHandLimit": "перебор карт — вытащите лишние из руки",
     "insidePrompt": "выберите релиз из сброса",
+    "cherryPickPrompt": "выбери карту для добора в руку",
+    "cherryPickSudoPrompt": "выбери 2: одна в руку, вторая на верх колоды",
+    "cherryPickToHand": "→ в руку",
+    "cherryPickToDeck": "→ на колоду",
+    "cherryPickNoHand": "нельзя в руку",
+    "rebasePrompt": "задай порядок верхних карт — 1 берётся следующей",
+    "rebasePosition": "позиция",
+    "upgradePrompt": "сбрось одну карту",
+    "upgradeWaiting": "ждём остальных",
+    "upgradeTakePrompt": "возьми одну из сброшенных карт",
     "requestMiss": "нет такой карты",
     "tabHistory": "история",
     "tabParticipants": "участники",
@@ -715,6 +733,8 @@
     "turnEnded": "ход завершён",
     "turnStarted": "ход",
     "unpassed": "вернулся",
+    "upgradeTaken": "взял из центра",
+    "upgradeThrown": "сброшено в центр",
     "windowClosed": "реакция завершена",
     "windowOpened": "реакция"
   }

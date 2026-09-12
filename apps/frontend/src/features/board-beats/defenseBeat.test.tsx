@@ -166,6 +166,7 @@ function harness(handSlot: HTMLElement | null = null) {
     sudo: { current: sudoNode },
     cover: { current: cover },
     effect: { current: effect },
+    cause: { current: nodeAt({ left: 250, top: 300, width: 150, height: 210 }) },
     eventsBox: { current: eventsBox },
     discardBox: { current: node() },
     pileBox: () => null,
@@ -1042,6 +1043,60 @@ it('sends the AI card standing behind the prompt home once this batch answers it
   })
 })
 
+it('keeps the AI trigger out of the heap while the neutralized exchange is still flying', async () => {
+  const trigger = cardById('trigger-ai')
+  if (!trigger) throw new Error('missing AI trigger')
+  const { api, Probe } = harness()
+  render(<Probe />)
+  const published: BoardState[] = []
+  const standing: BoardState = {
+    ...base,
+    aiCause: { card: 'trigger-ai', eventId: 3 },
+    decks: {
+      ...base.decks,
+      discard: trigger,
+      discardCount: 1,
+      discardHeap: [{ uid: 'd3', card: trigger, ...scatterAt(3) }],
+    },
+  }
+  vi.useFakeTimers()
+  hang.on = true
+  hang.release = null
+  try {
+    let flight: Promise<void> | undefined
+    act(() => {
+      flight = api.beat?.runNeutralized(
+        { ...debuggerPlan(), homeward: 'ai-crush-frontend', causeward: standing.aiCause },
+        { base: standing, publish: (state) => published.push(state) },
+      )
+    })
+    while (!hang.release) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20)
+      })
+    }
+    expect(published.at(-1)?.pending).toBeNull()
+    expect(published.at(-1)?.aiCause).toBeUndefined()
+    expect(published.at(-1)?.decks.discardHeap).toEqual([])
+    expect(published.at(-1)?.decks.discardCount).toBe(0)
+    act(() => {
+      hang.release?.()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    await flight
+    expect(published.at(-1)?.decks.discardHeap?.map((card) => card.uid)).toEqual(['d3'])
+    expect(published.at(-1)?.decks.discardCount).toBe(1)
+  } finally {
+    hang.on = false
+    act(() => {
+      hang.release?.()
+    })
+    vi.useRealTimers()
+  }
+})
+
 it('adds no road home when the batch answered nobody’s AI card', async () => {
   played.names = []
   played.calls = []
@@ -1066,4 +1121,48 @@ it('leaves our own staged answer alone and only releases the handoff', async () 
   expect(played.calls.filter((c) => c.name === 'playToCenter')).toEqual([])
   expect(release).toHaveBeenCalledTimes(1)
   expect(exits.items).toHaveLength(2)
+})
+
+it.each([
+  'covered',
+  'neutralized',
+] as const)('holds a local %s answer for the full reading interval after its flight lands', async (kind) => {
+  exits.items = []
+  hang.on = false
+  const { api, Probe } = harness()
+  let land: () => void = () => {}
+  const landing = new Promise<void>((resolve) => {
+    land = resolve
+  })
+  const release = vi.fn()
+  const staging = {
+    current: { mainUid: 'answer', el: null, release, whenLanded: () => landing },
+  }
+  render(<Probe staging={staging} />)
+  vi.useFakeTimers()
+  try {
+    const running =
+      kind === 'covered'
+        ? api.beat?.runCovered({ ...cancelPlan(), defender: 'p1' }, ctx)
+        : api.beat?.runNeutralized({ ...debuggerPlan(), player: 'p1' }, ctx)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+    })
+    expect(release).not.toHaveBeenCalled()
+    expect(exits.items).toEqual([])
+    await act(async () => land())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1100)
+    })
+    expect(release).not.toHaveBeenCalled()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200)
+    })
+    expect(release).toHaveBeenCalledOnce()
+    expect(exits.items).toHaveLength(2)
+    await running
+  } finally {
+    land()
+    vi.useRealTimers()
+  }
 })

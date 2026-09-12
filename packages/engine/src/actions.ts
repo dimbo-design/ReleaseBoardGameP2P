@@ -27,6 +27,14 @@ export type Choice =
   | { kind: 'handLimit'; cards: CardUid[] }
   // `toDeck` is the sudo second pick, placed on top of pile 0 unseen.
   | { kind: 'pickFromDiscard'; card: CardUid; toDeck?: CardUid }
+  // The order the player committed, per pile: index 0 becomes the new top.
+  // Validated as an exact permutation of what the pending offered.
+  | { kind: 'reorderTop'; order: { pile: number; cards: CardUid[] }[] }
+  // System Upgrade. `upgradeDiscard` comes from a seat on the roster;
+  // `upgradeTake` from the actor, once every seat has answered and sudo gives
+  // them the pick.
+  | { kind: 'upgradeDiscard'; card: CardUid }
+  | { kind: 'upgradeTake'; card: CardUid }
   // Taking a staged release back before its cost is paid. The `release` action
   // emits nothing until the cost lands, so no peer ever saw the play — which is
   // why this carries no card and emits no event either. The same "I changed my

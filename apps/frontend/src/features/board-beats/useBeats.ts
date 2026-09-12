@@ -9,6 +9,7 @@ import type {
   IntroBeat,
   StagedHandoff,
 } from '~/entities/game/board'
+import type { DiscardPickHandoff } from '~/entities/game/board/types'
 import { useReducedMotion } from '~/shared/lib/useReducedMotion'
 import { useAiBeat } from './aiBeat'
 import { useComboBeat } from './comboBeat'
@@ -22,6 +23,7 @@ import { useHandLimitBeat } from './handLimitBeat'
 import type { BeatPlan } from './planBeats'
 import { planBeats } from './planBeats'
 import { useTransferBeat } from './transferBeat'
+import { useUpgradeBeat } from './upgradeBeat'
 
 // The board's beat queue. `useGame` accumulates engine events off the wire in
 // BATCHES — a peer can receive several moves in one sync — so a board that
@@ -50,6 +52,7 @@ import { useTransferBeat } from './transferBeat'
 // gets remembered nine times out of ten.
 
 interface Beat {
+  target?: BoardState
   key: string
   /**
    * The projection this beat animates AWAY from — the board while it runs.
@@ -119,6 +122,7 @@ export interface Beats {
 }
 
 export function useBeats(args: {
+  discardPick?: RefObject<DiscardPickHandoff | null>
   live: BoardState
   events: Event[]
   anchors: BoardAnchors
@@ -158,6 +162,7 @@ export function useBeats(args: {
     clearPaidCost,
     takeStagedRelease,
     handLimit,
+    discardPick,
   } = args
   const reduced = useReducedMotion()
   const [running, setRunning] = useState<Beat | null>(null)
@@ -177,7 +182,7 @@ export function useBeats(args: {
   // that produced it.
   const [advanced, setAdvanced] = useState<BoardState | null>(null)
 
-  const discards = useDiscardBeat(anchors)
+  const discards = useDiscardBeat(anchors, staging)
   const draws = useDrawBeat(anchors)
   const decks = useDeckBeat(anchors)
   const combo = useComboBeat(anchors, staging, clearPaidCost, takeStagedRelease)
@@ -187,6 +192,7 @@ export function useBeats(args: {
   const handLimits = useHandLimitBeat(anchors, handLimit)
   const transfers = useTransferBeat(anchors)
   const ais = useAiBeat(anchors)
+  const upgrades = useUpgradeBeat(anchors, staging)
 
   // `intro` rides along because the arming effect below reads the beat from here
   // rather than from its own closure: the effect fires on the match key, and the
@@ -251,6 +257,18 @@ export function useBeats(args: {
           run: (ctx) => handLimits.run(plan, ctx),
         }
       }
+      if (plan.kind === 'upgrade') {
+        return {
+          key: plan.key,
+          base,
+          exclusive: false,
+          // A throw does not own the table: other beats may follow it in the
+          // same batch, and the centre it lands in is the projection's, not
+          // this beat's to hold.
+          alarm: false,
+          run: (ctx) => upgrades.run(plan, ctx),
+        }
+      }
       if (plan.kind === 'draw') {
         return {
           key: plan.key,
@@ -261,7 +279,7 @@ export function useBeats(args: {
           // — yet the table still has to see that a 503 landed. The plan
           // carries the fact; this is the same field, and the same reason, the
           // defenceless sweep lights its own glow with.
-          alarm: plan.draws.some((d) => d.reveal?.neutralized === true),
+          alarm: false,
           run: (ctx) => draws.run(plan, ctx),
         }
       }
@@ -284,6 +302,8 @@ export function useBeats(args: {
         }
       }
       if (plan.kind === 'gameEnd') {
+        const event = events.find((candidate) => candidate.id === plan.eventId)
+        if (event?.type !== 'gameOver' || event.winner !== base.selfId) return null
         return {
           key: plan.key,
           base,
@@ -406,12 +426,20 @@ export function useBeats(args: {
           // `aiEvent` just above.
           exclusive: false,
           alarm: false,
-          run: (ctx) => ais.runTaken(plan, ctx),
+          run: (ctx) => {
+            const local = discardPick?.current
+            if (discardPick && plan.mine && local?.card === plan.card) {
+              discardPick.current = null
+              return local.run(ctx)
+            }
+            return ais.runTaken(plan, ctx)
+          },
         }
       }
       return null
     },
     [
+      events,
       discards.run,
       draws.run,
       decks.runReshuffle,
@@ -425,10 +453,12 @@ export function useBeats(args: {
       elimination.run,
       gameEnd.run,
       handLimits.run,
+      upgrades.run,
       transfers.runTransfer,
       transfers.runRequested,
       ais.run,
       ais.runTaken,
+      discardPick,
     ],
   )
 
@@ -481,7 +511,7 @@ export function useBeats(args: {
         // the finally below regardless, so a failure costs the animation and
         // never the state.
         try {
-          await next.run({ base: next.base, publish })
+          await next.run({ base: next.base, after: next.target ?? latest.current.live, publish })
         } catch (err) {
           if (import.meta.env.DEV) console.error('[beats] %s failed', next.key, err)
         }
@@ -646,10 +676,30 @@ export function useBeats(args: {
       if (!beat) continue
       beat.after = previous
       previous = beat
+      beat.target = live
       queue.current.push(beat)
     }
     void drain()
   }, [events, live, enabled, reduced, beatOf, drain, running, restoredThrough])
+
+  // Keep the pre-batch board on the render that queues an arriving batch too.
+  // `running` is set in the layout effect, but staging's catch-up effects also
+  // observe this render: showing `live` here would clear an already-landed
+  // defense before the queue restores the hand it is animating away from.
+  // The watermark the layout effect above settles on, read rather than written:
+  // this runs during RENDER, before that effect raises `seen.current` for this
+  // pass. A live resync raises `restoredThrough` on a render where `enabled` is
+  // already true, so filtering on `seen.current` alone would read the whole
+  // restored batch as fresh and plan it — choreography for moves the projection
+  // has already reflected, which is the exact failure `restoredThrough` exists
+  // to prevent. Forward only, like the effect's own raise: max, never assignment.
+  const settledSeen = Math.max(seen.current, restoredThrough ?? 0)
+  const unqueued = enabled && !reduced && !running ? events.filter((e) => e.id > settledSeen) : []
+  // A non-animated batch never starts a runner, so it must show live now;
+  // there would be no later queue render to release a preview shadow.
+  const awaitingBatch =
+    unqueued.length > 0 &&
+    planBeats(unqueued, settled.current, live.pending, live.decks.discardCount).length > 0
 
   return {
     // The shadow is what the running beat has published, or its own base while
@@ -660,7 +710,8 @@ export function useBeats(args: {
     // beat reports done, so the handover to the live projection is the queue's
     // own last frame.
     shadow:
-      (running?.exclusive ? (advanced ?? intro?.shadow) : (advanced ?? running?.base)) ?? null,
+      (running?.exclusive ? (advanced ?? intro?.shadow) : (advanced ?? running?.base)) ??
+      (awaitingBatch ? settled.current : null),
     overlays: [
       ...discards.overlay,
       ...draws.overlay,
@@ -672,6 +723,7 @@ export function useBeats(args: {
       ...handLimits.overlay,
       ...transfers.overlay,
       ...ais.overlay,
+      ...upgrades.overlay,
     ],
     exclusive: running?.exclusive ?? false,
     alarm: running?.alarm ?? false,
@@ -685,11 +737,13 @@ export function useBeats(args: {
     // out of the discard (#106) — and never more than one of them is open at
     // once, because one beat runs at a time. So this is a choice between
     // them, not a merge of them.
-    gapAt: draws.gapAt ?? transfers.gapAt ?? ais.gapAt,
+    gapAt: draws.gapAt ?? transfers.gapAt ?? ais.gapAt ?? upgrades.gapAt,
     gapSize:
       draws.gapAt == null
         ? transfers.gapAt == null
-          ? ais.gapSize
+          ? ais.gapAt == null
+            ? upgrades.gapSize
+            : ais.gapSize
           : transfers.gapSize
         : draws.gapSize,
   }

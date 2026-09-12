@@ -1,7 +1,15 @@
 import type { Action, Choice } from '../actions'
 import { RELEASE_ATTACKS, rulesFor } from '../cards'
 import type { Reduction } from '../engine'
-import type { CardInstance, CardUid, GameState, Pending, PlayerId, ReleaseSlot } from '../state'
+import {
+  type CardInstance,
+  type CardUid,
+  type GameState,
+  type Pending,
+  type PlayerId,
+  pendingOwes,
+  type ReleaseSlot,
+} from '../state'
 import type { PendingView } from '../view'
 import { bankToDiscard, createLog, DEFEND_MS, defencesFor, type Log, reject, setHand } from './core'
 import { stealRandom } from './handAttacks'
@@ -403,7 +411,13 @@ export function onDefend(state: GameState, action: Action & { type: 'RESOLVE' })
 export function pendingView(state: GameState, viewerId: PlayerId): PendingView | null {
   const p = state.pending
   if (!p) return null
-  const mine = p.player === viewerId
+  // Whether this viewer is the one being asked — the gate on every private
+  // field below. Through `pendingOwes` rather than `p.player`, because a
+  // `systemUpgrade` names a roster instead of one seat. It gates nothing in
+  // that case (its own branch has no private field at all), but the question
+  // asked here is "is the engine waiting on you", and there is one answer to
+  // that question in this codebase.
+  const mine = pendingOwes(p, viewerId)
   switch (p.kind) {
     case 'defend':
       return {
@@ -472,6 +486,27 @@ export function pendingView(state: GameState, viewerId: PlayerId): PendingView |
         player: p.player,
         options: mine ? [...p.options] : [],
         picks: p.picks,
+        source: p.source,
+      }
+    case 'reorderTop':
+      // A deck's contents are never public, so this is `mine` or nothing —
+      // the same gate `pickFromDiscard` uses, for the same reason.
+      return {
+        kind: 'reorderTop',
+        player: p.player,
+        piles: mine ? p.piles.map((e) => ({ pile: e.pile, cards: [...e.cards] })) : [],
+        source: p.source,
+      }
+    case 'systemUpgrade':
+      // Nothing here is private: the rules put the thrown cards face up at the
+      // centre, and who has yet to answer is plain to everyone watching.
+      return {
+        kind: 'systemUpgrade',
+        actor: p.actor,
+        owed: [...p.owed],
+        thrown: p.thrown.map((t) => ({ player: t.player, card: { ...t.card } })),
+        sudo: p.sudo,
+        phase: p.phase,
         source: p.source,
       }
     default:

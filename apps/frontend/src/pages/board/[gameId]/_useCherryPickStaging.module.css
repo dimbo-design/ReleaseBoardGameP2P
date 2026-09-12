@@ -1,0 +1,74 @@
+/* The whole discard, face up, over the heap it still belongs to (#108). Wider
+   than Inside's row (`_useInsideStaging.module.css`), because Cherry-pick
+   offers the pile rather than its Releases — so it wraps and scrolls in its own
+   box instead of pushing the table around.
+
+   NO transform on `.grid` (fix round 2, task-A4-findings-r2.md). `confirmPick()`'s
+   pass 2 pins each `.cell` to `position: fixed` at its own viewport rect
+   (Task A4's flights) — a transformed ancestor becomes the containing block
+   for a `position: fixed` descendant, so under a `transform` here the pin
+   would resolve against THIS box instead of the viewport and every card
+   would jump the instant it's pinned (reproduced in a real browser: a 120px
+   jump from doing nothing but copying an element's own rect into
+   `position: fixed`). Centre via full-area flex instead, and let clicks
+   through (`pointer-events: none`) so only `.cells` and the confirm bar are
+   interactive — the same shape, and the same reason, as `.suCenter` in
+   `GitCards.module.css` (the playground scene this ports from). Do NOT put a
+   transform back on this element. */
+.grid {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* the actual card row — owns the scroll box `.grid` used to before this fix.
+   `overflow-y: auto` does NOT establish a containing block for
+   `position: fixed` (only `transform`/`filter`/`backdrop-filter`/
+   `perspective`/`contain`/`will-change` do), so pinning a cell still escapes
+   this clip exactly as intended. */
+.cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-end;
+  justify-content: center;
+  max-block-size: 56vh;
+
+  /* Selection glow and labels must fit inside the scrollable content box. */
+  padding-block: 24px 32px;
+  padding-inline: 40px;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+/* while dealing out of the pile, don't clip — cards fly in from outside the
+   grid's own scroll band (GitCards.module.css's own `.dealing`, ported) */
+.dealing {
+  overflow: visible;
+}
+
+.cell {
+  position: relative;
+  inline-size: 150px;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.blocked {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.roleTag,
+.lockTag {
+  position: absolute;
+  inset-block-end: -22px;
+  inset-inline: 0;
+  text-align: center;
+}

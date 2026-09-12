@@ -1,5 +1,6 @@
 import type { DiscardReason, Event } from '@release/engine'
 import type { ReleaseSlots, ReleaseSupport, TablePending } from '@release/ui'
+import { cardById } from '@release/ui'
 import type { Scatter } from '@release/ui/animations'
 import type { BoardState } from '~/entities/game/board'
 import { standInScatter } from '~/entities/game/board'
@@ -172,6 +173,16 @@ export type BeatPlan =
        * `neutralized` plan's own `homeward` — see it for the full comment.
        */
       homeward?: string
+      causeward?: { card: string; eventId: number }
+    }
+  // SYSTEM UPGRADE (#108). Public pending.thrown holds the row across batches.
+  // The final base answer also owns the row's immediately following discards.
+  | {
+      kind: 'upgrade'
+      key: string
+      throws: { eventId: number; player: string; card: string }[]
+      clear?: { eventId: number; player: string; card: string }[]
+      take?: { player: string; card: string; uid: string; fromPlayer: string }
     }
   | { kind: 'reshuffle'; key: string; cards: number }
   | { kind: 'piles'; key: string; steps: PileStep[] }
@@ -246,6 +257,8 @@ export type BeatPlan =
        * attack that stands until it is answered.
        */
       resolved?: true
+      /** Immediate resolutions own their exit; no pending card stands for a later beat. */
+      spent?: { eventId: number; card: string }[]
     }
   // Every release flies into its slot. `codeReview` rides along when the play
   // was a combo; `cost` when the rules made it pay for itself — the card is
@@ -353,6 +366,7 @@ export type BeatPlan =
        * has to stand and explain the prompt. This is where it goes.
        */
       homeward?: string
+      causeward?: { card: string; eventId: number }
     }
   // A Release comes back out of the discard — `ai-inside` (#106), and Git
   // Cherry-pick once #61 lands. The CHOICE is private (`pendingView` gates
@@ -369,6 +383,7 @@ export type BeatPlan =
       /** the AI card standing behind the prompt this batch answers — same
        * fact, same reasoning, as `neutralized`'s own `homeward` above. */
       homeward?: string
+      causeward?: { card: string; eventId: number }
     }
 
 // Reasons that CAN take a card out of a release slot — "can", not "always do".
@@ -386,8 +401,14 @@ const FROM_RELEASE = new Set<DiscardReason>(['destroyed', 'neutralized'])
 // `ReleaseSlots` has no string index signature (it names its four keys
 // explicitly), so the lookup takes it by its own type rather than a generic
 // Record — `keyof ReleaseSlots` keeps the cast at the one line that needs it.
-const slotHolding = (release: ReleaseSlots, card: string): string | null =>
-  (Object.keys(release) as (keyof ReleaseSlots)[]).find((k) => release[k]?.id === card) ?? null
+const slotHolding = (
+  release: ReleaseSlots,
+  card: string,
+  ids?: BoardState['you']['releaseId'],
+): string | null =>
+  (Object.keys(release) as (keyof ReleaseSlots)[]).find(
+    (k) => (ids?.[k] ?? release[k]?.id) === card,
+  ) ?? null
 
 function sourceOf(
   e: Extract<Event, { type: 'discarded' }>,
@@ -396,10 +417,8 @@ function sourceOf(
 ): DiscardSource | null {
   const mine = e.player === before.selfId
   if (FROM_RELEASE.has(e.reason)) {
-    const release = mine
-      ? before.you.release
-      : before.opponents.find((o) => o.id === e.player)?.release
-    const slot = release ? slotHolding(release, e.card) : null
+    const owner = mine ? before.you : before.opponents.find((o) => o.id === e.player)
+    const slot = owner ? slotHolding(owner.release, e.card, owner.releaseId) : null
     // Found in the zone: it left the zone. Not found: fall through and look
     // where the card actually was — the reason narrows the search, it does not
     // decide the answer. A Code Review attached to a destroyed release lives in
@@ -509,9 +528,13 @@ const releaseSupportOf = (before: BoardState, player: string) =>
 // `handLimit` and `pickFromDiscard` carry `source` at all, and every other
 // member (`defend`, `requestCard`, `giveCard`, `discardForRelease`) has no such
 // field for TypeScript to narrow onto.
-const homewardOf = (before: BoardState): { homeward?: string } => {
+const homewardOf = (
+  before: BoardState,
+): { homeward?: string; causeward?: { card: string; eventId: number } } => {
   const pending = before.pending
-  return pending && 'source' in pending && pending.source ? { homeward: pending.source } : {}
+  return pending && 'source' in pending && pending.source && cardById(pending.source)?.deck === 'ai'
+    ? { homeward: pending.source, ...(before.aiCause ? { causeward: before.aiCause } : {}) }
+    : {}
 }
 
 // Whether a hand-limit run is Bad Vibe-Coding's rather than a turn's end —
@@ -667,6 +690,10 @@ export function planBeats(
   // The hand limit's own run — coalesced per PLAYER: two seats can pay the
   // price in one relayed batch, and each pays it into a grid of its own.
   let handLimit: Extract<BeatPlan, { kind: 'handLimit' }> | null = null
+  // System Upgrade's run — several seats can answer inside one relayed batch,
+  // and they read as one staggered gesture; seats answering in separate batches
+  // become separate short beats over a centre that persists on its own.
+  let upgradeRun: Extract<BeatPlan, { kind: 'upgrade' }> | null = null
   // The player a sweep is open for — set by `eliminated`, read by the
   // `discarded` branch that follows it to mark that run gathered. Cleared
   // INSIDE `flush()`, alongside the other run locals: `flush()` runs on every
@@ -687,6 +714,7 @@ export function planBeats(
     if (pileRun) plans.push(pileRun)
     if (pairOut) plans.push(pairOut)
     if (handLimit) plans.push(handLimit)
+    if (upgradeRun) plans.push(upgradeRun)
     // LAST: everything this run flew has to be off the table before the video
     // covers it.
     if (elimination) plans.push(elimination)
@@ -696,11 +724,84 @@ export function planBeats(
     pairOut = null
     sweeping = null
     handLimit = null
+    upgradeRun = null
     elimination = null
   }
 
   for (let i = 0; i < events.length; i++) {
     const e = events[i]
+    if (e.type === 'upgradeTaken' && before.pending?.kind === 'systemUpgrade') {
+      const pending = before.pending
+      const tail = events.slice(i + 1, i + pending.thrown.length)
+      const chosen = pending.thrown.find((candidate) => {
+        if (candidate.card.id !== e.card) return false
+        const rest = pending.thrown.filter((t) => t.card.uid !== candidate.card.uid)
+        return (
+          tail.length === rest.length &&
+          tail.every(
+            (event, index) =>
+              event.type === 'discarded' &&
+              event.reason === 'effect' &&
+              event.player === rest[index].player &&
+              event.card === rest[index].card.id,
+          )
+        )
+      })
+      if (chosen) {
+        flush()
+        plans.push({
+          kind: 'upgrade',
+          key: `upgrade-take:${e.id}`,
+          throws: [],
+          take: { player: e.player, card: e.card, uid: chosen.card.uid, fromPlayer: chosen.player },
+          clear: tail.flatMap((event) =>
+            event.type === 'discarded'
+              ? [{ eventId: event.id, player: event.player, card: event.card }]
+              : [],
+          ),
+        })
+        for (const event of tail) owned.add(event.id)
+        continue
+      }
+    }
+    if (e.type === 'upgradeThrown') {
+      // Several seats answering inside ONE batch become one staggered beat;
+      // seats answering in separate batches become separate short beats over a
+      // centre that persists on its own (the projection holds `thrown`). Same
+      // folding the `discarded` run does, for the same reason — and the same
+      // rule that a run never reaches across something else, which is what the
+      // `flush()` on the first throw of a new run is for.
+      if (!upgradeRun) flush()
+      upgradeRun ??= { kind: 'upgrade', key: `upgrade:${e.id}`, throws: [] }
+      upgradeRun.throws.push({ eventId: e.id, player: e.player, card: e.card })
+      // The final base answer owns its immediately following public discards.
+      // They leave the row, not the hands those cards already left.
+      if (before.pending?.kind === 'systemUpgrade' && !before.pending.sudo) {
+        const expected = [
+          ...before.pending.thrown.map((t) => ({ player: t.player, card: t.card.id })),
+          ...upgradeRun.throws,
+        ]
+        const tail = events.slice(i + 1, i + 1 + expected.length)
+        if (
+          tail.length === expected.length &&
+          tail.every(
+            (event, index) =>
+              event.type === 'discarded' &&
+              event.reason === 'effect' &&
+              event.player === expected[index].player &&
+              event.card === expected[index].card,
+          )
+        ) {
+          upgradeRun.clear = tail.flatMap((event) =>
+            event.type === 'discarded'
+              ? [{ eventId: event.id, player: event.player, card: event.card }]
+              : [],
+          )
+          for (const event of tail) owned.add(event.id)
+        }
+      }
+      continue
+    }
     if (e.type === 'drawn') {
       // AN AI TRIGGER IS NOT A DRAW. It is its own scene from the pile onward,
       // so it is claimed whole here and the draw plan never sees it — the
@@ -722,7 +823,7 @@ export function planBeats(
         // `releaseDestroyed`, `revealed`, `turnEnded` have none, and
         // `eliminated` firing for the defenceless-503 sweep is intended).
         const tail = events[i + 3]
-        if (tail?.type === 'released') owned.add(tail.id)
+        if (tail?.type === 'released' || tail?.type === 'placed') owned.add(tail.id)
         plans.push({
           kind: 'aiEvent',
           key: `ai:${e.id}`,
@@ -751,6 +852,18 @@ export function planBeats(
       })
       continue
     }
+    if (e.type === 'placed' && !owned.has(e.id)) {
+      flush()
+      plans.push({
+        kind: 'releasePlaced',
+        key: `placed:${e.id}`,
+        eventId: e.id,
+        player: e.player,
+        card: e.card,
+        slot: 'monitoring',
+      })
+      continue
+    }
     if (e.type === 'attacked') {
       // One event, one beat — the pair (or the lone card) reaches the centre
       // as a single gesture, never coalesced with what came before or after.
@@ -766,7 +879,20 @@ export function planBeats(
       // owes nobody one, and the batch is where that fact actually lives.
       const after = events[i + 1]
       const resolved =
-        after?.type === 'discarded' && after.reason === 'attackSpent' && after.card === e.card
+        after?.type === 'discarded' &&
+        after.reason === 'attackSpent' &&
+        after.card === e.card &&
+        after.player === e.attacker
+      const spent: { eventId: number; card: string }[] = []
+      if (resolved) {
+        for (let j = i + 1; j < events.length; j++) {
+          const d = events[j]
+          if (d.type !== 'discarded' || d.reason !== 'attackSpent' || d.player !== e.attacker) break
+          spent.push({ eventId: d.id, card: d.card })
+          owned.add(d.id)
+        }
+        openAttack = null
+      }
       plans.push({
         kind: 'attackPlaced',
         key: `attack:${e.id}`,
@@ -775,7 +901,7 @@ export function planBeats(
         attacker: e.attacker,
         card: e.card,
         sudo: e.sudo,
-        ...(resolved ? { resolved: true as const } : {}),
+        ...(resolved ? { resolved: true as const, spent } : {}),
       })
       continue
     }

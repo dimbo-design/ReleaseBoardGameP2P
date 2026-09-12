@@ -1,3 +1,4 @@
+import type { GameState } from '@release/engine'
 import { createFakeEngine, FAKE_DECK, FAKE_EVENTS, TURN_ACTION_MS } from '@release/engine/fake'
 import {
   ABSENT_GRACE_MS,
@@ -18,7 +19,7 @@ import {
 // rather than this test silently drifting out of sync.
 const WINDOW_FIRST_MS = 15_000
 
-function twoPlayerSession() {
+function twoPlayerSession(seed = 1) {
   return createSession({
     gameId: 'g1',
     keeperId: 'a',
@@ -26,7 +27,7 @@ function twoPlayerSession() {
     // Seed 42 puts a trigger card (publicly revealed on draw, per Task 4's
     // "hides the drawn card" test) at the top of pile 0. Seed 1 deals a normal
     // card there instead, so a draw stays private to the drawer as intended.
-    seed: 1,
+    seed,
     players: [
       { playerId: 'a', peerId: 'peer-a', name: 'Ann' },
       { playerId: 'b', peerId: 'peer-b', name: 'Bo' },
@@ -567,7 +568,20 @@ it('expires a window a deadline-free pending would otherwise hold open', () => {
 })
 
 it('lets a stalled defence resolve even after its window has expired', () => {
-  const { session } = twoPlayerSession()
+  // Seed 4, not the shared helper's default 1: task B1 (#108) added Git Rebase
+  // to FAKE_DECK, which shifts the shuffle's RNG stream the same way earlier
+  // deck-size changes did elsewhere in this suite (see properties.test.ts and
+  // packages/engine/src/conformance.ts for the same class of drift) — under
+  // seed 1 this fixture's window no longer closes on the release-scope defend
+  // path within this test's own trace. Swept against the current deck; every
+  // other call site keeps the shared default, which still fits their needs.
+  //
+  // Seed 2 now, not 4: #108 then added System Upgrade, the same class of shift
+  // again, and under seed 4 the responder reaches the open window holding no
+  // release attack at all — the fixture's premise, not the property. Swept
+  // again; 34 of the first 60 seeds satisfy it, so this is an abundant
+  // condition the shuffle happens to place, not a narrow one being hunted for.
+  const { session } = twoPlayerSession(2)
   const opened = openWindowFixture(session)
   const window = opened.state.window
   if (!window) throw new Error('fixture failed to open a window')
@@ -624,7 +638,11 @@ it('never closes a live reaction window on an absent seat`s behalf', () => {
 })
 
 it('leaves a stalled defence for a disconnected seat to resolve on reconnection', () => {
-  const { session } = twoPlayerSession()
+  // Seed 2, not the shared helper's default 1: this fixture needs the
+  // responder to reach the open window holding a release attack to throw, and
+  // #108's addition of System Upgrade to FAKE_DECK moved seed 1's shuffle off
+  // that. Same sweep, same seed as the sibling test above.
+  const { session } = twoPlayerSession(2)
   const opened = openWindowFixture(session)
   const window = opened.state.window
   if (!window) throw new Error('fixture failed to open a window')
@@ -782,4 +800,57 @@ it('logs what an absent seat`s own accepted bot suggestion commits', () => {
   expect(result.session.state.pending).toBeNull()
   expect(grown).toContain('discarded')
   expect(grown).toContain('released')
+})
+
+// A System Upgrade is the only pending owed to several seats at once, so it is
+// the only one where a seat that walks away can hold everybody else's match
+// hostage — `driveAbsent` has to answer for it seat by seat, not once.
+it('drains a System Upgrade roster past a seat that walked away', () => {
+  const { session } = createSession({
+    gameId: 'g1',
+    keeperId: 'a',
+    engine: createFakeEngine(),
+    seed: 1,
+    players: [
+      { playerId: 'a', peerId: 'peer-a', name: 'Ann' },
+      { playerId: 'b', peerId: 'peer-b', name: 'Bo' },
+      { playerId: 'c', peerId: 'peer-c', name: 'Cy' },
+    ],
+    setup: {},
+    deck: FAKE_DECK,
+    events: FAKE_EVENTS,
+  })
+
+  // Built here rather than played out: reaching a System Upgrade through the
+  // deck would pin this test to a shuffle seed, and what is under test is the
+  // keeper's answer to the roster, not how the roster came to exist.
+  const state: GameState = {
+    ...session.state,
+    pending: {
+      kind: 'systemUpgrade',
+      actor: 'a',
+      owed: ['b', 'c'],
+      thrown: [],
+      sudo: false,
+      phase: 'discarding',
+      source: 'operation-system-upgrade',
+    },
+  }
+  const bWalkedAway: Session = {
+    ...session,
+    state,
+    seats: session.seats.map((s) =>
+      s.playerId === 'b' ? { ...s, peerId: null, absentSince: 0 } : s,
+    ),
+  }
+
+  const result = driveAbsent(bWalkedAway, ABSENT_GRACE_MS + 1)
+  const pending = result.session.state.pending
+  expect(pending?.kind).toBe('systemUpgrade')
+  if (pending?.kind !== 'systemUpgrade') throw new Error('the upgrade must still stand')
+  // The empty seat answered for itself and left the roster.
+  expect(pending.owed).not.toContain('b')
+  // The seat that is still there is still owed: the keeper answers for absence,
+  // never for a player who is present and simply thinking.
+  expect(pending.owed).toContain('c')
 })

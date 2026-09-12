@@ -240,9 +240,22 @@ it('never sends a peer a card identity it is not entitled to', () => {
       // elsewhere in the payload. Walking the parsed payload and comparing
       // the exact string values is what a genuine substring collision cannot
       // fool — do not revert this to `wire.includes(uid)`.
+      //
+      // One deck card may legitimately be on this wire: Git Rebase's private
+      // look at the top of a pile (#108). The rules give those cards to the
+      // player using it — "не показывая другим" — so `pendingView` puts them
+      // in that one viewer's projection and nobody else's, and they are still
+      // in `decks.main` while the decision is open. Excused only for the
+      // viewer this SYNC is addressed to, and only the uids their own pending
+      // offers; every other card in every other SYNC stays forbidden.
       const onWire = collectStringValues(outgoing.message.payload)
+      const ownReorder =
+        state.pending?.kind === 'reorderTop' && state.pending.player === viewer.playerId
+          ? new Set(state.pending.piles.flatMap((e) => e.cards.map((c) => c.uid)))
+          : new Set<string>()
       const hidden = [...state.decks.main.flat(), ...state.decks.events]
       for (const uid of hidden.map((c) => c.uid)) {
+        if (ownReorder.has(uid)) continue
         expect(onWire.has(uid)).toBe(false)
       }
 
@@ -394,7 +407,12 @@ it('never lets one seat stall the whole game', () => {
   // nothing. The refill's own guard is packages/engine/src/fake/reshuffle.test.ts.
   // Seed 4 is kept for the reasons that outlived #79 — driveAbsent genuinely
   // fires, the game reaches `over` on its own, and it steers clear of #80.
-  const abandoned = disconnect(start(4), 'peer-a', 1_000).session
+  // Seed 1, not 4: task B1 (#108) added Git Rebase to FAKE_DECK, which — like
+  // every earlier deck-size change noted above — shifts the shuffle's RNG
+  // stream, so a fixed seed lands on a new trajectory. 4's game no longer
+  // finishes within budget once abandoned this way; swept again against the
+  // current deck.
+  const abandoned = disconnect(start(1), 'peer-a', 1_000).session
   const { session, exhausted } = playOut(abandoned)
 
   // The criterion is that the game *finishes*, not that the turn moved once:

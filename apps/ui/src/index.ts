@@ -135,6 +135,10 @@ export type {
   TableTarget,
   TableWindow,
 } from './table/Table/intents'
+// Whose decision a pending is, asked one way by the kit and by its consumers —
+// a `systemUpgrade` is owed to several seats at once, so a board comparing
+// against a single `player` would show its prompt to at most one of them.
+export { pendingOwedBy, pendingOwesSelf } from './table/Table/intents'
 export {
   default as PendingPrompt,
   type PendingPromptCopy,

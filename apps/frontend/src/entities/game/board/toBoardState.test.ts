@@ -365,8 +365,35 @@ describe('toBoardState', () => {
     const state = toBoardState(withEvents, [], labels)
     expect(state.you.releaseEvent).toEqual({ frontend: 'ai-release-frontend' })
     expect(state.opponents[0].releaseEvent).toEqual({ monitoring: 'ai-monitoring' })
-    // the slots themselves are unchanged — the card still reads as an ordinary one
-    expect(state.you.release.frontend?.id).toBe('release-frontend')
+    expect(state.you.release.frontend?.id).toBe('ai-release-frontend')
+    expect(state.opponents[0].release.monitoring?.id).toBe('ai-monitoring')
+    expect(state.you.release.backend?.id).toBe('release-backend')
+    expect(state.you.releaseId).toEqual({
+      frontend: 'release-frontend',
+      backend: 'release-backend',
+    })
+    expect(state.opponents[0].releaseId).toEqual({ monitoring: 'protection-monitoring' })
+  })
+
+  it.each([
+    'frontend',
+    'backend',
+    'database',
+  ] as const)('keeps the AI %s face in both release zones', (slot) => {
+    const release = {
+      [slot]: { uid: 'event#1', card: `release-${slot}`, event: `ai-release-${slot}` },
+    }
+    const state = toBoardState(
+      {
+        ...view,
+        self: { ...view.self, release },
+        opponents: [{ ...view.opponents[0], release }],
+      },
+      [],
+      labels,
+    )
+    expect(state.you.release[slot]?.id).toBe(`ai-release-${slot}`)
+    expect(state.opponents[0].release[slot]?.id).toBe(`ai-release-${slot}`)
   })
 
   it('carries a defend pending openedAt through unchanged, alongside deadline', () => {
@@ -684,6 +711,22 @@ describe('the discard heap', () => {
     expect(heap).toHaveLength(1)
   })
 
+  it('removes a picked card while preserving the resting poses of the remaining heap', () => {
+    const log: Event[] = [
+      discardedEvent(1, 'attack-bug'),
+      discardedEvent(2, 'protection-debugger'),
+      discardedEvent(3, 'defense-hotfix'),
+      { id: 4, type: 'takenFromDiscard', player: 'you', card: 'protection-debugger', to: 'hand' },
+    ]
+    const heap = toBoardState(
+      withDecks({ discardCount: 2, discardTop: 'defense-hotfix' }),
+      log,
+      labels,
+    ).decks.discardHeap
+    expect(heap?.map((c) => c.uid)).toEqual(['d1', 'd3'])
+    expect(heap?.[0]).toMatchObject(scatterAt(1))
+  })
+
   it('does not append a top the fold already ends on', () => {
     const log = [discardedEvent(7, 'attack-bug')]
     const heap =
@@ -691,4 +734,41 @@ describe('the discard heap', () => {
         .discardHeap ?? []
     expect(heap).toHaveLength(1)
   })
+})
+
+it.each([
+  'upgradeThrown',
+  'upgradeTaken',
+] as const)('renders %s with its actor and card', (type) => {
+  const events: Event[] = [{ id: 1, type, player: 'p2', card: 'attack-bug' }]
+  const state = toBoardState(view, events, { ...labels, [type]: 'Upgrade action' })
+  expect(state.history[0]).toMatchObject({
+    id: 1,
+    who: 'bot',
+    kind: 'Upgrade action',
+    card: cardById('attack-bug')?.name,
+  })
+})
+
+it('keeps the AI cause on the table while its event asks for a choice', () => {
+  const log: Event[] = [
+    {
+      id: 10,
+      type: 'aiRevealed',
+      player: 'you',
+      aiCard: 'trigger-ai',
+      eventCard: 'ai-bad-vibe-coding',
+    },
+    { id: 11, type: 'discarded', player: 'you', card: 'trigger-ai', reason: 'effect' },
+  ]
+  const pending: PlayerView['pending'] = {
+    kind: 'handLimit',
+    player: 'you',
+    excess: 1,
+    options: ['c1'],
+    source: 'ai-bad-vibe-coding',
+  }
+  const result = toBoardState({ ...view, pending }, log, labels)
+  expect(result.aiCause).toEqual({ card: 'trigger-ai', eventId: 11 })
+  expect(toBoardState(view, log, labels).aiCause).toBeUndefined()
 })

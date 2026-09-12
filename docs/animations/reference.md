@@ -207,6 +207,7 @@ runner lifted out of `useBeats` unchanged, `drawBeat.tsx` and `deckBeat.tsx` are
 | `piles` | `features/board-beats/deckBeat.tsx` (`runPiles`/`step`) | `pilesChanged`, classified by `classifyPiles` (`planBeats.ts`) against the running pile counts — the event itself names neither the operation nor the split index | `flyFrom` (split), `absorbToDeck` (merge), `gatherToDeck` (fromDiscard) |
 | `transfer` | `features/board-beats/transferBeat.tsx` (`runRequested`/`runTransfer`) | `requested` — public, whole; `handTransfer` — with `role` off `selfId`, `named` off `base.pending`, and `card` only if the event carried one | `popIn`, `shake`, `takeFromSeat`, `playToCenter`, `dealToSeat`, `flipCard` (via `patch`), the hand-arrival step |
 | `ai` | `features/board-beats/aiBeat.tsx` (`run`/`runTaken`) | `aiEvent` — the trigger off its own pile to `cause`, the card the events deck gives up to `effect`, both held `TABLE_HOLD` (doubled, `HALLUCINATION_HOLD`, for `ai-hallucination`), then one of `AiTail`'s six endings (`zone`/`crush`/`turnEnded`/`alarm`/`standing`/`none`) read off what follows in the batch, never re-derived from the card's own id; the plan behind it reads two facts outside its own batch — `releaseEventsOf` (a crush's destination, events deck or discard) and `owed` (the live pending, to tell a standing prompt from an unanswered mimic). `takenFromDiscard` — `ai-inside`'s answer, shown open at the centre for the whole table before it splits by `mine` | `drawToCenter` (×2, via `toSlot`), `flipCard` (via `patch`), `playToReleaseZone`, `returnToDeck`, `dealToSeat`, the discard-exit step |
+| `upgrade` | `features/board-beats/upgradeBeat.tsx` | `upgradeThrown`, coalesced per batch — several seats answering one `systemUpgrade` inside one relayed batch become one staggered beat, and seats answering in separate batches become separate short beats. The beat plays ARRIVALS only: the cards already at the centre are rendered from `pending.thrown`, which is public and survives a batch boundary, so nothing here has to hold the table (I7) | `playToCenter` |
 
 See [`recipes.md`](./recipes.md#a-card-is-drawn-live-board),
 [`recipes.md`](./recipes.md#the-deck-is-rebuilt-split-merged-live-board),
@@ -427,3 +428,11 @@ Import and use declaratively — the animation is built in.
 | `TurnDock` | `@/table/TurnDock` | one fixed frame whose slots never move; the content inside them changes. `Swap` orchestrates `rollOut` → `rollIn` (a live layer in flow + the outgoing one absolutely overlaid), `Reveal` orchestrates `popIn` / `popOut` for a small element in reserved space. |
 | `ReleaseZone` | `@/table/ReleaseZone` | `slotRef?(key, el)` exposes each slot's node so a consumer can measure it and fly a card into that slot (AI Release / Monitoring landing). A position hook only — no visual effect. |
 | `Arrow` | `@/primitives/Arrow` | see the Arrow toolkit above (`useArrow`) |
+
+### `useCardReorder`
+
+Shared pointer reordering for the board and playground Rebase rows. Pass `enabled`, `step`,
+`rows: { id, cards: string[] }[]` and `onReorder(row, cards)`. Bind `onPointerDown` to each
+card wrapper and render its `position(row, uid, index)` as a translate. The wrapper’s parent
+is the row. `drag` identifies the active grab; disable confirmation until it ends.
+Pointer cancellation leaves the committed order untouched. Disable while dealing or returning.

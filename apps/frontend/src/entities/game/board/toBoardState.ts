@@ -31,12 +31,23 @@ const cardOrPlaceholder = (id: string): CardData => cardById(id) ?? PLACEHOLDER_
 // dropped here, not hidden by the kit. The codeReview half rides separately,
 // as the slot's support (see `toReleaseSupport`).
 function toReleaseSlots(release: ReleaseView) {
+  const face = (slot: ReleaseView[keyof ReleaseView]) =>
+    slot ? cardOrPlaceholder(slot.event ?? slot.card) : undefined
   return {
-    frontend: release.frontend ? cardOrPlaceholder(release.frontend.card) : undefined,
-    backend: release.backend ? cardOrPlaceholder(release.backend.card) : undefined,
-    database: release.database ? cardOrPlaceholder(release.database.card) : undefined,
-    monitoring: release.monitoring ? cardOrPlaceholder(release.monitoring.card) : undefined,
+    frontend: face(release.frontend),
+    backend: face(release.backend),
+    database: face(release.database),
+    monitoring: face(release.monitoring),
   }
+}
+
+// Animation events name the rules id even when the visible card is from AI.
+function toReleaseIds(release: ReleaseView): NonNullable<BoardState['you']['releaseId']> {
+  return Object.fromEntries(
+    Object.entries(release)
+      .filter(([, card]) => card != null)
+      .map(([slot, card]) => [slot, card.card]),
+  )
 }
 
 // The identities `toReleaseSlots` above drops. All four slots are the engine's
@@ -113,6 +124,8 @@ function actorOf(e: Event): string | undefined {
 // without re-deriving which field on `e` holds it.
 function cardIdOf(e: Event): string | undefined {
   switch (e.type) {
+    case 'upgradeThrown':
+    case 'upgradeTaken':
     case 'released':
     case 'placed':
     case 'discarded':
@@ -255,6 +268,8 @@ function toHistoryEntry(
   switch (e.type) {
     case 'dealt':
     case 'drawn':
+    case 'upgradeThrown':
+    case 'upgradeTaken':
     case 'released':
     case 'placed':
     case 'discarded':
@@ -331,6 +346,16 @@ function toDiscardHeap(log: Event[], top: CardData | undefined, count: number): 
   if (count === 0) return []
   const heap: HeapCard[] = []
   for (const e of log) {
+    if (e.type === 'takenFromDiscard') {
+      // Events identify the public card type, not a physical uid. Removing one
+      // matching copy preserves the visible inventory even with duplicates.
+      for (let i = heap.length - 1; i >= 0; i--) {
+        if (heap[i].card.id !== e.card) continue
+        heap.splice(i, 1)
+        break
+      }
+      continue
+    }
     if (e.type !== 'discarded') continue
     // The event id IS the stable integer `scatterAt` asks for — the engine's own
     // monotonic sequence, identical on every peer. No stringifying: `scatterAt`
@@ -418,11 +443,24 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
   const byId = new Map(visible.map((e) => [e.id, e]))
   const history = buildHistoryTree(visible.map((e) => toHistoryEntry(e, labels, nameOf, byId)))
 
+  const source = view.pending && 'source' in view.pending ? view.pending.source : null
+  const reveal =
+    source && cardById(source)?.deck === 'ai'
+      ? [...visible].reverse().find((e) => e.type === 'aiRevealed' && e.eventCard === source)
+      : undefined
+  const filed =
+    reveal?.type === 'aiRevealed'
+      ? visible.find((e) => e.id > reveal.id && e.type === 'discarded' && e.card === reveal.aiCard)
+      : undefined
+  const aiCause =
+    reveal?.type === 'aiRevealed' && filed ? { card: reveal.aiCard, eventId: filed.id } : undefined
+
   return {
     you: {
       name: view.self.name,
       hand: view.self.hand.map((c) => ({ uid: c.uid, card: cardOrPlaceholder(c.id) })),
       release: toReleaseSlots(view.self.release),
+      releaseId: toReleaseIds(view.self.release),
       support: toReleaseSupport(view.self.release),
       releaseUid: toReleaseUids(view.self.release),
       releaseEvent: toReleaseEvents(view.self.release),
@@ -432,6 +470,7 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
       name: o.name,
       handCount: o.handCount,
       release: toReleaseSlots(o.release),
+      releaseId: toReleaseIds(o.release),
       support: toReleaseSupport(o.release),
       releaseEvent: toReleaseEvents(o.release),
       eliminated: o.eliminated,
@@ -468,6 +507,7 @@ export function toBoardState(view: PlayerView, log: Event[], labels: HistoryLabe
     // Structural passthrough — licensed by the Exact<> assertions in
     // contract.test-d.ts. Both carry openedAt alongside deadline already.
     pending: view.pending,
+    ...(aiCause ? { aiCause } : {}),
     window: view.window,
     // Structural passthrough — the engine's own answer to which pairs a
     // support may start. participants/spectators are room facts and are

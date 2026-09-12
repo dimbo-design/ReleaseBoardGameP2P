@@ -105,9 +105,9 @@ export function useDrawBeat(anchors: BoardAnchors) {
           await wait(BEFORE_FLIP)
           patch('draw', { faceDown: false })
           await wait(AFTER_FLIP)
-          await wait(TABLE_HOLD)
           const card = cardById(d.reveal.card)
           if (card && d.reveal.discardId !== undefined) {
+            await wait(TABLE_HOLD)
             // It leaves from the centre on the same scatter the heap already
             // rests it on (I7) — the flyer IS the card, so the step flies the
             // node rather than mounting a copy of it.

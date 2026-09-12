@@ -26,14 +26,16 @@ import type { BeatPlan } from './planBeats'
 const played = vi.hoisted(() => ({
   names: [] as string[],
   params: [] as (Record<string, unknown> | undefined)[],
+  wholePairs: [] as boolean[],
 }))
 
-// Both arrays, always together: `params` accumulating across a file whose
+// Reset all records together: `params` accumulating across a file whose
 // tests only ever cleared `names` is a trap for the next test that asserts on
 // it (#101, Fix A, fix round 1 — review finding 3).
 const resetPlayed = () => {
   played.names = []
   played.params = []
+  played.wholePairs = []
 }
 
 // What `useDiscardExit`'s `send` actually received — not just that it was
@@ -53,9 +55,12 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
   const { useState } = await import('react')
   return {
     ...real,
-    play: (name: string, _el: Element, params?: Record<string, unknown>) => {
+    play: (name: string, el: Element, params?: Record<string, unknown>) => {
       played.names.push(name)
       played.params.push(params)
+      played.wholePairs.push(
+        Boolean(el.querySelector('[data-main]') && el.querySelector('[data-aux]')),
+      )
       return { finished: Promise.resolve() } as unknown as Animation
     },
     // A stateful stand-in, not a fixed `overlay: []`: the reset() test needs
@@ -244,6 +249,68 @@ it('publishes the attack it just folded in, so the cover has something to cover'
 // and a fabricated `defend` here would tell the table an answer is owed for a
 // throw nobody can answer — with `deriveDock` drawing the known-wrong `0s`
 // expired ring over it for the length of the beat.
+it.each([
+  false,
+  true,
+])('flies an instantly resolved attack to discard (local staging: %s)', async (local) => {
+  resetPlayed()
+  exits.items = []
+  const { api, Probe } = harness()
+  const release = vi.fn(() => played.names.push('release'))
+  const staging = local
+    ? { current: { mainUid: 'ddos#0', supportUid: 'sudo#0', el: boxed(400, 300), release } }
+    : undefined
+  render(<Probe staging={staging} />)
+  const published: BoardState[] = []
+  const attackBase: BoardState = {
+    ...base,
+    you: {
+      ...base.you,
+      hand: [
+        { uid: 'ddos#0', card: card('attack-ddos') },
+        { uid: 'sudo#0', card: card('support-sudo') },
+        { uid: 'ddos#1', card: card('attack-ddos') },
+      ],
+    },
+  }
+  await drive(() =>
+    api.beat?.runAttack(
+      {
+        kind: 'attackPlaced',
+        key: 'attack:5',
+        eventId: 5,
+        attacker: local ? 'p1' : 'p2',
+        target: 'p3',
+        card: 'attack-ddos',
+        sudo: true,
+        resolved: true,
+        spent: [
+          { eventId: 6, card: 'attack-ddos' },
+          { eventId: 7, card: 'support-sudo' },
+        ],
+      },
+      { base: attackBase, publish: (state) => published.push(state) },
+    ),
+  )
+  expect(exits.items).toHaveLength(1)
+  expect(exits.items[0]).toMatchObject({
+    card: { id: 'attack-ddos' },
+    aux: { id: 'support-sudo' },
+    scatter: scatterAt(6),
+    auxScatter: scatterAt(7),
+    from: CENTRE_BOX,
+    pose: { rot: -4, dx: 0, dy: 0 },
+  })
+  expect(published.every((state) => state.pending?.kind !== 'defend')).toBe(true)
+  if (local) {
+    expect(played.names).toEqual(['release', 'centerToDiscard'])
+    expect(published.at(-1)?.you.hand.map((item) => item.uid)).toEqual(['ddos#1'])
+  } else {
+    expect(played.names).toEqual(['playToCenter', 'centerToDiscard'])
+    expect(played.wholePairs).toEqual([true])
+  }
+})
+
 it('never says an answer is owed for an attack that cannot be answered', async () => {
   resetPlayed()
   const { api, Probe } = harness()
@@ -402,9 +469,9 @@ it('never replaces a pending that is already standing', async () => {
   expect(published).toHaveLength(0)
 })
 
-it('folds an opponent’s attack in from their seat', async () => {
+it('lands an opponent’s attack in its table pose and keeps that pose for the discard', async () => {
   resetPlayed()
-  const { api, Probe } = harness()
+  const { api, Probe, centre } = harness()
   render(<Probe />)
   const plan: Extract<BeatPlan, { kind: 'attackPlaced' }> = {
     kind: 'attackPlaced',
@@ -416,10 +483,37 @@ it('folds an opponent’s attack in from their seat', async () => {
     target: 'p2',
   }
   await drive(() => api.beat?.runAttack(plan, ctx))
-  expect(played.names).toEqual(['foldIntoPair'])
+  expect(played.names).toEqual(['landInPose'])
+  expect(played.params[0]).toEqual({
+    from: { left: 0, top: 0, width: 150, height: 210 },
+    box: CENTRE_BOX,
+    pose: 'translate(0px, 0px) rotate(-4deg)',
+  })
+  const pending = boxed(CENTRE_BOX.left, CENTRE_BOX.top)
+  pending.setAttribute('data-pending-play', '')
+  centre.appendChild(pending)
+  exits.items = []
+  await drive(() =>
+    api.beat?.runPairOut(
+      {
+        kind: 'pairToDiscard',
+        key: 'attack-out:6',
+        main: { eventId: 6, card: 'attack-bug' },
+      },
+      ctx,
+    ),
+  )
+  expect(exits.items).toMatchObject([
+    {
+      card: { id: 'attack-bug' },
+      from: CENTRE_BOX,
+      pose: { rot: -4, dx: 0, dy: 0 },
+      scatter: scatterAt(6),
+    },
+  ])
 })
 
-it('folds both halves of a sudo pair in from the attacker’s seat', async () => {
+it('lands a sudo attack as one pair in the pose its pending render uses', async () => {
   resetPlayed()
   const { api, Probe } = harness()
   render(<Probe />)
@@ -433,13 +527,23 @@ it('folds both halves of a sudo pair in from the attacker’s seat', async () =>
     target: 'p2',
   }
   await drive(() => api.beat?.runAttack(plan, ctx))
-  expect(played.names.filter((n) => n === 'foldIntoPair')).toHaveLength(2)
+  expect(played.names).toEqual(['playToCenter'])
+  expect(played.wholePairs).toEqual([true])
+  expect(played.params).toEqual([
+    {
+      from: { left: 0, top: 0, width: 150, height: 210 },
+      to: CENTRE_BOX,
+      rotate: -4,
+      dx: 0,
+      dy: 0,
+    },
+  ])
 })
 
 // A window attack thrown by a plain click never touches `_useBoardStaging.ts`
 // at all — the handoff stays null, and the card is still findable by id in
 // the local hand, same as `sourceOf` does for a discard.
-it('folds the local player’s own click-thrown attack in from its hand slot when nothing was staged', async () => {
+it('lands the local player’s unstaged attack in its table pose', async () => {
   resetPlayed()
   const { api, Probe } = harness()
   render(<Probe />)
@@ -453,7 +557,7 @@ it('folds the local player’s own click-thrown attack in from its hand slot whe
     target: 'p1',
   }
   await drive(() => api.beat?.runAttack(plan, ctx))
-  expect(played.names).toEqual(['foldIntoPair'])
+  expect(played.names).toEqual(['landInPose'])
 })
 
 // ===== releasePlaced =====

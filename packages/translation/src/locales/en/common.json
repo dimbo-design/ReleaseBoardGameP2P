@@ -262,6 +262,14 @@
     "pickFromDiscard": {
       "prompt": "take a card from the discard",
       "action": "take"
+    },
+    "reorderTop": {
+      "prompt": "look at the top three cards and set their order",
+      "action": "reorder"
+    },
+    "systemUpgrade": {
+      "prompt": "system upgrade — discard a card from your hand",
+      "action": "discard"
     }
   },
   "window": {
@@ -323,6 +331,16 @@
     "askNeutralize": "neutralise the alarm — answer with a lit card",
     "askHandLimit": "over the hand limit — pull the excess out of the hand",
     "insidePrompt": "pick a release from the discard",
+    "cherryPickPrompt": "choose a card to take to hand",
+    "cherryPickSudoPrompt": "choose 2: one to hand, one onto the deck top",
+    "cherryPickToHand": "→ hand",
+    "cherryPickToDeck": "→ deck",
+    "cherryPickNoHand": "no hand",
+    "rebasePrompt": "set the order of the top cards — 1 is drawn next",
+    "rebasePosition": "position",
+    "upgradePrompt": "discard one card",
+    "upgradeWaiting": "waiting for the others",
+    "upgradeTakePrompt": "take one of the discarded cards",
     "requestMiss": "not in hand",
     "tabHistory": "history",
     "tabParticipants": "participants",
@@ -715,6 +733,8 @@
     "turnEnded": "turn over",
     "turnStarted": "turn",
     "unpassed": "back in",
+    "upgradeTaken": "took from the centre",
+    "upgradeThrown": "discarded to the centre",
     "windowClosed": "reaction over",
     "windowOpened": "reaction"
   }

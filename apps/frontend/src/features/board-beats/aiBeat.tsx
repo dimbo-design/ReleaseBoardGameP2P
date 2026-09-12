@@ -9,7 +9,8 @@ import {
   wait,
 } from '@release/ui/animations'
 import { useCallback, useRef } from 'react'
-import type { BeatRun, BoardAnchors } from '~/entities/game/board'
+import type { BeatRun, BoardAnchors, BoardState } from '~/entities/game/board'
+import { aiCauseExit, withoutAiCause } from './aiCauseExit'
 import type { BeatPlan } from './planBeats'
 import { HALLUCINATION_HOLD, TABLE_HOLD, useToCentre } from './toCentre'
 
@@ -126,6 +127,25 @@ export function useAiBeat(anchors: BoardAnchors) {
       //    plan, not a second id check here.
       await wait(plan.eventCard === 'ai-hallucination' ? HALLUCINATION_HOLD : TABLE_HOLD)
 
+      // A prompt keeps both its cause and effect on the table. Publish the
+      // standing render before releasing the flyers so neither card disappears
+      // between the reveal and the pending state. Their exits belong to the
+      // batch that answers the prompt, even though the engine banked the trigger
+      // when it revealed the effect.
+      if (plan.tail.kind === 'standing') {
+        const next = {
+          ...beat.base,
+          pending: beat.after?.pending ?? beat.base.pending,
+          aiCause: { card: plan.trigger, eventId: plan.triggerDiscardId },
+        }
+        beat.base = next
+        beat.publish(next)
+        await nextFrames()
+        drop(TRIG)
+        drop(EFF)
+        return
+      }
+
       // The destroyed release becomes a flyer exactly where it stands, and the
       // zone lets go of it in the same commit — a card cannot be in a slot and
       // in the air at once.
@@ -173,37 +193,47 @@ export function useAiBeat(anchors: BoardAnchors) {
       // 5. …and the AI card takes the road its ending gives it.
       const effectOut = (async () => {
         if (plan.tail.kind === 'zone') {
-          const slot = rectOf(a.releaseSlot(plan.player, plan.tail.slot))
+          const target = rectOf(a.releaseSlot(plan.player, plan.tail.slot))
           const el = elOf(EFF)
-          if (el && slot) {
-            const anim = play('playToReleaseZone', el, { from: effect, to: slot })
+          if (el && target) {
+            const anim = play('playToReleaseZone', el, { from: effect, to: target })
             if (anim) await anim.finished
           }
-          // It STAYS. No return home: the batch said `released`/`placed`, which
-          // is what standing on the table looks like from outside the engine.
-          drop(EFF)
-          return
-        }
-        // IT STANDS. A prompt is owed and this card is what explains it, so the
-        // carrier is simply dropped where it landed and the projection's own
-        // render takes the slot (`_Board.tsx`'s `aiStanding`, off
-        // `pending.source`). Its journey home belongs to the batch that answers
-        // the prompt, not to this one.
-        //
-        // The trigger does NOT get the same treatment, and the difference is
-        // not a preference: the engine banks it in this very batch, so holding
-        // it would contradict a projection that already has it in the heap. The
-        // AI card can stand because `decks.events` is projected as a count —
-        // one fewer, and nothing on screen disagrees.
-        if (plan.tail.kind === 'standing') {
-          // One frame boundary before the carrier lets go. NOT "the
-          // projection's render comes up first" — it cannot: the shadow is
-          // still `before`, which has no pending, and `aiStanding` only
-          // appears once the queue drains to `live`. What the await actually
-          // buys is that the drop lands on a later commit than the flight's
-          // own last frame, so the carrier is never removed inside the same
-          // commit that painted it at its landing spot (I2). The ordering is
-          // pinned by `aiBeat.test.tsx`'s own call-order assertion.
+          // The slot must own the card before its carrier lets go. The trigger
+          // can still be flying, and later beats keep rendering this shadow.
+          // Publish only this placement: the batch target may include effects
+          // whose own animations have not run yet.
+          const slot = plan.tail.slot as keyof BoardState['you']['release']
+          const card = plan.tail.card
+          const place = <
+            T extends Pick<BoardState['you'], 'release' | 'releaseId' | 'releaseEvent'>,
+          >(
+            owner: T,
+          ) => ({
+            ...owner,
+            release: { ...owner.release, [slot]: event },
+            releaseId: { ...owner.releaseId, [slot]: card },
+            releaseEvent: { ...owner.releaseEvent, [slot]: plan.eventCard },
+          })
+          const mine = plan.player === beat.base.selfId
+          const uid =
+            mine && beat.after?.you.releaseEvent?.[slot] === plan.eventCard
+              ? beat.after.you.releaseUid?.[slot]
+              : undefined
+          const next = {
+            ...beat.base,
+            you: mine
+              ? {
+                  ...place(beat.base.you),
+                  ...(uid ? { releaseUid: { ...beat.base.you.releaseUid, [slot]: uid } } : {}),
+                }
+              : beat.base.you,
+            opponents: beat.base.opponents.map((owner) =>
+              owner.id === plan.player ? place(owner) : owner,
+            ),
+          }
+          beat.base = next
+          beat.publish(next)
           await nextFrames()
           drop(EFF)
           return
@@ -340,19 +370,30 @@ export function useAiBeat(anchors: BoardAnchors) {
       // carrier, and a carrier passed between hooks is how this codebase has
       // already grown two latch bugs of that family (`useBeats.ts`'s own
       // comments).
-      if (plan.homeward) {
+      if (plan.homeward || plan.causeward) {
+        const causeItems = aiCauseExit(plan.causeward, a)
         // The pending goes first, in its own publish — `defenseBeat`'s own
         // ordering (`runNeutralized`), and the same reason: the shadow still
         // carries the prompt, so `_Board.tsx`'s `aiStanding` is still
         // rendering this very card at `effect` while the carrier below is
         // about to fly away from that same rect.
         const c = ctx.current
+        const decks = c?.base.decks
         if (c) {
-          const next = { ...c.base, pending: null }
+          const next = withoutAiCause(c.base, causeItems.length > 0 ? plan.causeward : undefined)
           c.base = next
           c.publish(next)
         }
-        const ai = cardById(plan.homeward)
+        const causeOut =
+          causeItems.length > 0
+            ? latest.current.exit.send(causeItems).then(() => {
+                if (!c || !decks || ctx.current !== c) return
+                const next = { ...c.base, decks }
+                c.base = next
+                c.publish(next)
+              })
+            : undefined
+        const ai = plan.homeward ? cardById(plan.homeward) : null
         const home = rectOf(a.effect.current)
         const deck = rectOf(a.eventsBox.current)
         if (ai && home && deck) {
@@ -367,6 +408,7 @@ export function useAiBeat(anchors: BoardAnchors) {
             drop('homeward')
           }
         }
+        await causeOut
       }
     },
     [toSlot, elOf, drop, raise, patch],

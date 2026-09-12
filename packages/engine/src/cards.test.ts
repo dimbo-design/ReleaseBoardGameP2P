@@ -29,17 +29,16 @@ it('treats every release attack as a supported attack card', () => {
   expect(RELEASE_ATTACKS.has('attack-ddos')).toBe(false)
 })
 
-it('omits the deferred cards', () => {
-  // Git Branch and Git Merge left this list with #61 slice B. Rebase needs
-  // private deck knowledge and System Upgrade a pending owed to several
-  // players at once, so both are still ahead.
-  for (const id of ['operation-git-rebase', 'operation-system-upgrade']) {
-    expect(rulesFor(id), id).toBeUndefined()
-  }
+it('implements System Upgrade as a sudo-capable operation', () => {
+  expect(rulesFor('operation-system-upgrade')).toEqual({ kind: 'operation', sudo: true })
 })
 
 it('implements Git Cherry-pick as a sudo-capable operation', () => {
   expect(rulesFor('operation-git-cherry-pick')).toEqual({ kind: 'operation', sudo: true })
+})
+
+it('implements Git Rebase as a sudo-capable operation', () => {
+  expect(rulesFor('operation-git-rebase')).toEqual({ kind: 'operation', sudo: true })
 })
 
 it('returns undefined for an unknown id rather than throwing', () => {

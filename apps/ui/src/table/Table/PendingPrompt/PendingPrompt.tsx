@@ -28,6 +28,14 @@ export interface PendingPromptCopy {
   // Git Cherry-pick's discard pick. The copy contract must stay total over
   // every TablePending kind, since `copy[pending.kind]` indexes it.
   pickFromDiscard: { prompt: string; action: string }
+  // Git Rebase's private reorder. The panel itself is Task B3's work — this
+  // key only keeps the copy contract total now that TablePending has the kind.
+  reorderTop: { prompt: string; action: string }
+  // System Upgrade. One pair for both phases: the prompt a seat reads while
+  // throwing a card and the one the actor reads while taking one back are the
+  // same decision from two sides, and `copy[pending.kind]` has no room for a
+  // per-phase key. Splitting it is the surface task's call, not the contract's.
+  systemUpgrade: { prompt: string; action: string }
 }
 
 export interface PendingPromptProps {
@@ -207,7 +215,18 @@ export default function PendingPrompt({
   // referential change to the same one — TableState is rebuilt from scratch on
   // every projection update, so `pending` is rarely `===` across renders even
   // when it describes the same outstanding decision).
-  const fingerprint = `${pending.kind}:${pending.player}`
+  // `systemUpgrade` is fingerprinted by its actor and phase rather than by the
+  // seat it is waiting on, unlike every other kind. It is owed to a roster that
+  // DRAINS as seats answer, so "the seat owing" changes underneath a viewer who
+  // is still mid-choice — and would wipe their selection for a decision that
+  // never changed. What genuinely makes it a different question is the phase:
+  // 'discarding' asks a roster seat which card they throw, 'picking' asks the
+  // actor which thrown card they take, and the two are answered by different
+  // Choice kinds over different options.
+  const fingerprint =
+    pending.kind === 'systemUpgrade'
+      ? `systemUpgrade:${pending.actor}:${pending.phase}`
+      : `${pending.kind}:${pending.player}`
   const [card, setCard] = useState<string | null>(null)
   const [cards, setCards] = useState<string[]>([])
   const [method, setMethod] = useState<NeutralizeMethodId | null>(null)
@@ -428,6 +447,19 @@ export default function PendingPrompt({
             onClick={() => setDiscardPicks((cur) => [...cur, o.uid])}
           />
         ))
+      break
+    }
+    case 'reorderTop': {
+      // Type contract only (#108, Task B1) — the reorder grid is Task B3's
+      // work. Until then this renders no options and cannot confirm, the same
+      // pre-implementation defaults every other kind starts from above.
+      break
+    }
+    case 'systemUpgrade': {
+      // Type contract only (#108, Task C1) — the two surfaces (a roster seat
+      // throwing a card, the actor picking one back up) are later tasks' work.
+      // Until then this renders no options and cannot confirm, the same
+      // pre-implementation defaults `reorderTop` above starts from.
       break
     }
   }

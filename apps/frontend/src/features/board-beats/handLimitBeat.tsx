@@ -4,6 +4,7 @@ import { nextFrames, play, scatterAt, useDiscardExit, useFlyer, wait } from '@re
 import { type RefObject, useCallback, useRef } from 'react'
 import type { BeatRun, BoardAnchors, HandLimitHandoff } from '~/entities/game/board'
 import { CLEAR_STEP, GATHER_HOLD } from '~/entities/game/board'
+import { aiCauseExit, withoutAiCause } from './aiCauseExit'
 import type { BeatPlan, DiscardCard } from './planBeats'
 import { withoutFlown } from './withoutFlown'
 
@@ -284,29 +285,25 @@ export function useHandLimitBeat(
       if (adopted) held?.release()
       flyer.drop()
       if (isStale()) return
-      await latest.current.send(items)
-      if (isStale()) return
 
-      // The AI card that raised this prompt goes home now that the batch has
-      // answered it — its own road, not this grid's (#106).
-      //
-      // The pending goes FIRST, in its own publish, exactly as
-      // `defenseBeat.runNeutralized` does it and for the same reason: the
-      // shadow still carries the prompt, so `_Board.tsx`'s `aiStanding`
-      // (off `pending.source`) is still rendering that card in the `effect`
-      // slot — and `sendHomeward` is about to raise a carrier at that very
-      // rect and fly it away. Without this the table sees a duplicate stand
-      // still while its own copy leaves.
-      //
-      // A publish, not a flag the render could be told to obey: the two
-      // early returns above deliberately skip this leg (see their comments),
-      // and they rely on the PROJECTION clearing the card once the pending
-      // does. Suppressing the render instead would leave those paths with a
-      // card both suppressed and never flown — genuinely vanished.
-      if (plan.homeward) {
-        ctx.publish({ ...flown, pending: null })
-        await sendHomeward(plan.homeward, isStale)
+      // Bad Vibe resolves as one departure: the selected card and its trigger
+      // go to the discard while the AI card returns to its deck. Clear the
+      // standing pair in the same commit that mounts those exit carriers.
+      const causeItems = aiCauseExit(plan.causeward, a)
+      if (plan.homeward || plan.causeward) {
+        const next = withoutAiCause(flown, causeItems.length > 0 ? plan.causeward : undefined)
+        ctx.base = next
+        ctx.publish(next)
       }
+      await Promise.all([
+        latest.current.send([...items, ...causeItems]).then(() => {
+          if (isStale() || causeItems.length === 0) return
+          const next = { ...ctx.base, decks: flown.decks }
+          ctx.base = next
+          ctx.publish(next)
+        }),
+        plan.homeward ? sendHomeward(plan.homeward, isStale) : undefined,
+      ])
     },
     [whereFrom, flyer.raise, flyer.elOf, flyer.pin, flyer.drop, sendHomeward],
   )

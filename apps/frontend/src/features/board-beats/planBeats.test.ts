@@ -253,6 +253,26 @@ describe('planBeats', () => {
     ])
   })
 
+  it.each(['p1', 'p2'])('finds an AI release by its rules identity for %s', (player) => {
+    const base = boardBefore()
+    const release = { frontend: card('ai-release-frontend') }
+    const releaseId = { frontend: 'release-frontend' }
+    const before = boardBefore({
+      you: { ...base.you, release, releaseId },
+      opponents: [{ ...base.opponents[0], release, releaseId }],
+    })
+    const plans = planBeats(
+      [discarded(4, { player, card: 'release-frontend', reason: 'destroyed' })],
+      before,
+    )
+    expect(plans).toMatchObject([
+      {
+        kind: 'discard',
+        cards: [{ source: { kind: 'release', player, slot: 'frontend' } }],
+      },
+    ])
+  })
+
   it('flies a destroyed card out of the release slot it stood in', () => {
     const [beat] = planBeats(
       [discarded(4, { card: 'release-frontend', reason: 'destroyed' })],
@@ -1402,7 +1422,31 @@ describe('planBeats — an attack resolved inside its own play (#19 follow-up)',
       boardBefore(),
     )
     const attack = plans.find((p) => p.kind === 'attackPlaced')
-    expect(attack).toMatchObject({ card: 'attack-ddos', resolved: true })
+    expect(attack).toMatchObject({
+      card: 'attack-ddos',
+      resolved: true,
+      spent: [{ eventId: 11, card: 'attack-ddos' }],
+    })
+    expect(plans.map((p) => p.kind)).toEqual(['attackPlaced'])
+  })
+
+  it('keeps the Sudo discard with the instantly resolved attack', () => {
+    const plans = planBeats(
+      [
+        { id: 10, type: 'attacked', attacker: 'p1', card: 'attack-ddos', sudo: true, target: 'p2' },
+        { id: 11, type: 'discarded', player: 'p1', card: 'attack-ddos', reason: 'attackSpent' },
+        { id: 12, type: 'discarded', player: 'p1', card: 'support-sudo', reason: 'attackSpent' },
+      ],
+      boardBefore(),
+    )
+    expect(plans).toHaveLength(1)
+    expect(plans[0]).toMatchObject({
+      kind: 'attackPlaced',
+      spent: [
+        { eventId: 11, card: 'attack-ddos' },
+        { eventId: 12, card: 'support-sudo' },
+      ],
+    })
   })
 
   // An ordinary attack stands until it is answered, and must keep saying so.
@@ -1862,4 +1906,116 @@ describe('planBeats — a Release comes back out of the discard (#106, Task 11)'
     )
     expect(plans).toHaveLength(0)
   })
+})
+
+// SYSTEM UPGRADE'S ARRIVALS (#108). Several seats answer one pending, and how
+// their answers reach this peer is not fixed: the keeper may send them in one
+// batch or in several. Folding a run is what makes both look the same on the
+// table — one staggered beat when they arrive together, one short beat each
+// when they do not — over a centre the projection holds either way.
+describe('planBeats — System Upgrade (#108)', () => {
+  const thrown = (id: number, player: string, cardId: string) =>
+    ({ id, type: 'upgradeThrown', player, card: cardId }) as unknown as Event
+
+  it('folds consecutive upgrade throws into one beat', () => {
+    const plans = planBeats(
+      [thrown(1, 'p2', 'attack-bug'), thrown(2, 'p3', 'defense-hotfix')],
+      boardBefore(),
+    )
+    expect(plans).toHaveLength(1)
+    expect(plans[0]).toMatchObject({ kind: 'upgrade' })
+    expect((plans[0] as { throws: unknown[] }).throws).toHaveLength(2)
+  })
+
+  // What the `flush()` on a new run is actually for. Without it the upgrade run
+  // opens alongside a draw run that is still standing, and the SECOND draw then
+  // folds into the first — one gesture reaching across a throw that happened in
+  // between it. Mutation-checked: dropping that line turns the two draws into
+  // one and only this test notices.
+  it('does not let a draw run reach across an upgrade throw', () => {
+    const plans = planBeats([drawn(1), thrown(2, 'p2', 'attack-bug'), drawn(3)], boardBefore())
+    expect(plans.map((p) => p.kind)).toEqual(['draw', 'upgrade', 'draw'])
+  })
+
+  it('does not let an upgrade run swallow one on the far side of an unrelated event', () => {
+    const plans = planBeats(
+      [
+        thrown(1, 'p2', 'attack-bug'),
+        { id: 2, type: 'turnEnded', player: 'p1' } as Event,
+        thrown(3, 'p3', 'defense-hotfix'),
+      ],
+      boardBefore(),
+    )
+    expect(plans.map((p) => p.kind)).toEqual(['upgrade', 'upgrade'])
+  })
+})
+
+it('plans Monitoring placement through the centre and release zone', () => {
+  expect(
+    planBeats(
+      [{ id: 20, type: 'placed', player: 'p1', card: 'protection-monitoring' }],
+      boardBefore(),
+    ),
+  ).toMatchObject([{ kind: 'releasePlaced', card: 'protection-monitoring', slot: 'monitoring' }])
+})
+
+it('keeps final base Upgrade row exits in the upgrade beat', () => {
+  const before = boardBefore({
+    pending: {
+      kind: 'systemUpgrade',
+      actor: 'p3',
+      owed: ['p1'],
+      thrown: [{ player: 'p2', card: { uid: 't1', id: 'defense-hotfix' } }],
+      sudo: false,
+      phase: 'discarding',
+      source: 'operation-system-upgrade',
+    },
+  })
+  const events: Event[] = [
+    { id: 1, type: 'upgradeThrown', player: 'p1', card: 'attack-bug' },
+    discarded(2, { player: 'p2', card: 'defense-hotfix' }),
+    discarded(3),
+  ]
+  const plans = planBeats(events, before)
+  expect(plans).toHaveLength(1)
+  expect(plans[0]).toMatchObject({
+    kind: 'upgrade',
+    clear: [
+      { eventId: 2, player: 'p2', card: 'defense-hotfix' },
+      { eventId: 3, player: 'p1', card: 'attack-bug' },
+    ],
+  })
+})
+
+it('identifies the sudo Upgrade choice by public UID even with matching card faces', () => {
+  const before = boardBefore({
+    pending: {
+      kind: 'systemUpgrade',
+      actor: 'p1',
+      owed: [],
+      thrown: [
+        { player: 'p2', card: { uid: 'first', id: 'attack-bug' } },
+        { player: 'p3', card: { uid: 'chosen', id: 'attack-bug' } },
+      ],
+      sudo: true,
+      phase: 'picking',
+      source: 'operation-system-upgrade',
+    },
+  })
+  const plans = planBeats(
+    [
+      { id: 1, type: 'upgradeTaken', player: 'p1', card: 'attack-bug' },
+      discarded(2, { player: 'p2' }),
+    ],
+    before,
+  )
+  expect(plans).toEqual([
+    {
+      kind: 'upgrade',
+      key: 'upgrade-take:1',
+      throws: [],
+      take: { player: 'p1', card: 'attack-bug', uid: 'chosen', fromPlayer: 'p3' },
+      clear: [{ eventId: 2, player: 'p2', card: 'attack-bug' }],
+    },
+  ])
 })
