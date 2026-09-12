@@ -9,7 +9,7 @@ import {
   wait,
 } from '@release/ui/animations'
 import { useCallback, useRef } from 'react'
-import type { BeatRun, BoardAnchors } from '~/entities/game/board'
+import type { BeatRun, BoardAnchors, BoardState } from '~/entities/game/board'
 import { aiCauseExit, withoutAiCause } from './aiCauseExit'
 import type { BeatPlan } from './planBeats'
 import { HALLUCINATION_HOLD, TABLE_HOLD, useToCentre } from './toCentre'
@@ -193,14 +193,48 @@ export function useAiBeat(anchors: BoardAnchors) {
       // 5. …and the AI card takes the road its ending gives it.
       const effectOut = (async () => {
         if (plan.tail.kind === 'zone') {
-          const slot = rectOf(a.releaseSlot(plan.player, plan.tail.slot))
+          const target = rectOf(a.releaseSlot(plan.player, plan.tail.slot))
           const el = elOf(EFF)
-          if (el && slot) {
-            const anim = play('playToReleaseZone', el, { from: effect, to: slot })
+          if (el && target) {
+            const anim = play('playToReleaseZone', el, { from: effect, to: target })
             if (anim) await anim.finished
           }
-          // It STAYS. No return home: the batch said `released`/`placed`, which
-          // is what standing on the table looks like from outside the engine.
+          // The slot must own the card before its carrier lets go. The trigger
+          // can still be flying, and later beats keep rendering this shadow.
+          // Publish only this placement: the batch target may include effects
+          // whose own animations have not run yet.
+          const slot = plan.tail.slot as keyof BoardState['you']['release']
+          const card = plan.tail.card
+          const place = <
+            T extends Pick<BoardState['you'], 'release' | 'releaseId' | 'releaseEvent'>,
+          >(
+            owner: T,
+          ) => ({
+            ...owner,
+            release: { ...owner.release, [slot]: event },
+            releaseId: { ...owner.releaseId, [slot]: card },
+            releaseEvent: { ...owner.releaseEvent, [slot]: plan.eventCard },
+          })
+          const mine = plan.player === beat.base.selfId
+          const uid =
+            mine && beat.after?.you.releaseEvent?.[slot] === plan.eventCard
+              ? beat.after.you.releaseUid?.[slot]
+              : undefined
+          const next = {
+            ...beat.base,
+            you: mine
+              ? {
+                  ...place(beat.base.you),
+                  ...(uid ? { releaseUid: { ...beat.base.you.releaseUid, [slot]: uid } } : {}),
+                }
+              : beat.base.you,
+            opponents: beat.base.opponents.map((owner) =>
+              owner.id === plan.player ? place(owner) : owner,
+            ),
+          }
+          beat.base = next
+          beat.publish(next)
+          await nextFrames()
           drop(EFF)
           return
         }

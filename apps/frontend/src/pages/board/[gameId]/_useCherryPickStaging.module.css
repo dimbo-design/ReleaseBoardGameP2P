@@ -37,6 +37,9 @@
   align-items: flex-end;
   justify-content: center;
   max-block-size: 56vh;
+
+  /* Selection glow and labels must fit inside the scrollable content box. */
+  padding-block: 24px 32px;
   padding-inline: 40px;
   overflow-y: auto;
   pointer-events: auto;

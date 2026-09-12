@@ -787,14 +787,17 @@ it('is never working under prefers-reduced-motion', async () => {
   expect(getByTestId('running').textContent).toBe('idle')
 })
 
-it('starts a release victory celebration as an exclusive board beat', async () => {
+it.each([
+  'release',
+  'lastStanding',
+] as const)('starts a %s victory celebration as an exclusive board beat for the winner', async (condition) => {
   vi.useFakeTimers()
   motion.reduced = false
   const event = {
     id: 99,
     type: 'gameOver',
     winner: 'p1',
-    condition: 'release',
+    condition,
   } as Event
   const { container, getByTestId, rerender } = render(
     <Probe live={preDiscard} events={[]} anchors={stub} />,
@@ -808,6 +811,38 @@ it('starts a release victory celebration as an exclusive board beat', async () =
   expect(container.querySelector('[data-testid="game-end-confetti"]')).not.toBeNull()
   expect(getByTestId('running').textContent).toBe('running')
   expect(getByTestId('exclusive').textContent).toBe('exclusive')
+})
+
+it.each([
+  { condition: 'release', selfId: 'p2', role: 'losing player' },
+  { condition: 'lastStanding', selfId: 'p2', role: 'losing player' },
+  { condition: 'release', selfId: 'observer', role: 'observer' },
+  { condition: 'lastStanding', selfId: 'observer', role: 'observer' },
+] as const)('does not celebrate a $condition win on the $role board', async ({
+  condition,
+  selfId,
+}) => {
+  vi.useFakeTimers()
+  motion.reduced = false
+  const live = { ...preDiscard, selfId }
+  const event = { id: 99, type: 'gameOver', winner: 'p1', condition } as Event
+  const { container, getByTestId, rerender } = render(
+    <Probe live={live} events={[]} anchors={stub} />,
+  )
+
+  rerender(<Probe live={live} events={[event]} anchors={stub} />)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+
+  expect(container.querySelector('[data-testid="game-end-confetti"]')).toBeNull()
+  expect(getByTestId('running').textContent).toBe('idle')
+  expect(getByTestId('exclusive').textContent).toBe('open')
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(8500)
+  })
+  expect(container.querySelector('[data-testid="game-end-confetti"]')).toBeNull()
 })
 
 // ===== a 503 a standing Monitoring answers by itself (#103 testing, problem 2)

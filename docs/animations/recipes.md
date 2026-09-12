@@ -1708,6 +1708,11 @@ each one read off what the plan already decided rather than re-derived from the 
 "Goes home" is one leg, `goHome`, shared by every ending but `zone` and `standing`: the card flips
 face down where it stands and shrinks back into the events deck (`returnToDeck`).
 
+**Zone landing.** Publish the changed slot as soon as `playToReleaseZone` finishes, including
+the AI face, rules ID and event origin (and the local physical UID). Paint that slot before
+removing the flight carrier. The trigger discard runs concurrently and may finish later; it
+must not make the arrived card disappear. Other state in the accepted batch waits for its own beat.
+
 **Standing cause.** The board retains `aiCause` beside the effect and hides that trigger's
 entry/count from the displayed discard. The standing render is published before the reveal flyers
 are released. The resolving batch sends the cause to the discard through `aiCauseExit` together
@@ -2299,6 +2304,12 @@ us. Inside's row (`ai-inside`) is the OTHER surface over the same pending kind; 
   duplicate catalog cards consume separate destination poses one-to-one. `toDiscardHeap` consumes
   `takenFromDiscard`, so selected cards no longer remain in the displayed heap. A rejected RESOLVE
   unlocks the existing choice; rejection of a single-option automatic answer opens manual retry.
+- **Landing commits the private hand order.** The handoff receives the beat context, and
+  `useHandArrival.onLanded` publishes the selected physical UID at the opened gap while saving
+  that same order for subsequent projections. The hand updates even if the heap return is still
+  flying; the engine appending the card cannot move it back to the end afterward.
+- **The grid scroll box reserves vertical space** for selection glow and role labels, including
+  the first and last rows. Keep scrolling and the transform-free flight ancestor.
 - **The two sudo roles come from the engine**, not from click order: `openPickFromDiscard` withholds triggers from
   a base offer and `onPickFromDiscard` refuses one the hand slot, so a trigger in `options` can only be the deck
   card.
@@ -2671,7 +2682,7 @@ opponents' hands, the deck is down by what was dealt, the zone is on screen. Res
 
 ## Ending a match — the winning release, the poppers, the window
 
-**When to call.** On every terminal `gameOver` event, whatever its condition — the poppers are the
+**When to call.** On the winner’s own screen for a terminal `gameOver` event, whatever its condition — the poppers are the
 finale of ANY victory, not the release condition's own scene (the rules owner's answer on #133). The
 event is the guard, rather than `released`: a direct play, a Security Bug steal and an AI Release can
 all finish the three-slot condition after their own choreography has settled, and a last-standing win
@@ -2718,7 +2729,9 @@ The confetti layer is above `GameOver` and does not catch pointer events.
 path, and the order needs no special case: `flush()` pushes the elimination beat last of its run and
 the `gameOver` branch flushes before pushing its own, so **the clip plays first and the poppers
 follow**. The victory window waits for both — `_Board.tsx` shows it on an empty queue, never on the
-event — so every screen sees the same three things in the same order.
+event. `useBeats` checks `gameOver.winner === selfId`: only the winner gets poppers and
+their 2.4s lead-in. Other players and spectators finish preceding beats and see the results
+without confetti or its delay.
 
 ---
 

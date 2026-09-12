@@ -1,8 +1,10 @@
+import { createFakeEngine, FAKE_DECK, FAKE_EVENTS } from '@release/engine/fake'
 import { cardById } from '@release/ui'
 import { scatterAt } from '@release/ui/animations'
 import { describe, expect, it, vi } from 'vitest'
-import type { BoardState } from '~/entities/game/board'
+import { type BoardState, type HistoryLabels, toBoardState } from '~/entities/game/board'
 import { SHOW_HOLD, useAiBeat } from './aiBeat'
+import { planBeats } from './planBeats'
 import {
   anchorsFixture,
   animationsTrace,
@@ -41,11 +43,8 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
       animationsTrace.waited.push(ms)
       return real.wait(ms)
     },
-    // `aiBeat.tsx` has exactly one call site for `nextFrames` (the `standing`
-    // branch) — `useFlyer.tsx`'s own internal `raise()` imports `nextFrames`
-    // straight from `./timing`, not through this barrel, so it never touches
-    // this trace. That makes a plain call-order log here unambiguous: any
-    // `'nextFrames'` entry IS the standing branch's own await.
+    // Internal flyer raises import timing directly, so this trace records
+    // only the runner's handoffs from a carrier to the standing board.
     nextFrames: () => {
       animationsTrace.order.push('nextFrames')
       return real.nextFrames()
@@ -105,6 +104,76 @@ describe('aiBeat', () => {
     // the AI card went to the slot and NOT to the events deck
     expect(playedNames()).toContain('playToReleaseZone')
     expect(playedNames()).not.toContain('returnToDeck')
+  })
+
+  it.each([
+    ['p1', 'ai-monitoring', 'monitoring', 'protection-monitoring'],
+    ['p2', 'ai-monitoring', 'monitoring', 'protection-monitoring'],
+    ['p1', 'ai-release-frontend', 'frontend', 'release-frontend'],
+    ['p2', 'ai-release-frontend', 'frontend', 'release-frontend'],
+  ] as const)('keeps %s’s landed %s in the zone while the trigger is still leaving', async (player, eventCard, slot, rulesCard) => {
+    const engine = createFakeEngine()
+    const initial = engine.createGame({
+      gameId: 'ai-landing',
+      seed: 4242,
+      players: [
+        { id: 'p1', name: 'One' },
+        { id: 'p2', name: 'Two' },
+      ],
+      setup: {},
+      deck: FAKE_DECK,
+      events: FAKE_EVENTS,
+    })
+    const staged = {
+      ...initial,
+      turn: { ...initial.turn, player, drawnFrom: [] },
+      decks: {
+        ...initial.decks,
+        main: [[{ uid: 'trigger', id: 'trigger-ai' }, ...initial.decks.main[0]]],
+        events: [{ uid: 'event', id: eventCard }],
+      },
+    }
+    const reduction = engine.reduce(staged, { type: 'DRAW', player, at: 1000 })
+    const before = toBoardState(engine.project(staged, 'p1'), [], {} as HistoryLabels)
+    const after = toBoardState(engine.project(reduction.state, 'p1'), [], {} as HistoryLabels)
+    const plans = planBeats(reduction.events, before, after.pending)
+    expect(plans.map((entry) => entry.kind)).toEqual(['aiEvent'])
+    const plan = plans[0]
+    if (plan.kind !== 'aiEvent') throw new Error('Expected AI scene')
+    expect(plan.tail).toEqual({ kind: 'zone', slot, card: rulesCard })
+    const anchors = anchorsFixture({ releaseSlot: () => nodeAt(ZONE_SLOT) })
+    anchors.exitSpy.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5000))
+      animationsTrace.order.push('trigger-landed')
+    })
+    const { result } = renderBeat(() => useAiBeat(anchors))
+    const { published } = await runBeat(
+      (p, beat) =>
+        result.current.run(p, {
+          ...beat,
+          after,
+          publish: (state) => {
+            animationsTrace.order.push('publish-zone')
+            beat.publish(state)
+          },
+        }),
+      plan,
+      anchors,
+      { base: before },
+    )
+    const landed = published.at(-1)
+    const owner = player === 'p1' ? landed?.you : landed?.opponents.find((o) => o.id === player)
+    expect(owner?.release[slot]?.id).toBe(eventCard)
+    expect(owner?.releaseId?.[slot]).toBe(rulesCard)
+    expect(owner?.releaseEvent?.[slot]).toBe(eventCard)
+    if (player === 'p1') expect(landed?.you.releaseUid?.[slot]).toBe('event')
+    expect(landed?.you.hand).toEqual(before.you.hand)
+    expect(landed?.decks).toEqual(before.decks)
+    const order = callOrder()
+    expect(order.indexOf('publish-zone')).toBeGreaterThan(order.indexOf('play:playToReleaseZone'))
+    expect(order.indexOf('nextFrames')).toBeGreaterThan(order.indexOf('publish-zone'))
+    expect(order.indexOf('drop:eff')).toBeGreaterThan(order.indexOf('nextFrames'))
+    expect(order.indexOf('trigger-landed')).toBeGreaterThan(order.indexOf('drop:eff'))
   })
 
   const crushPlan = (destination: 'events' | 'discard') => ({

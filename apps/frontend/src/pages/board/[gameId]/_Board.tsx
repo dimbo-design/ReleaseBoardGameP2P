@@ -476,6 +476,7 @@ export default function Board({
     events: intro?.events ?? [],
     anchors,
     actions,
+    onHandArrival: (hand, uid, at) => handOrder.commit(hand, hand, uid, at),
     copy: {
       prompt: copy.table.cherryPickPrompt,
       sudoPrompt: copy.table.cherryPickSudoPrompt,

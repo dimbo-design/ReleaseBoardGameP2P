@@ -302,6 +302,8 @@ export function useBeats(args: {
         }
       }
       if (plan.kind === 'gameEnd') {
+        const event = events.find((candidate) => candidate.id === plan.eventId)
+        if (event?.type !== 'gameOver' || event.winner !== base.selfId) return null
         return {
           key: plan.key,
           base,
@@ -428,7 +430,7 @@ export function useBeats(args: {
             const local = discardPick?.current
             if (discardPick && plan.mine && local?.card === plan.card) {
               discardPick.current = null
-              return local.run(ctx.after ?? ctx.base)
+              return local.run(ctx)
             }
             return ais.runTaken(plan, ctx)
           },
@@ -437,6 +439,7 @@ export function useBeats(args: {
       return null
     },
     [
+      events,
       discards.run,
       draws.run,
       decks.runReshuffle,

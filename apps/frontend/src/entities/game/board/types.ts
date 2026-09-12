@@ -399,5 +399,5 @@ export interface BoardProps {
 
 export interface DiscardPickHandoff {
   card: string
-  run: (after: BoardState) => Promise<void>
+  run: (ctx: BeatRun) => Promise<void>
 }

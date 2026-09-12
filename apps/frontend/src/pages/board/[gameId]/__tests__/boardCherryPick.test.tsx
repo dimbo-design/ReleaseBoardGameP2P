@@ -4,7 +4,8 @@
 // rather than its releases, and under sudo takes two — a shape
 // `_useInsideStaging`'s row was never built for. `_useCherryPickStaging`
 // gives it a sibling surface rather than widening that row.
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cardById } from '@release/ui'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useEffect } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { mockReducedMotion } from '~/test/reducedMotion'
@@ -27,7 +28,7 @@ vi.mock('~/features/game-intro/useDealIntro', () => ({
     }
   },
 }))
-const exits = vi.hoisted(() => ({ items: [] as string[][] }))
+const exits = vi.hoisted(() => ({ items: [] as string[][], pending: null as Promise<void> | null }))
 vi.mock('@release/ui/animations', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@release/ui/animations')>()
   return {
@@ -36,7 +37,7 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
       overlay: [],
       send: (items: { key: string }[]) => {
         exits.items.push(items.map((item) => item.key))
-        return Promise.resolve()
+        return exits.pending ?? Promise.resolve()
       },
       reset: () => {},
       FLIGHT_MS: 0,
@@ -44,10 +45,85 @@ vi.mock('@release/ui/animations', async (importOriginal) => {
   }
 })
 
+it.each([
+  1, 2,
+] as const)('keeps a Cherry-pick arrival in its landing slot across projections (%s picks)', async (picks) => {
+  vi.useFakeTimers()
+  mockReducedMotion(false)
+  let finishReturn = () => {}
+  exits.pending = new Promise<void>((resolve) => {
+    finishReturn = resolve
+  })
+  try {
+    const base = makeBoardProps()
+    const hand = ['defense-hotfix', 'attack-bug', 'support-sudo'].map((id, i) =>
+      handItem(`original-${i}`, id),
+    )
+    const picked = handItem('picked', 'release-frontend')
+    const pending = cherryPending(
+      [
+        { uid: picked.uid, id: picked.card.id },
+        { uid: 'deck', id: 'release-backend' },
+        { uid: 'rest', id: 'protection-debugger' },
+      ],
+      picks,
+    )
+    const state = { ...base.state, you: { ...base.state.you, hand }, pending }
+    const intro = { gameId: 'cherry-arrival', view: null, onDone: () => {}, events: [] }
+    const props = { ...base, state, intro, actions: { onResolve: vi.fn() } }
+    const { container, rerender } = render(<Board {...props} />)
+    fireEvent.click(screen.getByTestId('cherry-cell-picked'))
+    if (picks === 2) fireEvent.click(screen.getByTestId('cherry-cell-deck'))
+    fireEvent.click(screen.getByRole('button', { name: /confirm/i }))
+    const accepted = {
+      ...props,
+      state: { ...state, pending: null, you: { ...state.you, hand: [...hand, picked] } },
+      intro: {
+        ...intro,
+        events: [
+          {
+            id: 1,
+            type: 'takenFromDiscard' as const,
+            player: 'you',
+            card: picked.card.id,
+            to: 'hand' as const,
+          },
+        ],
+      },
+    }
+    rerender(<Board {...accepted} />)
+    // Keep the heap return pending: landing must update the fan itself,
+    // without waiting for another animation or the final live projection.
+    for (let i = 0; i < 25; i++) await act(() => vi.advanceTimersByTimeAsync(100))
+    const names = () =>
+      [...container.querySelectorAll('[data-hand-slot]')].map((slot) =>
+        ['Hotfix', 'Bug', 'Frontend', 'Sudo'].find((name) => slot.textContent?.includes(name)),
+      )
+    expect(names()).toEqual(['Hotfix', 'Bug', 'Frontend', 'Sudo'])
+    await act(async () => {
+      finishReturn()
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(names()).toEqual(['Hotfix', 'Bug', 'Frontend', 'Sudo'])
+    rerender(<Board {...accepted} state={{ ...accepted.state, history: [] }} />)
+    expect(names()).toEqual(['Hotfix', 'Bug', 'Frontend', 'Sudo'])
+  } finally {
+    finishReturn()
+    exits.pending = null
+    vi.useRealTimers()
+  }
+})
+
 // Same shape as `boardAi.test.tsx`'s own `cherryPending` (not exported from
 // there, so mirrored here rather than reached for across files) — the
 // regression suite that first proved Cherry-pick must NOT land on Inside's
 // row.
+const handItem = (uid: string, id: string) => {
+  const card = cardById(id)
+  if (!card) throw new Error(`Unknown fixture card: ${id}`)
+  return { uid, card }
+}
+
 const cherryPending = (options: { uid: string; id: string }[], picks: 1 | 2 = 1) => ({
   kind: 'pickFromDiscard' as const,
   player: 'you',

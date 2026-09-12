@@ -1,5 +1,5 @@
 import type { Event } from '@release/engine'
-import type { TableActions } from '@release/ui'
+import type { HandItem, TableActions } from '@release/ui'
 import { Card, ConfirmAction, cardById, Typography } from '@release/ui'
 import {
   HEAP_SHOW,
@@ -12,7 +12,7 @@ import {
 } from '@release/ui/animations'
 import type { ReactNode, RefObject } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { BoardAnchors, BoardState } from '~/entities/game/board'
+import type { BeatRun, BoardAnchors, BoardState } from '~/entities/game/board'
 import type { DiscardPickHandoff } from '~/entities/game/board/types'
 import { useReducedMotion } from '~/shared/lib/useReducedMotion'
 import styles from './_useCherryPickStaging.module.css'
@@ -48,6 +48,7 @@ export function useCherryPickStaging(args: {
   events?: Event[]
   anchors: BoardAnchors
   actions?: TableActions
+  onHandArrival: (hand: HandItem[], uid: string, at: number) => void
   copy: {
     prompt: string
     sudoPrompt: string
@@ -111,12 +112,20 @@ export function useCherryPickStaging(args: {
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-once by design — `clearTimers` is a plain function recreated every render, so listing it would clear timers on every render instead of only on unmount
   useLayoutEffect(() => clearTimers, [])
 
-  // the chosen card settles into the hand (the shared step every other
-  // arrival on the board uses) — nothing here mirrors the hand locally, the
-  // fan already renders straight off the projection's own `you.hand`.
   const [manualRetry, setManualRetry] = useState(false)
   const exit = useDiscardExit(anchors.discardBox)
-  const arrival = useHandArrival(anchors.hand, () => {})
+  const taking = useRef<BeatRun | null>(null)
+  const arrival = useHandArrival(anchors.hand, (gap, cards) => {
+    const ctx = taking.current
+    if (!ctx) return
+    const hand = [...ctx.base.you.hand]
+    hand.splice(gap, 0, ...cards.map((card) => ({ uid: card.key, card: card.card })))
+    // Commit the same physical UID and slot to both owners: the queue's
+    // current fan and the private order applied to future wire projections.
+    args.onHandArrival(hand, cards[0].key, gap)
+    ctx.base = { ...ctx.base, you: { ...ctx.base.you, hand } }
+    ctx.publish(ctx.base)
+  })
 
   const resolve = useResolveFeedback(args.events ?? [], state.selfId, actions, () => {
     args.handoff.current = null
@@ -278,7 +287,9 @@ export function useCherryPickStaging(args: {
     setConfirmed(true)
     args.handoff.current = {
       card: ours.options.find((o) => o.uid === hand)?.id ?? '',
-      run: async (after) => {
+      run: async (ctx) => {
+        taking.current = ctx
+        const after = ctx.after ?? ctx.base
         setFlying(true)
         const handData = cardById(ours.options.find((o) => o.uid === hand)?.id ?? '')
         const deckOpt = deck ? ours.options.find((o) => o.uid === deck) : undefined
@@ -321,10 +332,7 @@ export function useCherryPickStaging(args: {
           await nextFrames()
           await play('playToCenter', el, { from, to, duration: REVEAL_DUR })?.finished
           await wait(REVEAL_HOLD)
-          await arrival.arrive(
-            [{ key: `cherry-hand-${hand}`, card: handData, el }],
-            state.you.hand.length,
-          )
+          await arrival.arrive([{ key: hand, card: handData, el }], ctx.base.you.hand.length)
         })()
         const deckFlight = (async () => {
           if (!deck || !deckData || !deckRect) return
@@ -366,6 +374,7 @@ export function useCherryPickStaging(args: {
           }),
         )
         await Promise.all([handFlight, deckFlight, returnFlight])
+        taking.current = null
         setFlying(false)
         setConfirmed(false)
       },
